@@ -1,0 +1,36 @@
+# Absurd pins — the co-versioning record for the vendored schema and its SDK.
+# Sibling precedent, and the fuller one: infra/formal/PIN.txt.
+
+earendil-works/absurd
+tag: 0.5.0
+commit: 550d3b9e6f9382d96178de6ab8c90c7f8edf2227
+file: sql/absurd.sql
+matched-sdk: absurd-sdk==0.5.0
+license: Apache-2.0, LICENSE fetched from the pinned commit
+LICENSE.sha256                       a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
+
+absurd.sql.sha256                    d34309370c539f3a51f2b36b69b1f77551f8e4a14480a1c8def8bb8f40fd9aab
+migrations/0.4.0-0.5.0.sql.sha256    edfaab897364a02dd752cb0c740525c9dcf471bbcbe06c1db53c50a617c69ce3
+
+# `sha256sum infra/absurd/absurd.sql infra/absurd/migrations/*.sql`, recorded 2026-08-09.
+# Re-record with the tag and the commit on every re-vendor — they move together or the record
+# is worse than none.
+#
+# The migration is vendored because `absurd.sql` uses bare `create function` and so cannot be
+# re-applied to a database that already has an earlier version. Every database we own was on
+# 0.4.0, so a bump that only replaced `absurd.sql` would have left all of them behind while the
+# pin claimed otherwise. `setup_absurd.sh` now compares `absurd.get_schema_version()` against
+# this file and applies what is missing.
+# One machine: the file is vendored, so it arrives through our own history rather than a
+# fetch. Contrast infra/formal, where Apalache is fetched at runtime and wants two.
+#
+# The 0.4.0 record this replaces, kept because it is what corroborated the fetch path used to
+# vendor 0.5.0: tag 0.4.0, commit 05282a40c8dddc378acdc6933adc4c221583808a, sha256
+# c2ed3a301aa2a4782257843e514e8057c3049de5998ea8dc632a1a159464b51c. Re-fetching that commit
+# from upstream reproduced that hash exactly, and it matched the file already in the tree — so
+# the same fetch path is what produced the 0.5.0 hash above.
+#
+# 0.5.0 drops `create extension "uuid-ossp"`: `absurd.portable_uuidv7` now probes for a native
+# `pg_catalog.uuidv7()` with `to_regprocedure` and falls back to `pg_catalog.gen_random_uuid()`,
+# both built in. The bootstrap therefore no longer needs the superuser step that creating an
+# extension required.

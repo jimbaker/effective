@@ -1,0 +1,34 @@
+name = "effective"
+version = "0.1.0"
+keywords = ["math"]
+defaultTargets = ["Effective"]
+
+[leanOptions]
+pp.unicode.fun = true # pretty-prints `fun a ↦ b`
+relaxedAutoImplicit = false
+weak.linter.mathlibStandardSet = false # our project, not a Mathlib upstream contribution
+maxSynthPendingDepth = 3
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.33.1"
+
+[[lean_lib]]
+name = "Effective"
+
+[[lean_exe]]
+name = "enforce_vectors"
+root = "Main"
+# Emits the machine-derived measured-trip conformance vectors as JSON (see Main.lean,
+# `just formal-vectors`). The Python conformance test consumes the committed output.
+
+[[lean_exe]]
+name = "decide_vectors"
+root = "DecideVectors"
+# The same, for the permission cascade's decision (see DecideVectors.lean, Effective/Decide.lean).
+
+[[lean_exe]]
+name = "govern_vectors"
+root = "GovernVectors"
+# The same, for the `govern` gate's ruling (see GovernVectors.lean, Effective/Govern.lean).

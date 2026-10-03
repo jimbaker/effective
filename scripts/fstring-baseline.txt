@@ -1,0 +1,310 @@
+# f-string baseline — sites recorded as accepted, so the gate can fail on GROWTH.
+#
+# Format:  <path> :: <statics, as a Python literal> :: <which processor should own it>
+#
+# An f-string is for a t-string processor's RENDER BACKEND, and (for now) creating an
+# exception. Those two are DESIGNATED in fstring_sweep.py and never appear here.
+# Everything below is a finding waiting for its processor. The gate fails on a finding
+# NOT listed, and on an entry nothing produces — so this file can only shrink.
+#
+# Keyed on (path, statics), never a line number: an edit above a site keeps its entry.
+
+src/agent/bank.py :: ' missing or unreadable: not banked by the writer' :: text
+src/agent/bank.py :: 'no  tree at ' :: text
+src/agent/bank.py :: 'no  trial.json — the replay pin would be vacuous' :: text
+src/agent/bank.py :: 'stamp banked  stores, found ' :: text
+src/agent/bank.py :: 'stamp says era , current era is ' :: text
+src/agent/bank.py :: 'stamp seed  != pinned seed ' :: text
+src/agent/bench_telemetry.py :: '' :: text
+src/agent/bench_telemetry.py :: '  ! : : ' :: text
+src/agent/bench_telemetry.py :: ':' :: key -> compose_key
+src/agent/bench_telemetry.py :: '<' :: text
+src/agent/bracket.py :: '  ' :: text
+src/agent/bracket.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
+src/agent/bracket.py :: '[guardrail: ]' :: text
+src/agent/contrastbench.py :: ' user= action= amount=' :: text
+src/agent/contrastbench.py :: ' user= action= amount= note=""' :: text
+src/agent/contrastbench.py :: '--' :: key -> compose_key
+src/agent/contrastbench.py :: '. ' :: text
+src/agent/contrastbench.py :: ': ' :: text
+src/agent/contrastbench.py :: 'For each numbered note below, judge what it expresses. Reply with exactly  lines, one label per line in order, each chosen from: complaint, praise, neutral. No numbering, nothing else.\n\n' :: text
+src/agent/contrastbench.py :: 'How many distinct users have at least one record with action=?' :: text
+src/agent/contrastbench.py :: 'How many records have action= and amount > 250?' :: text
+src/agent/contrastbench.py :: 'How many records with action= have a note whose text expresses a ? Notes are free text, not labels — judge what each note MEANS (every note expresses a complaint, praise, or neutral routine content).' :: text
+src/agent/contrastbench.py :: 'LOG:\n\n\nQUESTION: ' :: text
+src/agent/contrastbench.py :: 'OUTPUT: ' :: text
+src/agent/contrastbench.py :: 'QUESTION: ' :: text
+src/agent/contrastbench.py :: 'What is the total amount over all records with user= and action=?' :: text
+src/agent/contrastbench.py :: 'Which user has the most records with action= whose note text expresses a ? Notes are free text, not labels — judge what each note MEANS (every note expresses a complaint, praise, or neutral routine content).' :: text
+src/agent/contrastbench.py :: 'Which user has the most records with action=?' :: text
+src/agent/contrastbench.py :: "You answer one question about an operations log by writing Python.\nThe full log text is ALREADY in the sandbox variable `ctx` (a string, one record\nper line, format: 2026-03-14T09:41 user=uma action=refund amount=142). Do NOT ask\nfor the log; write code against `ctx`.\n\nEach turn reply with `thought` (brief) and EITHER `code` OR a final `answer`\n(a plain number or username, nothing else — give it as soon as you know it).\nAnything your code prints, plus the final expression's value, is shown to you,\nTRUNCATED to 500 characters. Each turn's code runs fresh — no variables persist\nbetween turns. Plain Python only: str/list/dict/set methods, comprehensions,\nfunctions; no imports, classes, yield, or match.\n\n" :: text
+src/agent/contrastbench.py :: "You answer one question about an operations log by writing Python.\nThe log is ALREADY in the sandbox as `records`: a list of dicts with keys\nts (str), user (str), action (str), amount (int). Do NOT ask for the data;\nwrite code against `records`.\n\nEach turn reply with `thought` (brief) and EITHER `code` OR a final `answer`\n(a plain number or username, nothing else — give it as soon as you know it).\nYour code's final expression value is validated and returned to you IN FULL as\nJSON. Each turn's code runs fresh — no variables persist between turns. Plain\nPython only: str/list/dict/set methods, comprehensions, functions; no imports,\nclasses, yield, or match.\n\n" :: text
+src/agent/contrastbench.py :: 'You answer one question about an operations log, exactly.\nThe log and the question are in the user message. Reply in ONE turn: `thought`\n(brief), `code` always null, and `answer` — a plain number or username, nothing else.\n\n' :: text
+src/agent/contrastbench.py :: 'attempt-' :: key -> compose_key
+src/agent/contrastbench.py :: 'error: ' :: text
+src/agent/contrastbench.py :: 'log::' :: key -> compose_key
+src/agent/contrastbench.py :: 'notes::' :: key -> compose_key
+src/agent/contrastbench.py :: 'q:::' :: key -> compose_key
+src/agent/contrastbench.py :: 'sem-argmax--' :: key -> compose_key
+src/agent/contrastbench.py :: 'sem-count--' :: key -> compose_key
+src/agent/contrastbench.py :: 'semq::' :: key -> compose_key
+src/agent/debug.py :: '\n\nFile :\n' :: text
+src/agent/debug.py :: 'applied to ' :: text
+src/agent/eval.py :: '[error: ]' :: text
+src/agent/gsm8k.py :: 'gsm8k_' :: text
+src/agent/hotpotqa.py :: '  ' :: text
+src/agent/hotpotqa.py :: "() — read the paragraph titled ''" :: text
+src/agent/hotpotqa.py :: 'hotpot_' :: text
+src/agent/hotpotqa.py :: 'p' :: key -> compose_key
+src/agent/permit_tuning.py :: ' (human: deny)' :: text
+src/agent/precise_edit.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
+src/agent/runtime.py :: 'error: ' :: text
+src/agent/runtime.py :: 'unknown tool: ' :: text
+src/agent/session_telemetry.py :: '  cache-read tokens  : ' :: text
+src/agent/session_telemetry.py :: '  cache_hit_ratio    :    <- same dial as the GSM8K bench' :: text
+src/agent/session_telemetry.py :: '  est. cost (Opus)   : $' :: text
+src/agent/session_telemetry.py :: '  output tokens      : ' :: text
+src/agent/session_telemetry.py :: '  sidecar ->   (, OTLP)' :: text
+src/agent/session_telemetry.py :: '  total input tokens : ' :: text
+src/agent/session_telemetry.py :: ' violation(s)' :: text
+src/agent/session_telemetry.py :: 'LM.' :: text
+src/agent/session_telemetry.py :: 'session:   ( LLM turns)' :: text
+src/agent/skillsbench.py :: '\n...[ chars elided]...\n' :: prompt -> channels
+src/agent/skillsbench.py :: '\n[exit code: ]' :: prompt -> channels
+src/agent/skillsbench.py :: '### Skill: \n\n' :: prompt -> channels
+src/agent/skillsbench.py :: '--cpus=' :: prompt -> channels
+src/agent/skillsbench.py :: '--memory=m' :: prompt -> channels
+src/agent/skillsbench.py :: ':' :: key -> compose_key
+src/agent/skillsbench.py :: ': ' :: prompt -> channels
+src/agent/skillsbench.py :: '::' :: key -> compose_key
+src/agent/skillsbench.py :: '[command timed out after s]' :: prompt -> channels
+src/agent/skillsbench.py :: 'agent timeout (s, their protocol cap)' :: prompt -> channels
+src/agent/skillsbench.py :: 'attempt-' :: key -> compose_key
+src/agent/skillsbench.py :: 'docker.io/library/' :: prompt -> channels
+src/agent/skillsbench.py :: 'effective:' :: key -> compose_key
+src/agent/skillsbench.py :: 'sb-' :: key -> compose_key
+src/agent/skillsbench.py :: 'unknown skill ; available: ' :: prompt -> channels
+src/agent/tape_bank.py :: '  ' :: text
+src/agent/tape_bank.py :: ' missing or unreadable — not banked by the tape writer' :: text
+src/agent/tape_bank.py :: 'no  in ' :: text
+src/agent/tape_bank.py :: 'no  in  — banked before the sidecar was kept' :: text
+src/agent/tape_bank.py :: 'no  tree at ' :: text
+src/agent/tape_bank.py :: 'stamp says era , current era is ' :: text
+src/agent/tape_bank.py :: 'tape is vacuous for the walk:  turn(s) and  action(s), below the / the property needs to witness anything' :: text
+src/agent/tape_bank.py :: 'the fresh tape VIOLATES the transcript property ( violation(s) over  witnessed turn(s)):\n\n\nThat is a defect in the loop, not in the run — banking it would install a fixture that agrees with the bug. Nothing was displaced.' :: text
+src/agent/tape_bank.py :: 'this tape is vacuous for the walk ( turns,  actions; need /). The model gave up rather than working the problem, which happens. Re-run to try again; nothing was displaced.' :: text
+src/agent/tasks.py :: '(?<!\\d)(?!\\d)' :: text
+src/agent/voi.py :: 'probe+' :: text
+src/agent/voi.py :: 'probe+$' :: text
+src/effective/bridge_absurd.py :: 'c_' :: text
+src/effective/bridge_absurd.py :: 'e_' :: text
+src/effective/bridge_absurd.py :: 'r_' :: text
+src/effective/bridge_absurd.py :: 't_' :: text
+src/effective/budget.py :: ' for this generation' :: text
+src/effective/budget.py :: ' overall' :: text
+src/effective/budget.py :: '%' :: text
+src/effective/budget.py :: ':' :: key -> compose_key
+src/effective/budget.py :: 'grant more budget? spent $ of $' :: text
+src/effective/cards/render_markdown.py :: '\n' :: text
+src/effective/cards/render_markdown.py :: '\n**Actions:** ' :: text
+src/effective/cards/render_markdown.py :: '\n> ' :: text
+src/effective/cards/render_markdown.py :: '\n_[ — Vega-Lite chart]_' :: text
+src/effective/cards/render_markdown.py :: '\n__' :: text
+src/effective/cards/render_markdown.py :: '  ·  __' :: text
+src/effective/cards/render_markdown.py :: '### ' :: text
+src/effective/cards/render_markdown.py :: '**** (`` → )' :: text
+src/effective/cards/render_markdown.py :: '|  |  |' :: text
+src/effective/cards/render_shiny.py :: 'act______' :: text
+src/effective/cards/render_shiny.py :: 'action-button ev-action ev-action--' :: text
+src/effective/cards/render_shiny.py :: 'ev-badge ev-badge--' :: text
+src/effective/cards/render_shiny.py :: 'ev-metric ev-metric--' :: text
+src/effective/cards/spec.py :: '' :: text
+src/effective/cards/spec.py :: ' ' :: text
+src/effective/cards/spec.py :: '#' :: key -> compose_key
+src/effective/cards/spec.py :: '$' :: text
+src/effective/cards/spec.py :: '–' :: text
+src/effective/channels.py :: '<<>>' :: text
+src/effective/channels.py :: 'invalid : ' :: text
+src/effective/channels.py :: 'missing field: ' :: text
+src/effective/channels.py :: 'output : ' :: text
+src/effective/checkpoints.py :: 'file:?mode=ro' :: text
+src/effective/code.py :: '[]' :: text
+src/effective/code.py :: 'inputs[]' :: text
+src/effective/coding/gate.py :: ': ' :: text
+src/effective/coding/gate.py :: 'lint [] ' :: text
+src/effective/coding/gate.py :: 'lint [fidelity] non-printable character U+ at line ' :: text
+src/effective/coding/gate.py :: 'lint [ruff ] ' :: text
+src/effective/coding/gate.py :: 'lint [ruff] ' :: text
+src/effective/coding/gate.py :: 'lint [syntax]  (line )' :: text
+src/effective/coding/runners.py :: ' reference(s): ' :: text
+src/effective/coding/runners.py :: '::' :: key -> compose_key
+src/effective/coding/runners.py :: 'exit ; failing: ' :: text
+src/effective/coding/runners.py :: 'the suite could not collect: ' :: text
+src/effective/coding/runners.py :: 'wrote the file; the workspace now holds  file(s): ' :: text
+src/effective/coding/specs.py :: ' steps, stopped: ' :: text
+src/effective/coding/specs.py :: '; tools: ' :: text
+src/effective/cost.py :: 'cost budget exceeded: spent $ >= limit $' :: text
+src/effective/counterfactual.py :: "a fork reached a wait on  bounded by : a counterfactual explores a decision, not a clock, so there is no honest answer to 'did it arrive in time' in a branch that spends no time. Fork a region whose waits name no deadline, or await it before the fork point and fork on the outcome." :: text
+src/effective/counterfactual.py :: 'a fork reached sleep_until(): a counterfactual explores a decision, not a clock, so a fork never sleeps. Fork a region with no durable sleep, or move the sleep out of the forked tail.' :: text
+src/effective/counterfactual.py :: "a fork's replayed prefix awaited , which is not the fork point . The child would park on , its own event namespace, where the base's recorded answer does not exist; nothing emits there, so the task would wait forever with no error, no failure and no attempt burned. Fork AT this await instead (`fork_point=`), or fork a region that does not contain it; if you have delivered the base's answer into the child's namespace, name  in `transplanted`." :: text
+src/effective/dashboard.py :: '/tasks/' :: url -> no processor yet
+src/effective/dashboard.py :: 'Run ' :: text
+src/effective/envelope.py :: '""' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
+src/effective/envelope.py :: 'Respond in labeled sections, each opened by its marker on its own line, exactly in this shape:\n\n\n[[ ##  ## ]]\n\nWrite each value as plain text on the lines after its marker — no quoting or escaping, multi-line values are fine. Omit a section that does not apply this turn. Always end with the [[ ##  ## ]] marker.' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
+src/effective/envelope.py :: 'Respond with a single JSON object containing exactly these keys: . Use null for keys that do not apply this turn.' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
+src/effective/envelope.py :: '[[ ##  ## ]]\n<>' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
+src/effective/govern.py :: '. [] ' :: prompt -> channels
+src/effective/govern.py :: 'measured budget exceeded: spent $ >= $' :: text
+src/effective/graphlayout/demo.py :: '#' :: key -> compose_key
+src/effective/graphlayout/demo.py :: '.svg' :: text
+src/effective/graphlayout/demo.py :: 'wrote  graphs to / — open ' :: text
+src/effective/graphlayout/prepare.py :: 'e-' :: key -> compose_key
+src/effective/graphlayout/prepare.py :: '…' :: text
+src/effective/graphlayout/svg.py :: '  ' :: text
+src/effective/graphlayout/svg.py :: ',' :: key -> compose_key
+src/effective/graphlayout/svg.py :: 'ev-g-node ev-g-node-- ev-g-node--' :: text
+src/effective/graphlayout/svg.py :: 'ms' :: key -> compose_key
+src/effective/graphview.py :: '' :: text
+src/effective/graphview.py :: '  ' :: text
+src/effective/graphview.py :: '  ""' :: text
+src/effective/graphview.py :: '  ()' :: text
+src/effective/graphview.py :: ' -->|"x"| ' :: text
+src/effective/graphview.py :: ' x' :: text
+src/effective/graphview.py :: '$' :: text
+src/effective/graphview.py :: '---\ntitle: \n---' :: text
+src/effective/graphview.py :: ':  nodes,  edges,  executions' :: text
+src/effective/graphview.py :: '<br/>' :: mermaid -> no processor yet
+src/effective/graphview.py :: '<br/>()' :: mermaid -> no processor yet
+src/effective/graphview.py :: '^(\\d+)(\\d+)' :: text
+src/effective/graphview.py :: 'graph ' :: text
+src/effective/graphview.py :: 'ms' :: key -> compose_key
+src/effective/graphview.py :: 'n' :: key -> compose_key
+src/effective/graphview.py :: 'x' :: key -> compose_key
+src/effective/handlers/absurd.py :: '' :: text
+src/effective/handlers/absurd.py :: '$awaitEvent:' :: text
+src/effective/handlers/absurd.py :: '_' :: text
+src/effective/handlers/absurd.py :: 'epoch-' :: key -> compose_key
+src/effective/handlers/base.py :: 'sha256-' :: key -> compose_key
+src/effective/handlers/recording.py :: '' :: text
+src/effective/handlers/replay.py :: '<, no placed key>' :: text
+src/effective/interpreters/openai.py :: 'Tool result: ' :: text
+src/effective/keys/frame.py :: '' :: text
+src/effective/keys/frame.py :: 'it is not in the language: ' :: text
+src/effective/keys/frame.py :: 'the payload of the  arm is , which opens with an op arm — an arm wraps an ADDRESS, and nothing emits an event named after a checkpoint, so no producer mints this' :: text
+src/effective/keys/grammar.py :: '^(?:)-[0-9a-f]+$' :: text
+src/effective/keys/processor.py :: '' :: text
+src/effective/keys/registry.py :: '\n    ! ' :: text
+src/effective/keys/registry.py :: '\n    inside ' :: text
+src/effective/keys/registry.py :: '  ()  ' :: text
+src/effective/keys/registry.py :: ', occurrence=' :: text
+src/effective/keys/registry.py :: '/' :: url -> no processor yet
+src/effective/keys/registry.py :: '=' :: text
+src/effective/keys/registry.py :: 'a literal discriminator at term , coordinate ' :: text
+src/effective/keys/registry.py :: 'a splice at term  absorbs every remaining term' :: text
+src/effective/keys/registry.py :: 'different tags at term ' :: text
+src/effective/keys/registry.py :: 'disjoint arities at term , countable from the bytes' :: text
+src/effective/keys/registry.py :: '{}' :: key -> compose_key
+src/effective/lint.py :: '\n  violation(s)' :: text
+src/effective/lint.py :: ' claims the production namespace , and . A literal under a tag production owns is a claim about what the substrate mints; ask the minter for it instead of spelling it, or use a tag of your own.' :: text
+src/effective/lint.py :: ' declares an `@op_layer`/`@domain_layer` but is not in `LAYER_ROLE_SRCS`, so the layer-authority lint never sees it. Add it, or add it to `NOT_LAYER_ROLE` with the reason it is not layer-role' :: text
+src/effective/lint.py :: ' in a DOCSTRING. A docstring says what a thing IS; a reader cannot tell a stale promise from a current contract. Move the note to a dated comment, or the design question to an ADR' :: text
+src/effective/lint.py :: ' is reserved in `RESERVED_AUTHORITY_TAGS` but no `AuthorityTag` declares it — the fence guards a namespace nothing mints. Either declare it at its composition site or drop the reservation' :: text
+src/effective/lint.py :: ' names  in substrate prose. A stranger reading this has no such context, and Effective is not one deployment or one vendor. State the property that holds for any adopter; put the provenance in the commit message. Opt out with `: <reason>` when the name is a foreign PROTOCOL this seam interoperates with.' :: text
+src/effective/lint.py :: ' working note in a committed comment. Discharge it before committing — it is a transient, like a red test' :: text
+src/effective/lint.py :: ' yields an effect op but is not in `WORKFLOW_ROLE_SRCS`, so the determinism-boundary lint never sees it. Add it, or add it to `NOT_WORKFLOW_ROLE` with the reason it is not a workflow' :: text
+src/effective/lint.py :: '(...) is nondeterministic; pass the value in or yield an op' :: text
+src/effective/lint.py :: '*/src/' :: text
+src/effective/lint.py :: '.' :: text
+src/effective/lint.py :: ':' :: key -> compose_key
+src/effective/lint.py :: ':  is filtered by the same predicate elsewhere in this file — build the enumeration once' :: text
+src/effective/lint.py :: ': dispatch on  over  — convert to `match` closed by `assert_never`' :: text
+src/effective/lint.py :: ':: []  — ' :: text
+src/effective/lint.py :: 'AuthorityTag()' :: text
+src/effective/lint.py :: 'AuthorityTag(, scope=Scope.QUALIFIED)' :: text
+src/effective/lint.py :: '\\b()\\((\\d{4}-\\d{2}-\\d{2})\\)' :: text
+src/effective/lint.py :: '\\b()\\b' :: text
+src/effective/lint.py :: '`AuthorityTag()` declares no `scope`. State how far one answer in this namespace reaches: `Scope.SETTLEMENT` (one op-occurrence), `Scope.ACCRUAL` (a whole run/generation, on purpose) or `Scope.QUALIFIED` (it wraps another key)' :: text
+src/effective/lint.py :: '`` is allowlisted as deliberately dead but now RESOLVES — drop the entry' :: text
+src/effective/lint.py :: '`` names no test — no `def ` under tests/ and no tests/**/.py. Fix the citation, or add it to  with a reason if the name is dead on purpose' :: text
+src/effective/lint.py :: 'a @domain_layer must not yield a control-flow op (); domain layers are call-scoped and cannot suspend' :: text
+src/effective/lint.py :: 'a `cache` segment follows a `nocache` one in role ; an uncached segment poisons every downstream cache point' :: text
+src/effective/lint.py :: "a read FROM ledger does not mention `hypothetical`; a fork's row would join the canonical fold (the canonical view is `WHERE NOT hypothetical`). Add the predicate, or opt out with a `# : <reason>` comment" :: text
+src/effective/lint.py :: 'a refined `` arm sits  a broad `` at line  — ' :: text
+src/effective/lint.py :: 'an @op_layer must not yield a bare DomainOp (); it would bypass Step and the durable grain — forward `yield op`' :: text
+src/effective/lint.py :: 'escape category  carries no reason — the category says WHICH population, the reason says why this site is in it' :: text
+src/effective/lint.py :: 'escape category  is not one of  — an escape states a CLASSIFICATION, and free prose is how a preference and a schedule both passed as one' :: text
+src/effective/lint.py :: 'from  import' :: text
+src/effective/lint.py :: 'import of  inside a function body. If it breaks a cycle, is an optional/dev-only SDK, or is a prod-only side-effecting dep, add `("", ""): "<reason>"` to `LAZY_IMPORT_ALLOWED`; otherwise hoist it to module level' :: text
+src/effective/lint.py :: 'must not import  ()' :: text
+src/effective/lint.py :: 'namespace  is declared `AuthorityTag` — its names ARE the authorization — but it is not in `RESERVED_AUTHORITY_TAGS` (handlers/base.py), so an author-supplied await name could park on an approval / grant / park. Reserve it' :: text
+src/effective/lint.py :: "namespace  is declared `Scope.QUALIFIED`, which says the occurrence question RECURSES to the key it wraps — but its wrapped hole is not typed `Key`, so there is nothing to recurse into and a hand-rolled name can be laundered into this namespace. Annotate the wrapped parameter `Key` (as `hyp:`'s composer does)" :: text
+src/effective/lint.py :: "namespace  is production's (, minted at ), and this template composes  — a key that namespace cannot accept ( decodes against no registered variant). A test may invent its own tags freely; borrowing one production owns puts a second shape under it where `--key-registry` cannot see it. Use the registered shape, or a tag of your own." :: text
+src/effective/lint.py :: 'namespace  would own two variants whose languages are not provably disjoint:  at  and  here (). A key could satisfy both, so a decode cannot say which produced it, and an authorization under one name could answer the other. Separate them with a literal at a fixed coordinate (`tag:{a},seg,{b}` vs `tag:{a},action,{b}`), or give one its own tag' :: text
+src/effective/lint.py :: 'no registered production accounts for it ()' :: text
+src/effective/lint.py :: 'ordered-arms-' :: key -> compose_key
+src/effective/lint.py :: 'the terminal hole {} is unwrapped, and this rule cannot see its type. Wrap it: Segment(). If it is already an `int` or a `Key`, it needs no wrapper; say so with a `# ` comment above. (The composer refuses a non-atom in EVERY position, so this is a marker discipline rather than the safety property.)' :: text
+src/effective/lint.py :: 'undated  in a comment. Date it `(YYYY-MM-DD):` so it can be triaged, then discharge it before committing' :: text
+src/effective/lint.py :: 'workflows must not import ; do I/O through a yielded op' :: text
+src/effective/lint.py :: '|' :: text
+src/effective/machine/audit.py :: ': ' :: text
+src/effective/machine/audit.py :: 'cannot reach Finish from ' :: text
+src/effective/machine/audit.py :: 'no edge out of ' :: text
+src/effective/machine/audit.py :: 'undeclared= missing= — a route to Finish nobody declared ships unreviewed work, and a declared one that never fires is a dead claim' :: text
+src/effective/machine/audit.py :: 'unreachable from : ' :: text
+src/effective/machine/specs.py :: ' steps, stopped: ' :: text
+src/effective/machine/trampoline.py :: ' appended without declaring `canonical`' :: text
+src/effective/monty.py :: 'name  is not defined' :: text
+src/effective/parked.py :: 'file:?mode=ro' :: text
+src/effective/parked.py :: 'r_' :: text
+src/effective/parked.py :: 't_' :: text
+src/effective/permission.py :: 'approve ?' :: text
+src/effective/prose/runners.py :: '\n\ncallers:\n' :: text
+src/effective/prose/runners.py :: 'gates exit ' :: text
+src/effective/react.py :: '\n' :: text
+src/effective/react.py :: ': ' :: text
+src/effective/react.py :: 'Action: ()' :: text
+src/effective/react.py :: '[denied] ' :: text
+src/effective/react.py :: '[interrupt] ' :: text
+src/effective/react.py :: '[interrupted] ' :: text
+src/effective/react.py :: '[summary of earlier turns]\nfacts: \ntried: \nopen_questions: ' :: text
+src/effective/react.py :: '[unusable tool name] ' :: text
+src/effective/runread.py :: 'file:?mode=ro' :: text
+src/effective/runs.py :: 'file:?mode=ro' :: text
+src/effective/runview.py :: '\n**Actions:** ' :: text
+src/effective/runview.py :: '\n**Cost:**   ·  **Ops:** ' :: text
+src/effective/runview.py :: '\n**Ops:**   ·  cost unmeasured' :: text
+src/effective/runview.py :: ' ' :: text
+src/effective/runview.py :: '## ' :: text
+src/effective/runview.py :: '**** (`` → )' :: text
+src/effective/runview.py :: '``' :: text
+src/effective/runview.py :: 'answer ' :: text
+src/effective/sandbox.py :: 'a fork may not call the tool : it is not in the read-only allow-list (). A counterfactual must not mutate the world — add  to `allow` if it is genuinely read-only, or supply a canned result for it.' :: text
+src/effective/sandbox.py :: "cannot fork at a  inside the scope : the op is a decision, but a scoped body is driven as a sub-generator, so replay cannot hand back a generator positioned at an op inside it. Fork at a decision BEFORE the scope or AFTER it — a scope is one node in the fork's order." :: text
+src/effective/sandbox.py :: 'cannot fork at a : a fork substitutes a DECISION (a Step result or an AwaitEvent answer), not a write. Fork at the decision, not its consequence.' :: text
+src/effective/skills.py :: '- : ' :: text
+src/effective/sql.py :: 'inside a "quoted identifier". Interpolate the identifier itself with the identifier spec — t"… FROM {table:}", which quotes it for you — not inside the quotes' :: text
+src/effective/sqlite.py :: ': in ' :: text
+src/effective/tape.py :: ': ' :: text
+src/effective/tape.py :: 'cannot see the action it chose — ' :: text
+src/effective/tape.py :: 'replay and the wire disagree at message(s) ' :: text
+src/effective/tape.py :: 'replay rebuilt  message(s), the wire recorded ' :: text
+src/effective/telemetry.py :: '\n OTLP problem(s)' :: text
+src/effective/telemetry.py :: '/' :: url -> no processor yet
+src/effective/telemetry.py :: '//' :: url -> no processor yet
+src/effective/telemetry.py :: ':: ' :: text
+src/effective/telemetry.py :: 'LM.' :: text
+src/effective/telemetry.py :: 'tool..' :: text
+src/effective/viewing.py :: 'the run is parked at ' :: text
+src/effective/viewing.py :: "the tape has no record of : a replay must not outrun the tape's frontier, so this viewer stops rather than committing the op" :: text
+src/tui/app.py :: '\n\n**``**\n\n' :: text
+src/tui/app.py :: '  ()' :: text
+src/tui/app.py :: '  ·    ·   ops  ·    ·    ·   parked' :: text
+src/tui/app.py :: '**:**\n\n```\n\n```' :: text
+src/tui/app.py :: '**:** ``' :: text
+src/tui/app.py :: '``' :: text
+src/tui/app.py :: '```\n\n```' :: text
+src/tui/app.py :: 'answered ' :: text
+src/tui/app.py :: 'no run  (0..)' :: text
+src/tui/app.py :: 'payload is not JSON: ' :: text
+src/tui/app.py :: 'unknown command ' :: text
+src/tui/app.py :: 'x' :: key -> compose_key

@@ -1,0 +1,10 @@
+# Pinned Postgres image for the stateful durable-replay test substrate.
+# Reference this image ONLY by digest (content-addressed, immutable) — never by
+# the mutable :18 tag — mirroring infra/absurd/PIN.txt's commit-pin discipline.
+# Run under rootless Podman (daemonless; no Docker daemon trust).
+
+image:  docker.io/library/postgres
+tag:    18
+digest: sha256:29ee7bb30d804447dc9a91fd0d74322ae1dc3a4072cc6346f70a5ed6e783b565
+pulled: 2026-06-13
+engine: podman 4.9.3 (rootless)

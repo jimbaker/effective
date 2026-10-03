@@ -1,0 +1,112 @@
+# tdom pin — the vendoring record for a patched third-party template engine.
+# Sibling precedents: infra/absurd/PIN.txt (vendored schema), infra/formal/PIN.txt (fullest).
+
+t-strings/tdom
+version: 0.1.17
+upstream: https://github.com/t-strings/tdom
+source:   PyPI sdist tdom-0.1.17.tar.gz, fetched 2026-08-18
+sdist.sha256  3c46480f24ccb2dab6d400ffbfbfe52c0890fd286cab6088cab4296cbe934511
+license: MIT. The sdist ships no LICENSE file; LICENSE is fetched from upstream tag v0.1.17
+LICENSE.sha256  8b1512ca825ae5186c949b5697e3f4a99e0d3f502a226ed622ba45699ddbd7ed
+
+# Corroboration: the sdist hash above is the one uv.lock ALREADY recorded from the
+# resolve that installed 0.1.17 into this project weeks earlier. So the fetch used to
+# vendor it agrees with an independent earlier fetch — the two-source rule that
+# infra/formal states, satisfied here by our own lock rather than a second machine.
+
+# --- why vendored, rather than pinned from the registry ---
+#
+# Upstream `TemplateParser.close` judges its own buffer BEFORE telling the parser that
+# input has ended, and CPython 3.14.7 turned that into a false parse error on a
+# well-formed template. 3.14.7 made `HTMLParser.feed` BATCH: input accumulates in
+# `self._pending` and is only joined into `self.rawdata` and parsed once `_pending_len`
+# reaches a threshold that doubles whenever a pass parses nothing — a fix for quadratic
+# rescanning of an unterminated tag. tdom feeds one static or one placeholder at a time,
+# which is exactly the access pattern that batching defers, so at close() the tail of the
+# document is still in `_pending` and `rawdata` is truncated mid-attribute.
+#
+#   html(t'<g class="{k}"></g>')   # 3.14.5: <g class="x"></g>;  3.14.7: ValueError
+#
+# It took 15 tests here (graphlayout, dashboard, graphlayout_elkjs), deterministic over
+# six hash seeds. It is NOT a t-string change: Lib/string/templatelib.py is byte-identical
+# between 3.14.5 and 3.14.7.
+#
+# Upgrading is not the alternative. Upstream latest is 0.1.18 (2026-07-10) and its
+# parser.py is byte-identical to 0.1.17's — 0.1.18 changes only processor.py and adds
+# py.typed — so it fails identically. Nothing in the tracker mentions this; it is
+# unreported, and the patch below is written to be sent upstream unchanged.
+
+# --- the patch ---
+#
+# patches/0001-close-drain-before-judging.patch, and it is the WHOLE divergence:
+# `pristine sdist + patch == infra/tdom` is checked, not asserted (see below).
+#
+# It adds `_drain_pending_feed()` and calls it first in `close()`. The drain parses the
+# held-back input as MID-stream — goahead(0), not close()'s goahead(1) — which matters:
+# the first attempt at this fix simply moved `super().close()` to the top of the method,
+# and goahead(1) flushed unterminated constructs as TEXT. Three diagnostics changed and
+# `html(t'<')` silently rendered `&lt;` instead of raising. Ordering was not the bug; the
+# invariant was. The drain restores it: everything fed has been parsed, which is what
+# `waiting_for_data()` has always assumed.
+#
+# A no-op before 3.14.7 — `_pending` does not exist there and `feed` parsed eagerly — so
+# the same vendored tree serves both interpreters.
+#
+# Yes, it touches `_pending` / `_pending_len`, which are private. That is deliberate and
+# is the narrower of the two evils here: the alternative is to change WHEN the diagnostics
+# run, which changes what tdom reports for malformed input. If upstream would rather not
+# reach into stdlib privates, the better long-term shape is for `feed_template` to build
+# the sentinel-substituted string and feed it in ONE call, which sidesteps batching
+# entirely and is faster; that is a larger change and is not what this patch does.
+
+# --- acceptance, measured 2026-08-18 ---
+#
+# An eight-case probe (five malformed templates, three well-formed) run four ways:
+# unpatched/3.14.5 is the BASELINE, and patched/3.14.5, patched/3.14.7 all reproduce it
+# case for case, message for message. Suites: `just check` 3761 passed / 3 skipped /
+# 6 xfailed exit 0 on BOTH interpreters; `just pgt-test` 238 passed exit 0. The repo pin moved
+# forward to 3.14.7 once this landed, so the vendored fix is what the gate runs on now — the
+# 3.14.5 column is the regression check, not the shipping configuration.
+#
+# Re-run the probe when re-vendoring. A fix that makes the 15 pass while degrading what a
+# malformed template reports is not a fix, and only the malformed half of the probe says so.
+
+# --- hashes ---
+#
+# `cd infra/tdom && sha256sum tdom/*.py pyproject.toml patches/*.patch`, recorded 2026-08-18.
+# parser.py is OURS (patched); every other file is byte-identical to the sdist.
+3214e01f1022aab70c14667beeb62510a73c10207301bf01df6af38eb82c1427  tdom/__init__.py
+ebd17aa9e9833d2cb59a7d7932a8e3e5fd5c5707aeb92a3f2f611787cb9378fe  tdom/callables.py
+225bba6db2c2fea3f2d490257c74ae1043d7d408242a12613b035dbe4ea467b0  tdom/escaping.py
+ef173ca0b946c4891e71a88626e98fd7881c0a8218b2fd571e4ad0cf7aea2db8  tdom/format.py
+3058c5be92c03b0073ad6f5af61e53f0d427b0741d7871f045ec961d04ca0d77  tdom/htmlspec.py
+ea3a9cf544cd0a25c0e873fb85726c2e3f4097e8caa32640557374761f68d5bd  tdom/parser.py
+ed4adba694c64097f57d6c513f319596fc428aa41b3ee913608844d107cb54df  tdom/placeholders.py
+75c8918aebfad5cdd7a635e51052e6a626aadfc95e5a32e3ff6a13506813c29f  tdom/processor.py
+a7a1a647edcc87cb14bbef48744b6d152545d87f3a6ab76a7281f3f993aa5419  tdom/protocols.py
+c033caa8eda560318a8ae5b8ef14bbffb1f69cdec2cf5a81c3e4b6125d42f2c2  tdom/scope.py
+8577259746fb4f305301027c4b90802e87fbfb4a7831c6280154e11138d4bf9b  tdom/template_utils.py
+82f2065a7b5c28e30fdd45aff76f9438070513233fbf4f37ef128aeb8fff0793  tdom/tnodes.py
+d404738f58c202267416e2118a7e588e9cc337e75610a321ae3a579efad31b47  tdom/utils.py
+76ffa4a5f087ae8e1b8121584214d7ef1fa23a62ceffe3392aa2d5b01151cf9b  pyproject.toml
+477021ec82504645defcae6d853986a0fffb56c75bfea597e39c8d8d8be77a99  patches/0001-close-drain-before-judging.patch
+
+# The divergence is CHECKABLE, not asserted — `pristine sdist + patch == this tree`:
+#
+#   python - <<'EOF'
+#   import hashlib, io, tarfile, urllib.request
+#   raw = urllib.request.urlopen("https://files.pythonhosted.org/packages/b6/bd/"
+#       "f1d01e1a210c72623e6218af3f73e8187db562c0b9c8bd969ad4170de4a9/tdom-0.1.17.tar.gz").read()
+#   assert hashlib.sha256(raw).hexdigest() == "3c46480f24ccb2dab6d400ffbfbfe52c0890fd286cab6088cab4296cbe934511"
+#   tarfile.open(fileobj=io.BytesIO(raw)).extractall("/tmp/tdom-pristine", filter="data")
+#   EOF
+#   cd /tmp/tdom-pristine/tdom-0.1.17 && git apply <repo>/infra/tdom/patches/0001-*.patch
+#   diff -r --exclude=PKG-INFO --exclude=patches --exclude=PIN.txt . <repo>/infra/tdom
+
+# --- un-vendoring, when the PR lands ---
+#
+# Delete `tdom = { path = "infra/tdom" }` from [tool.uv.sources], set the dependency to the
+# first upstream release carrying the fix, `uv lock && uv sync`, run the probe on both
+# interpreters, and delete this directory. Do not un-vendor on a version bump alone —
+# check that the fix is IN it (`grep -n "_drain_pending_feed\|super().close()" tdom/parser.py`),
+# because 0.1.18 shipped after this bug existed and did not touch parser.py at all.

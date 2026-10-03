@@ -1,0 +1,44 @@
+# Formal-toolchain pins (Quint / Apalache) — the co-versioning record.
+# Install via `just formal-setup`; run via `just formal` (fast) / `just formal-verify` (slow).
+# Sibling precedent: infra/absurd/PIN.txt.
+
+quint            0.32.0     # npm @informalsystems/quint; integrity enforced by
+                            # package-lock.json (sha512-9Yoji7DU6moRm1ofDaN+ftdxNcEG…)
+                            # via `npm ci --ignore-scripts` — never install globally.
+
+apalache         0.56.1     # fetched by quint on first `verify` into ~/.quint/.
+                            # apalache-dist-0.56.1/apalache/lib/apalache.jar sha256:
+apalache.jar.sha256  4753c0ebb2cbb266e2c6ac19ab5ca3827d726cc80fd1fc5d7c1eeb64736cd60b
+                            # Provenance: two independent fetches agree, on two
+                            # machines (~2026-06-20, Java 21.0.11; 2026-07-04,
+                            # Java 26.0.1). `just formal-verify`
+                            # re-checks this hash before every run and refuses on
+                            # mismatch. Bumping quint may bump the apalache version
+                            # it fetches: update BOTH lines together and re-record
+                            # the jar hash from two machines before trusting it.
+
+java             >= 17      # Apalache requirement; 21 and 26 both observed working.
+                            # Not installed by the recipe — bring your own JDK.
+
+rust-evaluator   v0.6.0     # fetched by `quint run` (the random simulator) only;
+                            # not needed for typecheck/verify. Present on one dev
+                            # machine, absent on another — deliberately unpinned until the
+                            # simulator is part of a gate.
+
+# --- container sandbox (the formal-verify default; Containerfile alongside) ---
+
+base-image  docker.io/library/node@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553
+                            # node 24 bookworm-slim, digest-pinned. The image tag is
+                            # effective-formal:<quint>-<apalache> (0.32.0-0.56.1).
+                            # npm ci + the Apalache fetch happen at IMAGE BUILD and
+                            # the build fails on jar-hash mismatch, so a runnable
+                            # image implies a verified jar; at run time the checks
+                            # get --network=none, a read-only /spec mount, and a
+                            # tmpfs workdir (scripts/formal_verify_container.sh).
+                            # Bump procedure: new base digest + quint/apalache lines
+                            # together, rebuild, re-record — same two-machine rule.
+
+# Lean is pinned separately and already reproducible: formal/lean/lean-toolchain
+# (elan-managed) + lake-manifest.json (Mathlib et al., content-addressed).
+# Refreshed 2026-09-18 to Lean v4.33.1 / Mathlib v4.33.1, and the base image above to the
+# 2026-09-09 node:24-bookworm-slim index digest. Both corroborated on two machines the same day.

@@ -1,0 +1,14 @@
+[
+  {"verdicts": [], "ruling": {"kind": "proceed"}},
+  {"verdicts": [{"kind": "proceed"}, {"kind": "proceed"}], "ruling": {"kind": "proceed"}},
+  {"verdicts": [{"kind": "park", "asks": [1]}], "ruling": {"kind": "park", "asks": [1]}},
+  {"verdicts": [{"kind": "refuse", "reasons": [1]}], "ruling": {"kind": "refuse", "reasons": [1]}},
+  {"verdicts": [{"kind": "park", "asks": [1]}, {"kind": "proceed"}, {"kind": "park", "asks": [2]}], "ruling": {"kind": "park", "asks": [1, 2]}},
+  {"verdicts": [{"kind": "refuse", "reasons": [1]}, {"kind": "refuse", "reasons": [2]}], "ruling": {"kind": "refuse", "reasons": [1, 2]}},
+  {"verdicts": [{"kind": "park", "asks": [2]}, {"kind": "park", "asks": [1]}], "ruling": {"kind": "park", "asks": [2, 1]}},
+  {"verdicts": [{"kind": "park", "asks": [1]}, {"kind": "refuse", "reasons": [2]}], "ruling": {"kind": "refuse", "reasons": [2]}},
+  {"verdicts": [{"kind": "refuse", "reasons": [2]}, {"kind": "park", "asks": [1]}], "ruling": {"kind": "refuse", "reasons": [2]}},
+  {"verdicts": [{"kind": "park", "asks": [1]}, {"kind": "refuse", "reasons": [2]}, {"kind": "proceed"}], "ruling": {"kind": "refuse", "reasons": [2]}},
+  {"verdicts": [{"kind": "refuse", "reasons": []}, {"kind": "park", "asks": [1]}], "ruling": {"kind": "refuse", "reasons": []}},
+  {"verdicts": [{"kind": "park", "asks": []}, {"kind": "proceed"}], "ruling": {"kind": "park", "asks": []}}
+]

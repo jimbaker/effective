@@ -1,0 +1,14 @@
+[
+  {"limit": 3, "meter": 2, "fail": false, "grants": [], "outcome": {"kind": "cleared", "granted": 0, "trips": 0}},
+  {"limit": 3, "meter": 2, "fail": true, "grants": [], "outcome": {"kind": "cleared", "granted": 0, "trips": 0}},
+  {"limit": 3, "meter": 3, "fail": false, "grants": [], "outcome": {"kind": "parked", "trip": 0}},
+  {"limit": 3, "meter": 5, "fail": false, "grants": [], "outcome": {"kind": "parked", "trip": 0}},
+  {"limit": 3, "meter": 3, "fail": true, "grants": [{"add": 5}], "outcome": {"kind": "refused", "spent": 3, "ceiling": 3}},
+  {"limit": 3, "meter": 5, "fail": true, "grants": [], "outcome": {"kind": "refused", "spent": 5, "ceiling": 3}},
+  {"limit": 3, "meter": 3, "fail": false, "grants": [{"stop": true}], "outcome": {"kind": "refused", "spent": 3, "ceiling": 3}},
+  {"limit": 3, "meter": 3, "fail": false, "grants": [{"add": 0}], "outcome": {"kind": "refused", "spent": 3, "ceiling": 3}},
+  {"limit": 3, "meter": 3, "fail": false, "grants": [{"add": 5}], "outcome": {"kind": "cleared", "granted": 5, "trips": 1}},
+  {"limit": 3, "meter": 5, "fail": false, "grants": [{"add": 1}], "outcome": {"kind": "parked", "trip": 1}},
+  {"limit": 3, "meter": 5, "fail": false, "grants": [{"add": 1}, {"add": 2}], "outcome": {"kind": "cleared", "granted": 3, "trips": 2}},
+  {"limit": 3, "meter": 5, "fail": false, "grants": [{"add": 3}], "outcome": {"kind": "cleared", "granted": 3, "trips": 1}}
+]

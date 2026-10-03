@@ -1,0 +1,90 @@
+# Every it(...) title in the two translated files at Pi commit 60e7e76bd: file, describe block, title.
+tools.test.ts	read tool	should read file contents that fit within limits
+tools.test.ts	read tool	should handle non-existent files
+tools.test.ts	read tool	should truncate files exceeding line limit
+tools.test.ts	read tool	should truncate when byte limit exceeded
+tools.test.ts	read tool	should handle offset parameter
+tools.test.ts	read tool	should handle limit parameter
+tools.test.ts	read tool	should handle offset + limit together
+tools.test.ts	read tool	should show error when offset is beyond file length
+tools.test.ts	read tool	should include truncation details when truncated
+tools.test.ts	read tool	should detect image MIME type from file magic (not extension)
+tools.test.ts	read tool	should read BMP files from disk as PNG image attachments
+tools.test.ts	read tool	should treat files with image extension but non-image content as text
+tools.test.ts	write tool	should write file contents
+tools.test.ts	write tool	should create parent directories
+tools.test.ts	edit tool	should replace text in file
+tools.test.ts	edit tool	should fail if text not found
+tools.test.ts	edit tool	should include ENOENT when the edit target does not exist
+tools.test.ts	edit tool	should fail if text appears multiple times
+tools.test.ts	edit tool	should replace multiple disjoint regions in one call
+tools.test.ts	edit tool	should collapse large unchanged gaps in multi-edit diffs
+tools.test.ts	edit tool	should match edits against the original file, not incrementally
+tools.test.ts	edit tool	should fail when edits is empty
+tools.test.ts	edit tool	should fail when multi-edit regions overlap
+tools.test.ts	edit tool	should not partially apply edits when one edit fails
+tools.test.ts	edit tool	should include EACCES for read-only files
+tools.test.ts	edit tool	should include the original error message for unknown edit access errors
+tools.test.ts	edit tool	should include ENOENT in diff preview for missing files
+tools.test.ts	edit tool	should include EACCES in diff preview for unreadable files
+tools.test.ts	bash tool	should execute simple commands
+tools.test.ts	bash tool	should handle command errors
+tools.test.ts	bash tool	should respect timeout
+tools.test.ts	bash tool	should include full output path for truncated timeout and abort errors
+tools.test.ts	bash tool	should throw error when cwd does not exist
+tools.test.ts	bash tool	should handle process spawn errors
+tools.test.ts	bash tool	should pass shellPath through to shell resolution
+tools.test.ts	bash tool	should send commands over stdin when shell resolution requires it
+tools.test.ts	bash tool	should resolve legacy WSL bash.exe to stdin command transport
+tools.test.ts	bash tool	should prepend command prefix when configured
+tools.test.ts	bash tool	should include output from both prefix and command
+tools.test.ts	bash tool	should work without command prefix
+tools.test.ts	bash tool	should coalesce streaming updates for chatty output
+tools.test.ts	bash tool	should not count a trailing newline as an extra truncated bash output line
+tools.test.ts	bash tool	should decode UTF-8 characters split across output chunks
+tools.test.ts	bash tool	should expose local bash operations for extension reuse
+tools.test.ts	bash tool	should preserve executeBash sanitization when using local bash operations
+tools.test.ts	bash tool	should persist full output when truncation happens by line count only
+tools.test.ts	bash tool	executeBash should persist full output when truncation happens by line count only
+tools.test.ts	grep tool	should include filename when searching a single file
+tools.test.ts	grep tool	should respect global limit and include context lines
+tools.test.ts	grep tool	should treat flag-like patterns as search text
+tools.test.ts	find tool	should include hidden files that are not gitignored
+tools.test.ts	find tool	should respect .gitignore
+tools.test.ts	find tool	should surface fd glob parse errors
+tools.test.ts	find tool	should treat flag-like patterns as search text
+tools.test.ts	ls tool	should list dotfiles and directories
+tools.test.ts	tool cwd resolution	read uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	write uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	edit uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	grep uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	find uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	ls uses ctx.cwd when provided
+tools.test.ts	tool cwd resolution	bash uses ctx.cwd when provided
+tools.test.ts	edit tool fuzzy matching	should match text with trailing whitespace stripped
+tools.test.ts	edit tool fuzzy matching	should match fullwidth punctuation in Chinese text
+tools.test.ts	edit tool fuzzy matching	should match compatibility-equivalent Unicode forms
+tools.test.ts	edit tool fuzzy matching	should match smart single quotes to ASCII quotes
+tools.test.ts	edit tool fuzzy matching	should match smart double quotes to ASCII quotes
+tools.test.ts	edit tool fuzzy matching	should match Unicode dashes to ASCII hyphen
+tools.test.ts	edit tool fuzzy matching	should match non-breaking space to regular space
+tools.test.ts	edit tool fuzzy matching	should prefer exact match over fuzzy match
+tools.test.ts	edit tool fuzzy matching	should still fail when text is not found even with fuzzy matching
+tools.test.ts	edit tool fuzzy matching	should detect duplicates after fuzzy normalization
+tools.test.ts	edit tool fuzzy matching	should support fuzzy matching in multi-edit mode
+tools.test.ts	edit tool fuzzy matching	should preserve the correct occurrence when fuzzy replacement equals a nearby line
+tools.test.ts	edit tool fuzzy matching	should preserve untouched lines and produce an applicable patch for fuzzy multi-edits
+tools.test.ts	edit tool CRLF handling	should match LF oldText against CRLF file content
+tools.test.ts	edit tool CRLF handling	should preserve CRLF line endings after edit
+tools.test.ts	edit tool CRLF handling	should preserve LF line endings for LF files
+tools.test.ts	edit tool CRLF handling	should detect duplicates across CRLF/LF variants
+tools.test.ts	edit tool CRLF handling	should preserve UTF-8 BOM after edit
+tools.test.ts	edit tool CRLF handling	should preserve CRLF line endings and BOM in multi-edit mode
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	keeps legacy fields out of the public schema
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	folds top-level oldText/newText into edits
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	appends legacy replacement to existing edits
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	passes through valid input unchanged
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	passes through non-object input unchanged
+edit-tool-legacy-input.test.ts	edit tool prepareArguments	prepared args execute correctly
+edit-tool-legacy-input.test.ts	edit tool stringified edits	parses edits from a JSON string
+edit-tool-legacy-input.test.ts	edit tool stringified edits	leaves edits alone when the string is not valid JSON

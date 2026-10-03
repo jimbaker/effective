@@ -1,0 +1,46 @@
+# Sandboxed formal toolchain (quint + Apalache/TLC) — see PIN.txt.
+# Everything is fetched at IMAGE BUILD, hash-verified, then run with
+# --network=none: the 79-package npm graph never executes with network
+# access or a view of the host filesystem.
+#
+# Build (records the digest to pin):   just formal-image
+# Run  (offline, ro spec mount):       just formal-verify   (container path)
+FROM docker.io/library/node@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553
+
+# JDK for Apalache (>= 17) + curl for the build-time fetch only.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root from here on; quint resolves ~/.quint under this HOME.
+RUN useradd -m -u 1000 -s /bin/bash formal 2>/dev/null || usermod -l formal -d /home/formal -m node
+USER formal
+ENV HOME=/home/formal
+WORKDIR /home/formal/toolchain
+
+# quint, pinned by lockfile integrity, install scripts disabled.
+COPY --chown=formal package.json package-lock.json PIN.txt ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+# Apalache: the exact artifact quint 0.32.0 would lazily fetch
+# (DEFAULT_APALACHE_VERSION_TAG in dist/src/apalache.js), baked in and
+# verified against the PIN before the image is accepted.
+RUN set -e; \
+    APALACHE=$(awk '$1=="apalache"{print $2}' PIN.txt); \
+    EXPECT=$(awk '$1=="apalache.jar.sha256"{print $2}' PIN.txt); \
+    mkdir -p "$HOME/.quint/apalache-dist-$APALACHE"; \
+    curl -fsSL "https://github.com/apalache-mc/apalache/releases/download/v${APALACHE}/apalache.tgz" \
+        | tar -xz -C "$HOME/.quint/apalache-dist-$APALACHE"; \
+    ACTUAL=$(sha256sum "$HOME/.quint/apalache-dist-$APALACHE/apalache/lib/apalache.jar" | cut -d' ' -f1); \
+    [ "$EXPECT" = "$ACTUAL" ] || { echo "apalache.jar sha256 MISMATCH: expected $EXPECT got $ACTUAL" >&2; exit 1; }; \
+    echo "apalache $APALACHE jar OK: $ACTUAL"
+
+ENV PATH="/home/formal/toolchain/node_modules/.bin:${PATH}"
+
+# Specs are mounted read-only at /spec; the entrypoint copies them into a
+# writable workdir (tmpfs at runtime) because Apalache writes _apalache-out
+# under cwd.
+COPY --chown=formal entrypoint.sh /home/formal/entrypoint.sh
+RUN chmod +x /home/formal/entrypoint.sh
+WORKDIR /work
+ENTRYPOINT ["/home/formal/entrypoint.sh"]

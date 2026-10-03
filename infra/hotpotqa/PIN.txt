@@ -1,0 +1,9 @@
+# HotpotQA dev-distractor split — pinned source (reliable, hash-verified).
+# Public data; NOT vendored into the repo (it is ~27 MB). A fetcher
+# downloads it on demand, verifies this SHA256, and converts it to the loader's JSONL
+# schema in a cache OUTSIDE the repo (~/.cache/effective/hotpotqa/). A `just bench-hotpotqa`
+# run fetches (if absent) then runs under a hard cost budget.
+#
+# Source: HuggingFace dataset hotpotqa/hotpot_qa, config "distractor", validation split.
+url=https://huggingface.co/datasets/hotpotqa/hotpot_qa/resolve/main/distractor/validation-00000-of-00001.parquet
+sha256=c20b638ca82b21d04fe12e14ff417ad05153d4d215a65de54497fca4e972f7c6

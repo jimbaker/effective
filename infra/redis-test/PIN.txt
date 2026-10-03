@@ -1,0 +1,34 @@
+# Pinned Redis image for the arrivals-bridge test substrate.
+# Reference this image ONLY by digest (content-addressed, immutable) — never by
+# the mutable :8-alpine tag — mirroring infra/pg-test/PIN.txt's discipline.
+# Run under rootless Podman (daemonless; no Docker daemon trust), loopback-only.
+
+image:  docker.io/library/redis
+tag:    8-alpine
+digest: sha256:bd999b5cfee25fb24b8320a31fddbd69f462df44c8138c66e369582937beebc0
+amd64:  sha256:de4d18872bf67ad0bd62224a712263975ca1d53b9b1d0d5d076082e7fa887890
+server: 8.10.1
+pulled: 2026-09-19
+engine: podman 4.9.3 (rootless)
+
+# `digest` is the multi-arch OCI index, so the pin is portable; `amd64` is the child
+# manifest this machine actually ran, recorded so a reader can tell which bytes were
+# measured against.
+#
+# CORROBORATION, and its scope. Two INDEPENDENT PATHS agree on the index digest: podman's
+# local content store after a pull, and a HEAD against registry-1.docker.io with a token
+# fetched directly. The amd64 child was then read out of the index and matches what podman
+# stored. That is two paths on ONE machine. CLAUDE.md's supply-chain rule asks for two
+# independent MACHINES, and the second is not done: run the block below on another machine and add its
+# line before treating this pin as verified.
+#
+#   podman pull docker.io/library/redis:8-alpine
+#   podman image inspect docker.io/library/redis:8-alpine --format '{{range .RepoDigests}}{{.}}{{"\n"}}{{end}}'
+#
+# machine 1, 2026-09-19, index bd999b5c + amd64 de4d1887
+# machine 2: NOT DONE
+#
+# LICENSE. Redis 8 is AGPLv3. The server is never distributed by this repo (it is a test
+# container pulled at run time) and no Redis source is vendored, so it is not part of what
+# this repo ships. The `redis` Python
+# client is MIT and is an optional dependency of the bridge, not of `effective`.

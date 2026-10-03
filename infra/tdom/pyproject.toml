@@ -1,0 +1,68 @@
+[build-system]
+requires = ["uv-build"]
+build-backend = "uv_build"
+
+[project]
+name = "tdom"
+version = "0.1.17"
+description = "A 🤘 rockin' t-string HTML templating system for Python 3.14."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["markupsafe>=3.0.3"]
+authors = [
+  { name = "Dave Peck", email = "davepeck@davepeck.org" },
+  { name = "Ian Wilson", email = "ian@gardentheory.org" },
+  { name = "Andrea Giammarchi", email = "andrea.giammarchi@gmail.com" },
+  { name = "Paul Everitt", email = "pauleveritt@me.com" },
+]
+license = { text = "MIT" }
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+  "Topic :: Text Processing :: Markup :: HTML",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/t-strings/tdom"
+Changelog = "https://github.com/t-strings/tdom/releases"
+Issues = "https://github.com/t-strings/tdom/issues"
+CI = "https://github.com/t-strings/tdom/actions"
+
+[dependency-groups]
+dev = [
+  "furo>=2025.12.19",
+  "genbadge[coverage,tests]>=1.1.3",
+  "myst-parser>=5.0.0",
+  "pyright>=1.1.408",
+  "pytest>=9.0.2",
+  "pytest-cov>=7.1.0",
+  "pytest-html>=4.2.0",
+  "pytest-watcher>=0.6.3",
+  "ruff>=0.15.8",
+  "sphinx>=9.1.0",
+  "sybil[pytest]>=10.0.1",
+  "ty>=0.0.26",
+]
+
+[tool.pytest]
+testpaths = ["tdom", "docs", "README.md"]
+python_files = ["*_test.py"]
+
+[tool.pyright]
+include = ["tdom"]
+exclude = [".venv", ".git", ".github"]
+
+[tool.ruff.lint]
+preview = true
+
+[tool.uv.build-backend]
+module-name = "tdom"
+module-root = ""
+source-exclude = ["*_test.py"]

@@ -1,0 +1,17 @@
+[
+  {"verdicts": [], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 0}},
+  {"verdicts": [{"kind": "escalate"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 0}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "escalate"}, {"kind": "escalate"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 0}},
+  {"verdicts": [], "default": {"kind": "escalate"}, "decision": {"kind": "deny", "reason": 1}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "escalate"}], "default": {"kind": "escalate"}, "decision": {"kind": "deny", "reason": 1}},
+  {"verdicts": [], "default": {"kind": "allow"}, "decision": {"kind": "allow"}},
+  {"verdicts": [{"kind": "escalate"}], "default": {"kind": "allow"}, "decision": {"kind": "allow"}},
+  {"verdicts": [{"kind": "allow"}, {"kind": "deny", "reason": 2}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "allow"}},
+  {"verdicts": [{"kind": "deny", "reason": 2}, {"kind": "allow"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 2}},
+  {"verdicts": [{"kind": "deny", "reason": 2}, {"kind": "deny", "reason": 3}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 2}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "allow"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "allow"}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "deny", "reason": 3}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 3}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "escalate"}, {"kind": "allow"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "allow"}},
+  {"verdicts": [{"kind": "escalate"}, {"kind": "deny", "reason": 2}, {"kind": "allow"}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "deny", "reason": 2}},
+  {"verdicts": [{"kind": "allow"}, {"kind": "escalate"}, {"kind": "deny", "reason": 3}], "default": {"kind": "deny", "reason": 0}, "decision": {"kind": "allow"}}
+]

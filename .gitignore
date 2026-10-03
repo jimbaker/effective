@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+.coverage-contexts
+coverage.xml
+htmlcov/
+
+# Env / local
+.envrc
+.env
+*.env
+.claude/
+
+# Generated: the key registry and other derived build output
+build/
+benches/
+
+# Formal toolchain output
+formal/lean/.lake/
+formal/quint/_apalache-out/
+infra/formal/node_modules/

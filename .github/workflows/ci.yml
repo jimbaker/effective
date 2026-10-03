@@ -1,0 +1,92 @@
+# CI mirrors the local gates, so CI and `just` agree:
+#   check   ruff + ast-grep lints (incl. seam-dep-direction) + ty + pytest
+#   formal  lake build (Lean/Mathlib) + quint typecheck (the spec gate)
+#   durable the crash-replay + cross-engine suite against a real Postgres
+#
+# `durable` exists because `check` cannot fail for the reason that matters here: the
+# Postgres-backed tests SKIP without a database, so a `check` job that never sees one
+# reports only skips and exit 0.
+#
+# Per CLAUDE.md's supply-chain policy ("trust, but verify"), every third-party
+# action is pinned by commit SHA with its version in a comment — never a
+# floating tag. Bump a pin only after checking the SHA against the tag.
+#
+# The slow model-checking gate (`just formal-verify`, ~8 min Apalache/TLC) is
+# deliberately NOT per-push; run it locally or add a scheduled job later.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# One run per ref; a new push cancels the previous in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (lint + types + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      # uv sync installs the pinned Python 3.14 + deps (ast-grep is a dep).
+      # `just check` runs the full lint set + pytest; the Postgres-backed tests
+      # auto-skip without a container (the cov gate owns those), so no service
+      # is needed here.
+      - run: just check
+
+  formal:
+    name: formal (lean + quint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      # lean-action installs the pinned Lean toolchain, fetches the Mathlib
+      # cache, and runs `lake build` in formal/lean (the Lean gate). It caches
+      # the toolchain + build across runs.
+      - uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9 # v1.5.0
+        with:
+          lake-package-directory: formal/lean
+      # node + a JDK are preinstalled on ubuntu-latest, so formal-setup only
+      # needs to install the lockfile-pinned quint and hash-verify Apalache
+      # (bare-metal path; the container sandbox is the local default).
+      #
+      # A hosted runner is the disposable sandbox: a throwaway VM with `contents: read`
+      # and no host filesystem to reach, so the bare-metal `-host` recipe runs here. The
+      # pin is still enforced: the setup script refuses on an Apalache hash mismatch.
+      - run: just formal-setup
+      - run: just formal-quint-host
+
+  # The durable half, which `check` cannot reach: `just check` runs against whatever
+  # Postgres is configured, and with none it SKIPS rather than fails.
+  # `EFFECTIVE_REQUIRE_PG` asserts that the Absurd arm executed, once, before
+  # collection. The job runs the WHOLE suite, since `just pgt-test`'s file list
+  # reaches only part of the Postgres-gated tests.
+  durable:
+    name: durable (the whole suite, both engines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      # `pgt-up` stands up the digest-pinned Postgres from infra/pg-test/PIN.txt under
+      # rootless podman, applies the vendored absurd.sql and alembic, and takes the
+      # template the parallel lane copies. Podman is preinstalled on ubuntu-latest; if
+      # that ever stops being true, the fallback is a `services:` container on the SAME
+      # digest — never a floating `postgres:18`.
+      - run: podman --version
+      - run: just pgt-up
+      - name: the whole suite against the pinned Postgres
+        env:
+          DATABASE_URL: postgresql://effective:effective@localhost:5432/effective
+          EFFECTIVE_REQUIRE_PG: "1"
+        run: just test

@@ -1,0 +1,25 @@
+# Test names that source or docs cite DELIBERATELY, knowing they no longer exist.
+#
+# `--test-citations` fails on a backticked `test_*` (or a `::test_*` node id) that resolves to no
+# test. These entries are the legitimate exception: prose ABOUT a test's removal or
+# rename, where naming the dead test is the point of the sentence.
+#
+# Format: one bare name per line, then `#` and the reason. A reason is required by convention, not
+# by the parser; an entry without one is a note to nobody.
+#
+# The gate also fails on a STALE entry — one whose name now resolves — so this file can only
+# shrink or be deliberately grown, never quietly rot. Same discipline as the link-check baseline.
+
+test_a_foreign_tag_may_not_carry_coordinates  # tests/test_grammar.py:152 records the rule REVERSING
+test_a_seeded_value_round_trips_byte_identically  # renamed; two sites explain why the old name lied
+test_a_trailing_empty_segment_is_a_segment_not_an_absence  # replaced; both sites say by what
+test_name  # scripts/link_check.py:105 — a METAVARIABLE in a comment about `::locator` syntax
+
+# Synthetic tests that live INSIDE a fixture tree, never under tests/. `run_suite` materializes a
+# tree a model wrote and runs pytest over it, so the node ids it returns name tests that exist for
+# the duration of one container. The gate's grammar cannot tell such a name from a citation — it
+# scans text for `test_*`, which is its whole domain — and asserting the node id is exactly how
+# `tests/test_exec_tier.py` proves the predicate measured the tree rather than the environment.
+test_bad  # tests/test_exec_tier.py — FAILING fixture tree; the node id run_suite must report
+test_reaches_the_network  # tests/test_exec_tier.py — the container-isolation fixture tree
+test_reads_the_host_filesystem  # tests/test_exec_tier.py — the container-isolation fixture tree

@@ -1,0 +1,8 @@
+{
+  "name": "effective-graph-layout",
+  "private": true,
+  "description": "Pinned elkjs layout engine for effective.graphlayout (see PIN.txt; install via `just elk-setup`, never by hand)",
+  "dependencies": {
+    "elkjs": "0.12.0"
+  }
+}

@@ -1,0 +1,65 @@
+# elkjs pin — the layout engine behind `effective.graphlayout` (ADR-0022 §11.6).
+# Install via `just elk-setup`; never `npm install -g`, never a floating version.
+# Sibling precedents: infra/formal/PIN.txt (quint), infra/absurd/PIN.txt.
+
+elkjs            0.12.0     # npm elkjs, ZERO transitive dependencies — the whole
+                            # lockfile is one package. Integrity is enforced by
+                            # package-lock.json (sha512-YZcKynxVxYoKIOEpywEPwCFdg+…)
+                            # via `npm ci --ignore-scripts`.
+
+elk.bundled.js.sha256  1222e44f953ce7746af23801e723708f8e6f436b8b377a6a5fc7552f34a307b3
+                            # node_modules/elkjs/lib/elk.bundled.js — what the Node
+                            # facade (layout_worker.mjs) requires.
+elk-worker.min.js.sha256  e4f5c51c6f2fd564bb64e52e81c4a85a316ef2f24f8b90e1db5eb886c765b030
+                            # the browser Web Worker build, for the eventual Shiny /
+                            # FastAPI page. Pinned now so the two paths cannot drift
+                            # onto different engine builds.
+                            #
+                            # Provenance: CORROBORATED on two independent machines,
+                            # 2026-07-25: the first machine recorded them and
+                            # re-verified them with `just elk-image`, whose
+                            # Containerfile checks both hashes at build and fails
+                            # on mismatch; the second ran `just elk-setup`, both
+                            # hashes OK. The standing
+                            # two-machine rule is SATISFIED; this pin is trusted.
+                            #
+                            # Why the node versions do not weaken that: both boxes
+                            # ran node v26.5.0, but `npm ci --ignore-scripts` only
+                            # downloads and extracts a PUBLISHED tarball — the two
+                            # bundles ship prebuilt inside it and node never
+                            # rebuilds them. The hashes are of the artifact, not of
+                            # anything either machine compiled, so version parity
+                            # is incidental rather than a shared-mode confound.
+                            #
+                            # Note for a future bump: `exclude-newer` in
+                            # pyproject.toml governs PyPI, NOT npm. Nothing stops a
+                            # future `npm ci` from resolving differently if the
+                            # lockfile moves — the lockfile and these hashes are
+                            # the whole defense here.
+
+# --- container sandbox (the DEFAULT and the only supported path) ---
+
+base-image  docker.io/library/node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+                            # node 24 bookworm-slim, digest-pinned. Image tag:
+                            # effective-elk:0.12.0. `npm ci` and the two hash
+                            # checks happen at IMAGE BUILD and the build FAILS on
+                            # mismatch, so a runnable image implies verified
+                            # bundles. At run time: --network=none, --read-only,
+                            # no host mount — the graph arrives on stdin and the
+                            # geometry leaves on stdout.
+                            #
+                            # **node runs in a container, always**: the rule is about the npm ecosystem,
+                            # not about elkjs's current dependency count, which is
+                            # zero today and is not a property anyone is watching.
+                            # Bump procedure: new base digest + elkjs version +
+                            # both bundle hashes together, rebuild, re-record from
+                            # two machines.
+
+node             >= 20      # only for the host-escape hatch
+                            # (`EFFECTIVE_ELK_HOST=1`, the no-Podman fallback —
+                            # runs the npm graph unsandboxed; prefer the image).
+                            # Not installed by the recipe — bring your own.
+
+# The geometry elkjs returns is DISPOSABLE (ADR-0022: layout is derived, never
+# hand-placed), so a bad layout is a visual bug, never a durable one. Nothing
+# elkjs returns is written to the ledger.

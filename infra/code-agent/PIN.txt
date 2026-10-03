@@ -1,0 +1,27 @@
+# Pinned artifacts for the T-real container tier.
+# Standing supply-chain policy (CLAUDE.md): exact version + digest, corroborated
+# from two independent machines, run rootless + --network=none.
+
+# Base image (pinned by digest in the Dockerfile FROM, never a floating tag):
+image        docker.io/library/python:3.12-slim
+digest       sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+
+# Python test runner (pinned exact in the Dockerfile):
+pytest       8.3.4
+
+# Local image tag, built with
+#   podman build -q -t effective-code-agent:pin -f infra/code-agent/Dockerfile infra/code-agent
+tag          effective-code-agent:pin
+
+# CONSUMER: src/effective/coding/tier.py, the coding machine's success predicate.
+# `run_suite` executes a tree a MODEL wrote, and pytest imports every module it collects, so a
+# conftest.py in that tree runs before any assertion does. The consumer uses the discipline the
+# Dockerfile states: rootless, `--network=none`, `--rm`, no volume mount, the tree fed on stdin
+# as a tar.
+# Isolation is asserted rather than assumed: tests/test_exec_tier.py runs the same tree on both
+# tiers and requires the HOST to reach the filesystem and the network that the container denies.
+
+# Cross-machine corroboration, per the absurd/pg-test/formal precedents: record a
+# second machine's `podman pull` digest here to complete the two-machine attestation
+# before this image is trusted for a distributable or multi-tenant run.
+second_machine_digest  <pending second-machine pull>

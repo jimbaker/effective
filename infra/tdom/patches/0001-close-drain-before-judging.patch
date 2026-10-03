@@ -1,0 +1,42 @@
+--- a/tdom/parser.py
++++ b/tdom/parser.py
+@@ -438,6 +438,7 @@
+         self.source = None
+ 
+     def close(self) -> None:
++        self._drain_pending_feed()
+         if self.waiting_for_data():
+             # We apply heuristics here to try to guess why the parser didn't finish.
+             if self.rawdata.count('"') % 2 == 1 or self.rawdata.count("'") % 2 == 1:
+@@ -454,6 +455,31 @@
+             raise ValueError("Some placeholders were never resolved.")
+         super().close()
+ 
++    def _drain_pending_feed(self) -> None:
++        """Restore the invariant the checks below rely on: everything fed has been parsed.
++
++        CPython 3.14.7 made `HTMLParser.feed` BATCH — input accumulates in `self._pending`
++        and is only joined into `self.rawdata` and parsed once `_pending_len` reaches a
++        threshold that doubles whenever a pass parses nothing (a fix for quadratic rescanning
++        of an unterminated tag). `HTMLParser.close` flushes it, but our checks run first and
++        would judge a buffer the parser is still holding, so a well-formed template raises:
++        `html(t'<g class="{k}"></g>')` leaves `rawdata` truncated mid-attribute with
++        `_pending == ['"></g>']`.
++
++        We feed one static or one placeholder at a time, which is exactly the access pattern
++        that batching defers. Drain it here and parse it as MID-stream input — `end=False`,
++        not `close()`'s `end=True` — so an unterminated construct stays in `rawdata` where
++        the diagnostics below can still see it, instead of being flushed as text. A no-op
++        before 3.14.7, where the attributes do not exist and `feed` parsed eagerly.
++        """
++        pending = getattr(self, "_pending", None)
++        if not pending:
++            return
++        self.rawdata += "".join(pending)
++        pending.clear()
++        self._pending_len = 0
++        self.goahead(False)  # typeshed declares `end: bool`; CPython itself passes 0/1
++
+     def waiting_for_data(self):
+         return len(self.rawdata) > 0
+ 

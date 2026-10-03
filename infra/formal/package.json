@@ -1,0 +1,8 @@
+{
+  "name": "effective-formal-toolchain",
+  "private": true,
+  "description": "Pinned Quint toolchain for formal/quint (see PIN.txt; install via `just formal-setup`, never by hand)",
+  "dependencies": {
+    "@informalsystems/quint": "0.32.0"
+  }
+}

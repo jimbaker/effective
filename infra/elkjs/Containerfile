@@ -1,0 +1,40 @@
+# Sandboxed ELK layout engine — see PIN.txt.
+#
+# STANDING RULE: **node runs in a container, always.** Not
+# because elkjs is deep — its lockfile is one package with zero dependencies —
+# but because the rule is about the ecosystem, not about today's graph. A pin
+# that is only safe while a dependency count stays at one is a pin that quietly
+# stops being safe on some future `npm update`. So the sandbox is unconditional
+# and the argument never has to be re-litigated per package.
+#
+# Everything is fetched and hash-verified at IMAGE BUILD, so a runnable image
+# implies a verified artifact; at run time the worker gets --network=none, a
+# read-only rootfs, and no host mount at all — the graph arrives on stdin and
+# the geometry leaves on stdout.
+#
+# Build:  just elk-image      Run:  just elk-smoke  (or effective.graphlayout.elkjs)
+FROM docker.io/library/node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+
+USER node
+ENV HOME=/home/node
+WORKDIR /home/node/layout
+
+# elkjs, pinned by lockfile integrity, install scripts disabled.
+COPY --chown=node package.json package-lock.json PIN.txt ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+# The build fails unless the installed bundles match the recorded hashes, so the
+# image cannot be built from a substituted tarball.
+RUN set -e; \
+    for entry in elk.bundled.js elk-worker.min.js; do \
+        expect=$(awk -v k="$entry.sha256" '$1==k{print $2}' PIN.txt); \
+        actual=$(sha256sum "node_modules/elkjs/lib/$entry" | cut -d' ' -f1); \
+        [ -n "$expect" ] || { echo "no PIN entry for $entry" >&2; exit 1; }; \
+        [ "$expect" = "$actual" ] || { echo "$entry sha256 MISMATCH: expected $expect got $actual" >&2; exit 1; }; \
+        echo "$entry OK: $actual"; \
+    done
+
+COPY --chown=node layout_worker.mjs ./
+
+# stdin/stdout ARE the protocol (JSON per line). No ports, no volumes.
+ENTRYPOINT ["node", "/home/node/layout/layout_worker.mjs"]

@@ -1,0 +1,11 @@
+# link-check baseline: pre-existing dead documentation links.
+#
+# Format:  <source> :: <dead path> :: <reason>
+#
+# The gate fails on any violation NOT listed here, AND on any entry here
+# that matches no current violation (stale: delete it). Entries are keyed
+# by SOURCE, so moving a document orphans every entry whose source it was;
+# a move commit rewrites baseline KEYS, not just the paths inside them.
+#
+# Do not hand-edit to silence a new break: a new break is fixed, never recorded.
+

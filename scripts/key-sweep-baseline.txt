@@ -1,0 +1,163 @@
+# key-sweep baseline — findings recorded as accepted, so the gate can fail on GROWTH.
+#
+# Format:  <path> :: <rule> :: <token> :: <reason>
+#
+# Keyed on (path, rule, token) and NOT on a line number, so an edit above a finding
+# does not invalidate its entry. The gate fails on any finding NOT listed here, AND
+# on any entry here matching no current finding (stale — delete it), so the record
+# can only shrink. Regenerate with `--init-baseline` only when bootstrapping.
+#
+# A reason is what makes an entry reviewable. `--init-baseline` writes a placeholder;
+# replacing it with the actual judgement is the work, and an unreplaced one is a
+# finding nobody has read yet.
+
+docs/effective-101.md :: prose :: gather:0:{i}:rec:{i} :: unreviewed — bootstrapped, replace with the judgement
+docs/effective-101.md :: prose :: gather:1:0 :: unreviewed — bootstrapped, replace with the judgement
+docs/effective-101.md :: prose :: gather:2:0 :: unreviewed — bootstrapped, replace with the judgement
+docs/effective-design.md :: prose :: fork:r-fork:review%3Am1 :: deliberate: the counter-example §5.5 quotes, the percent-escaped spelling the no-escaping design rejects, shown to measure what escaping costs a reader's glance
+scripts/key_sweep.py :: prose :: artifact:app/json:9f2 :: unreviewed — bootstrapped, replace with the judgement
+scripts/key_sweep.py :: prose :: artifact:app/json:9f2… :: unreviewed — bootstrapped, replace with the judgement
+scripts/key_sweep.py :: prose :: artifact:{Segment :: unreviewed — bootstrapped, replace with the judgement
+scripts/key_sweep.py :: prose :: f"q;ledger:{x}" :: unreviewed — bootstrapped, replace with the judgement
+scripts/key_sweep.py :: prose :: fork:r-fork;review:m1 -> absurd.py:153 :: unreviewed — bootstrapped, replace with the judgement
+scripts/key_sweep.py :: prose :: gather:0,3;;ledger :: unreviewed — bootstrapped, replace with the judgement
+src/agent/bank.py :: prose :: task:{id}/react:{tag} :: deliberate — era-2 banked stores CONTAIN this; the era history moved here from tests/test_banked_corpus.py so the gate and the fixture read one source
+src/effective/improve.py :: prose :: cand:{r}:{i} :: unreviewed — bootstrapped, replace with the judgement
+src/agent/lineage.py :: prose :: budget-grant:{run_id}:{n} :: unreviewed — bootstrapped, replace with the judgement
+src/agent/lineage.py :: prose :: govern:{gate}:{run_id}:{pass}:{occ}:{op} :: unreviewed — bootstrapped, replace with the judgement
+src/agent/voi.py :: prose :: budget-grant:{run_id}:{K} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/budget.py :: prose :: budget-grant:{run_id}:% :: unreviewed — bootstrapped, replace with the judgement
+src/effective/combinators.py :: prose :: chain-grant:{run_id}:{generation} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/counterfactual.py :: prose :: fork:r-fork:budget-grant:r-base:0 :: unreviewed — bootstrapped, replace with the judgement
+src/effective/counterfactual.py :: prose :: hyp:cf-a:reviewed%3Am1 :: unreviewed — bootstrapped, replace with the judgement
+src/effective/fork.py :: prose :: fork:{child_run_id}:{fork_point} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/fork.py :: prose :: ledger:extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/fork.py :: prose :: ledger:reviewed:* :: unreviewed — bootstrapped, replace with the judgement
+src/effective/govern.py :: prose :: govern:spend:run-g:0:0: :: unreviewed — bootstrapped, replace with the judgement
+src/effective/govern.py :: prose :: govern:{gate},{run_id}[,generation=N][,pass-n=N][,occurrence=N];{op_key} :: the park name's own wire form, in the docstring that composes it
+src/effective/handlers/absurd.py :: prose :: approve:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/handlers/absurd.py :: prose :: gather:0:0:{approve} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/handlers/absurd.py :: prose :: govern:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/keys/registry.py :: prose :: approve:r1:tool:charge_card :: unreviewed — bootstrapped, replace with the judgement
+src/effective/keys/registry.py :: prose :: approve:r1:tool:charge_card#2 :: unreviewed — bootstrapped, replace with the judgement
+src/effective/keys/registry.py :: prose :: hyp:r-fork,review%3Am1 :: deliberate: the percent-escaped spelling the module docstring quotes to show what escaping costs a reader's glance
+src/effective/keys/frame.py :: prose :: kind_of("rec:0;ledger;x") :: unreviewed — bootstrapped, replace with the judgement
+src/effective/layers.py :: prose :: govern:a:b:c :: unreviewed — bootstrapped, replace with the judgement
+src/effective/layers.py :: prose :: govern:{gate}:{run_id} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/lint.py :: prose :: approve;front-door:a:b :: unreviewed — bootstrapped, replace with the judgement
+src/effective/lint.py :: prose :: budget-grant:{RUN}:0 :: unreviewed — bootstrapped, replace with the judgement
+src/effective/lint.py :: prose :: explain("approve;r1;tool:charge-card") :: unreviewed — bootstrapped, replace with the judgement
+src/effective/ops.py :: prose :: await_event("approve;tool:act") :: unreviewed — bootstrapped, replace with the judgement
+src/effective/ops.py :: prose :: step_key("approve;tool:act") :: unreviewed — bootstrapped, replace with the judgement
+src/effective/permission.py :: prose :: ledger:processed:{id} :: unreviewed — bootstrapped, replace with the judgement
+tests/_authority.py :: prose :: govern:spend:r3:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/_composition.py :: compose :: skill:{skill},activate :: unreviewed — bootstrapped, replace with the judgement
+tests/_composition.py :: prose :: gather:0:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/_composition.py :: prose :: gather:1:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/_composition.py :: prose :: gather:2:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/_conformance.py :: prose :: gather:0,1;rec:1;depth-grant:{run_id}:1 :: unreviewed — bootstrapped, replace with the judgement
+tests/_conformance.py :: prose :: gather:0:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/_conformance.py :: prose :: gather:1:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_absurd_seed_reader.py :: compose :: ledger;{rid}:extracted :: unreviewed — bootstrapped, replace with the judgement
+tests/test_absurd_seed_reader.py :: compose :: ledger;{rid}:reviewed :: unreviewed — bootstrapped, replace with the judgement
+tests/test_artifact_addressing.py :: compose :: approve;{op_key(op1)} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_artifact_addressing.py :: compose :: approve;{op_key(op2)} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_artifact_addressing.py :: compose :: artifact:{artifact_id(op)} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_artifact_addressing.py :: compose :: artifact:{ct},sha256- :: unreviewed — bootstrapped, replace with the judgement
+tests/test_at_index.py :: compose :: step;{legal} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_await_occurrence_walks.py :: compose :: event;{GRANT.occurrence(2).stored()} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_await_occurrence_walks.py :: compose :: event;{GRANT.stored()} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_cart_checkout_example.py :: compose :: event;swap:{cart.ORDER_ID} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_combinators.py :: prose :: code:{name}:... :: unreviewed — bootstrapped, replace with the judgement
+tests/test_combinators.py :: prose :: gather:…:outer;rec:0;leaf :: unreviewed — bootstrapped, replace with the judgement
+tests/test_composition.py :: compose :: event;{DONE_EVENT} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: approve:{run_id};step;code:action,0,c;tool:send_email :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: artifact:{RULING_ARTIFACT} :: DELIBERATELY SPELLED — the ruling machine's ids are minted by the FIXTURE (_conformance.note_row_id/ruling_row_id), so composing them here would have the fixture assert against itself; renaming the minter's tag left all six cases green. The postamble ids in the same list ARE composed, because production mints those
+tests/test_conformance.py :: compose :: budget-grant:{run_id},{parks} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,0;ledger;{run_id}:ka :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,0;{approve} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,1;ledger;{run_id}:kb :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,1;{approve} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,{branch};ledger;{run_id}:{kind} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: gather:0,{branch};step;tool:{tool} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: d:0;state:work;ledger;note:{run_id},work,0 :: DELIBERATELY SPELLED — the ruling machine's ids are minted by the FIXTURE (_conformance.note_row_id/ruling_row_id), so composing them here would have the fixture assert against itself; renaming the minter's tag left all six cases green. The postamble ids in the same list ARE composed, because production mints those
+tests/test_conformance.py :: compose :: d:2;state:rule;ledger;ruling:{run_id},rule,2 :: DELIBERATELY SPELLED — the ruling machine's ids are minted by the FIXTURE (_conformance.note_row_id/ruling_row_id), so composing them here would have the fixture assert against itself; renaming the minter's tag left all six cases green. The postamble ids in the same list ARE composed, because production mints those
+tests/test_conformance.py :: compose :: d:3;state:work;ledger;note:{run_id},work,3 :: DELIBERATELY SPELLED — the ruling machine's ids are minted by the FIXTURE (_conformance.note_row_id/ruling_row_id), so composing them here would have the fixture assert against itself; renaming the minter's tag left all six cases green. The postamble ids in the same list ARE composed, because production mints those
+tests/test_conformance.py :: compose :: d:5;state:rule;ledger;ruling:{run_id},rule,5 :: DELIBERATELY SPELLED — the ruling machine's ids are minted by the FIXTURE (_conformance.note_row_id/ruling_row_id), so composing them here would have the fixture assert against itself; renaming the minter's tag left all six cases green. The postamble ids in the same list ARE composed, because production mints those
+tests/test_dashboard.py :: prose :: approve;% :: unreviewed — bootstrapped, replace with the judgement
+tests/test_descend_sweep.py :: compose :: step:{ASSESS} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_key_format.py :: prose :: KeyMap.explain("gather:0,0;event;step;tool:foo") :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_key_format.py :: prose :: approve;front-door:a:b :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_key_format.py :: prose :: gather:0:0:event:foo -> gather:0,0;event;step;tool:foo :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_voi_bridge_absurd.py :: compose :: budget-grant:{rid},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_voi_bridge_absurd.py :: compose :: budget-grant:{rid},1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_voi_bridge_absurd.py :: compose :: budget-grant:{rid},2 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_voi_bridge_absurd.py :: compose :: budget-grant:{rid},{k} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_durable_voi_bridge_absurd.py :: prose :: budget-grant:rid,0..:N-1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_enforce_measured_conformance.py :: compose :: budget-grant:{RUN},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_enforce_measured_conformance.py :: compose :: budget-grant:{RUN},1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_enforce_measured_conformance.py :: compose :: budget-grant:{RUN},{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_enforce_measured_conformance.py :: compose :: budget-grant:{RUN},{want['trip']} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork.py :: compose :: tool:after-{route} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_durable.py :: prose :: fork:r-fork;fork_done:g1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_durable.py :: prose :: fork:{rid}:review:m1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_durable_absurd.py :: compose :: ledger;extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_ledger.py :: compose :: fork:r-fork;review:{mid} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_ledger.py :: compose :: ledger;extracted:{mid} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep.py :: compose :: ledger;extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_absurd.py :: compose :: ledger;extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_cost.py :: compose :: ledger;extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_funnel_sweep.py :: compose :: event;review:{RUN_ID} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_gather.py :: prose :: gather:0:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern.py :: compose :: govern:spend,{RUN},occurrence=2;step;tool:charge_card :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern.py :: compose :: govern:spend,{RUN},pass-n=1;step;tool:charge_card :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern.py :: compose :: govern:spend,{RUN};step;tool:charge_card :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern_durable.py :: prose :: govern:{gate}:{run}:{pass} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern_op_scope.py :: compose :: tool:{op_name} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_govern_op_scope.py :: prose :: govern:{gate}:{run_id}:{pass_n} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_grammar.py :: prose :: artifact:message/rfc822,9f2c :: unreviewed — bootstrapped, replace with the judgement
+tests/test_grammar.py :: prose :: gather:{g}:wake-race:{i}:{cond} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_grant_aliasing.py :: prose :: depth-grant:chain-r:1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_grant_aliasing.py :: prose :: depth-grant:{run}:1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: compose :: d:{depth};step;tool:judge :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: compose :: ledger;extracted:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: compose :: step;{imitation} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: compose :: task:t1;d:{depth};step;tool:judge :: unreviewed — bootstrapped, replace with the judgement
+tests/test_key_sweep.py :: prose :: artifact:{Segment :: unreviewed — bootstrapped, replace with the judgement
+tests/test_key_sweep.py :: prose :: gather:0,3:ledger :: unreviewed — bootstrapped, replace with the judgement
+tests/test_key_sweep.py :: prose :: gather:0,3;;ledger :: unreviewed — bootstrapped, replace with the judgement
+tests/test_key_sweep.py :: prose :: gather:0:0:ev :: unreviewed — bootstrapped, replace with the judgement
+tests/test_key_sweep.py :: prose :: ledger;;m1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_lineage.py :: compose :: budget-grant:{RUN},2 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_lineage.py :: compose :: govern:review:{RUN}:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_lineage.py :: compose :: ledger;{RUN}:e1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_lint.py :: prose :: budget-grant:{run_id},% :: unreviewed — bootstrapped, replace with the judgement
+tests/test_measured_fork.py :: compose :: budget-grant:{RUN},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_measured_fork.py :: compose :: budget-grant:{RUN},1 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: compose :: step;{name} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: approve;r1:tool:charge_card#2 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: artifact:message/rfc822:… :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: await_event("approve;tool:act") :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: depth-grant:r1:1#2 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: govern:spend:r1:0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: ledger;X :: unreviewed — bootstrapped, replace with the judgement
+tests/test_op_key_injectivity.py :: prose :: step("talk:a;b;tool:x") :: unreviewed — bootstrapped, replace with the judgement
+tests/test_parked_reader.py :: compose :: approve;{run_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_parked_reader.py :: compose :: budget-grant:{run_id},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_parked_reader.py :: compose :: event;{name} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_parked_reader.py :: prose :: approve;% :: unreviewed — bootstrapped, replace with the judgement
+tests/test_phase0.py :: compose :: artifact:text/plain,sha256-{content_digest(_request().body)} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_phase0.py :: compose :: ledger;{committed_id(MID).stored()} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_phase0.py :: compose :: ledger;{assessed_id(MID).stored()} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_projection.py :: compose :: rec:{n};ledger;iteration:m{n} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_projection.py :: compose :: rec:{n};step:search :: unreviewed — bootstrapped, replace with the judgement
+tests/test_projection.py :: compose :: rec:{n};step:think :: unreviewed — bootstrapped, replace with the judgement
+tests/test_respawn_hazards_pending.py :: compose :: budget-grant:r-{suffix},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_serve.py :: compose :: budget-grant:{R},0 :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,2;step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,7;step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,8;step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,9;step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};ev:e{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};reply:e{i} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
