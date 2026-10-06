@@ -1,7 +1,7 @@
 [project]
 name = "effective"
 version = "0.1.0"
-description = "Agentic workflows as plain Python generators: composable, replayable, and durable. Model calls, Jev judgments, tools, and human approvals are typed ops."
+description = "Build agentic workflows from composable Python generators. A handler records each model call, Jev judgment, tool, and human approval, so a run is replayable and durable."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
