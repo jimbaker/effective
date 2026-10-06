@@ -4,10 +4,9 @@ Build agentic workflows from composable Python generators. A handler records eac
 
 An agent loop is a state machine. A workflow writes it as a plain Python generator whose frames
 hold the state, and which **yields an op** for each effect: call a model, call a tool, wait for a
-human, append to the ledger, the run's append-only record. The generator performs none of them.
-A **handler** decides what each op means, so the same generator is recorded in a test, replayed
-with no model, or run durably, where a crashed worker resumes by replaying the steps it already
-took.
+human, append to the ledger, the run's append-only record. A **handler** interprets each op, so
+the same generator is recorded in a test, replayed from that recording, or run durably, where a
+crashed worker resumes by replaying the steps it already took.
 
 The prompts are **t-strings**. A prompt is a `t"..."` whose interpolations are typed channels:
 inputs render in, and outputs declare the schema the answer must parse into. A `Gated` output runs a
