@@ -11,10 +11,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from agent.runtime import LocalCtx, make_tool_runner
 from agent.tasks import Task
+from effective.contexts import LocalCtx
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.tools import make_tool_runner
 from effective.react import Trajectory, run_agent
 
 

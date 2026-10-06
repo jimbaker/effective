@@ -28,7 +28,10 @@ if str(_ROOT) not in sys.path:
 
 from scripts.lint_mermaid import check_block, check_file, fences  # noqa: E402
 
-SCANNED = sorted(p for root in ("docs", "wiki") for p in (_ROOT / root).rglob("*.md"))
+SCANNED = [
+    _ROOT / "README.md",
+    *sorted(p for root in ("docs", "wiki") for p in (_ROOT / root).rglob("*.md")),
+]
 
 
 def ids(paths: list[Path]) -> list[str]:

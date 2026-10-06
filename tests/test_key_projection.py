@@ -299,8 +299,8 @@ def test_an_unclaimed_term_does_not_hide_the_terms_behind_it(keymap):
 def test_a_key_the_grammar_refuses_still_projects_its_claimed_frames(keymap):
     """The property that earns a second walk beside `_unframe`, which parses before it reads.
 
-    `agent.lineage.canonical` rewrites a run id to `{run}` so two runs compare, and `{` is in no
-    atom charset. Most banked names do not parse, so a projection that required one would
+    `effective.lineage.canonical` rewrites a run id to `{run}` so two runs compare, and `{` is in
+    no atom charset. Most banked names do not parse, so a projection that required one would
     shut half the corpus out of the comparison it exists for."""
     with pytest.raises(KeySyntaxError):
         parse("gather:0,0;{run}:m")
@@ -436,7 +436,7 @@ def test_the_two_peel_readers_cannot_disagree_about_what_projects(keymap):
     from the parse, and text the grammar refuses peels by tag. They part on exactly one shape, a
     foreign term whose payload is a single ATOM, and an atom carries no tag for either to
     substitute. Both of these are shapes something mints: Absurd writes the first, and
-    `agent.lineage.canonical` rewrites a run id to `{run}` to make the second."""
+    `effective.lineage.canonical` rewrites a run id to `{run}` to make the second."""
     absurd = "$awaitTaskResult:0192f0c0-0000-7000-8000-000000000000"
     assert _wrapped_payload(parse(absurd)) is None
     assert _foreign_tail(absurd) == "0192f0c0-0000-7000-8000-000000000000"

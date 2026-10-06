@@ -102,11 +102,10 @@ pythonpath = ["src"]
 # 90% *gate* is enforced only by `just cov` — the full suite against the test Postgres,
 # because the durable code paths (AbsurdHandler, the SQLite engine) need a real backend
 # to execute. A bare `--no-cov` opts an ad-hoc run out.
-addopts = "--cov=effective --cov-report=term-missing"
-# Test roles. The role decides what a passing run proves and which rules apply —
-# `minimize overlap` is a UNIT-role rule and is exactly wrong for the conformance suites, whose
-# overlap is the product. Applied to exemplars, NOT universally: there is deliberately no gate
-# requiring every test to declare a role. 
+addopts = "--strict-markers --cov=effective --cov-report=term-missing"
+# Test roles: the role decides what a passing run proves and which rules apply. "Minimize
+# overlap" is a unit-role rule, and wrong for the conformance suites, whose overlap is the product.
+# A test that declares no role is marked `unit` by `tests/conftest.py`.
 markers = [
     "unit: one seam in isolation; overlap with another unit test is waste",
     "spine: the pieces compose — overlap with unit tests is the deliverable, not waste",

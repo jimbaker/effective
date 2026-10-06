@@ -36,6 +36,8 @@ import re
 import sys
 
 BASELINE = pathlib.Path("scripts/fstring-baseline.txt")
+PRIVATE_BASELINE = pathlib.Path("scripts/fstring-private-baseline.txt")
+"""A tree that ships more than this repository keeps its own entries here; the gate reads both."""
 
 DESIGNATED: frozenset[tuple[str, str]] = frozenset(
     {
@@ -157,10 +159,13 @@ Entry = tuple[str, str]
 
 
 def load_baseline() -> dict[Entry, str]:
-    if not BASELINE.exists():
-        return {}
     entries: dict[Entry, str] = {}
-    for line in BASELINE.read_text().splitlines():
+    for line in (
+        line
+        for file in (BASELINE, PRIVATE_BASELINE)
+        if file.exists()
+        for line in file.read_text().splitlines()
+    ):
         if not line.strip() or line.startswith("#"):
             continue
         path, rest = line.split(" :: ", 1)

@@ -23,9 +23,9 @@ from agent.debug import (
     debug_loop,
     make_debug_interpreter,
 )
-from agent.precise_edit import Edit
 from effective import RecordingHandler, ReplayHandler
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.precise_edit import Edit
 
 BUGGY = "def add(a, b):\n    return a - b\n"
 
@@ -67,7 +67,7 @@ def _edit_json(path: str, old: str, new: str) -> str:
 
 
 def test_debug_loop_fixes_a_failing_test_end_to_end():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     ws = Workspace({"calc.py": BUGGY})
     assert not add_test(ws.files).passed  # the bug is real before we start
@@ -109,7 +109,7 @@ def rubric_quality(files) -> QualityReport:
 
 
 def test_staged_moo_fixes_then_cleans_up():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     ws = Workspace({"calc.py": BUGGY_UGLY})
     client, completions = _client(
@@ -180,7 +180,7 @@ def test_debug_loop_replays_without_the_model_or_tools():
 
 
 def test_no_safe_edit_leaves_the_file_untouched():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     ws = Workspace({"calc.py": BUGGY})
     bad = _edit_json("calc.py", "ghost", "x")  # anchor absent -> gate repairs, gives up

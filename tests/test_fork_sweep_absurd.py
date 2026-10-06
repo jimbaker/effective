@@ -24,9 +24,9 @@ import psycopg
 import pytest
 from _conformance import refusals_of
 from _durable import DSN, IMMEDIATE_RETRY, absurd, pg_ready
+from _spawning import absurd_spawner
 from test_fork_sweep import decision_wf, new_message_id
 
-from agent.runtime import make_tool_runner, spawn_tool
 from effective.api import append_ledger, await_event, call_tool
 from effective.bridge_absurd import read_absurd_task
 from effective.budget import BUDGET_DEPTH_PARAM
@@ -36,6 +36,7 @@ from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_t
 from effective.govern import Refused
 from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
 from effective.handlers.base import op_key
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import AppendLedgerRow, LedgerRow
@@ -127,19 +128,9 @@ def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
             )
         )
 
-        def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
-            # An INDEPENDENT connection — never the running task's ctx connection. No `reply_to`
-            # on either engine now: events are broadcast, so the done-event name is the address.
-            return str(
-                spawner_app.spawn(
-                    task_name,
-                    params,
-                    queue=queue,
-                    idempotency_key=idempotency_key,
-                    max_attempts=max_attempts,
-                    retry_strategy=IMMEDIATE_RETRY,
-                )["task_id"]
-            )
+        # An independent connection, never the running task's. Events are broadcast, so the
+        # done-event name is the address and the child needs no `reply_to`.
+        spawner = absurd_spawner(spawner_app, IMMEDIATE_RETRY)
 
         @app.register_task(f"sweep-{base_rid}", default_max_attempts=3)
         def sweep_task(params, ctx):
@@ -286,19 +277,7 @@ def test_one_idempotency_key_enqueues_one_task_on_the_deployed_engine(conn):
         def noop(params, ctx):
             return {"ok": True}
 
-        def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
-            task_id = str(
-                spawner_app.spawn(
-                    task_name,
-                    params,
-                    queue=queue,
-                    idempotency_key=idempotency_key,
-                    max_attempts=max_attempts,
-                    retry_strategy=IMMEDIATE_RETRY,
-                )["task_id"]
-            )
-            seen.append(task_id)
-            return task_id
+        spawner = absurd_spawner(spawner_app, IMMEDIATE_RETRY, seen)
 
         first = spawner(f"noop-{rid}", {"a": 1}, rid, "default")
         second = spawner(f"noop-{rid}", {"a": 1}, rid, "default")
@@ -371,17 +350,7 @@ def test_a_refused_child_answers_its_parent_on_the_DEPLOYED_engine(conn):
             )
         )
 
-        def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
-            return str(
-                spawner_app.spawn(
-                    task_name,
-                    params,
-                    queue=queue,
-                    idempotency_key=idempotency_key,
-                    max_attempts=max_attempts,
-                    retry_strategy=IMMEDIATE_RETRY,
-                )["task_id"]
-            )
+        spawner = absurd_spawner(spawner_app, IMMEDIATE_RETRY)
 
         @app.register_task(f"bad-sweep-{base_rid}", default_max_attempts=3)
         def bad_sweep(params, ctx):
@@ -441,16 +410,7 @@ def test_a_fork_of_a_base_whose_spawn_was_refused_replays_the_refusal_on_the_dep
     )
     review = compose_key(t"review:{Segment(message_id)}")
 
-    def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
-        spawned = spawner_app.spawn(
-            task_name,
-            params,
-            queue=queue,
-            idempotency_key=idempotency_key,
-            max_attempts=max_attempts,
-            retry_strategy=IMMEDIATE_RETRY,
-        )
-        return str(spawned["task_id"])
+    spawner = absurd_spawner(spawner_app, IMMEDIATE_RETRY)
 
     def spawning():
         return MeteredInterpreter(

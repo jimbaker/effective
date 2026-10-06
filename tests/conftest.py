@@ -52,6 +52,7 @@ import pytest
 # always tracks; the env var is for production, which does not run this file.
 os.environ["EFFECTIVE_TRACK_CONNECTIONS"] = "1"
 
+from effective.lint import configured
 from effective.sqlite import SqliteApp, unclosed_connections
 
 _DEFAULT_DSN = "postgresql://effective:effective@localhost:5432/effective"
@@ -219,7 +220,8 @@ def _clear_claimable_tasks(conn) -> int:
 
     A leftover claimable task spends later tests' `work_batch` claims, and a test that folds the
     WHOLE ledger into a projection passes on a clean database and fails on the next run with a
-    duplicate key. So: cancel non-terminal tasks, then truncate the ledger. A
+    duplicate key. So: cancel non-terminal tasks, then truncate the ledger and any projection a
+    tree declares in `[tool.effective.test].app_tables`. A
     marked database without the Absurd schema is a half-built fixture, refused by name."""
     import psycopg
     from _durable import cancel_leftover_runs
@@ -231,9 +233,10 @@ def _clear_claimable_tasks(conn) -> int:
             f"{_dbname(DSN)!r} is marked disposable and has no Absurd queue ({missing}); "
             "run `just pgt-up` or `just db-setup`."
         ) from missing
-    found = conn.execute("SELECT to_regclass('ledger')").fetchone()
-    if found is not None and found[0] is not None:
-        conn.execute("TRUNCATE ledger CASCADE")
+    for table in ("ledger", *(configured("app_tables", "test") or ())):
+        found = conn.execute(t"SELECT to_regclass({table})").fetchone()
+        if found is not None and found[0] is not None:
+            conn.execute(t"TRUNCATE {table:i} CASCADE")
     return cancelled
 
 
@@ -404,6 +407,21 @@ def _require_pg_if_asked() -> None:
             "Postgres with the Absurd schema and the ledger. Run `just pgt-up`, or unset "
             "the variable to let the durable tests skip."
         )
+
+
+ROLES = ("unit", "spine", "journey", "adversarial", "conformance")
+"""The test roles. A marker outside them, a future `slow` say, says nothing about a pass."""
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """A test that declares no role is a `unit` test.
+
+    A test that proves more than one seam in isolation declares which of `ROLES`, and every other
+    test is marked `unit` here, so `-m unit` selects exactly the population whose overlap is
+    waste."""
+    for item in items:
+        if not any(item.get_closest_marker(role) for role in ROLES):
+            item.add_marker(pytest.mark.unit)
 
 
 def pytest_configure(config) -> None:

@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from agent.voi import measured_prompt, should_grant
 from effective.api import step
 from effective.budget import Grant, MeasuredBudget
 from effective.cost import MeteredInterpreter, Usage
@@ -27,6 +26,7 @@ from effective.fork import (
 )
 from effective.govern import BudgetRefused
 from effective.keys import Key, Segment, compose_key
+from effective.voi import measured_prompt, should_grant
 
 STEP = 0.001  # dollars per refinement step (the surrogate's per-call cost)
 RUN = "run-b"

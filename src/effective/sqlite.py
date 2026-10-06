@@ -921,13 +921,14 @@ class SqliteApp:
         task_id = uuid7()
         limit = DEFAULT_MAX_ATTEMPTS if max_attempts is None else max_attempts
         # Under the lock, and the INSERT and its read-back together rather than separately: a
-        # workflow can spawn from inside a `gather` BRANCH (`agent.runtime.spawn_tool`, wired to
-        # this very connection), and a branch thunk runs off-lock by design. Unguarded, this
-        # method reproduced the whole family — `InterfaceError`, a `None` task id where the
-        # signature says `UUID`, lost task rows, and two DIFFERENT `idempotency_key`s handed the
-        # same `task_id`, which is precisely the at-most-once defect the docstring above says was
-        # structurally removed. Splitting the two statements would leave that last one: the
-        # winner must be read back in the same critical section that lost the race.
+        # workflow can spawn from inside a `gather` BRANCH
+        # (`effective.interpreters.tools.spawn_tool`, wired to this very connection), and a branch
+        # thunk runs off-lock by design. Unguarded, this method reproduced the whole family:
+        # `InterfaceError`, a `None` task id where the signature says `UUID`, lost task rows, and
+        # two DIFFERENT `idempotency_key`s handed the same `task_id`, which is precisely the
+        # at-most-once defect the docstring above says was structurally removed. Splitting the two
+        # statements would leave that last one: the winner must be read back in the same critical
+        # section that lost the race.
         spawned_at = time.time()
         with self.write_lock:
             inserted = self.conn.execute(

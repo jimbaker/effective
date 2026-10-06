@@ -12,16 +12,17 @@ from uuid import uuid4
 import pytest
 from _conformance import Fault, FaultCtx, FaultPosition, private
 
-from agent.compose import spawn_subagent_task
-from agent.runtime import LocalCtx, make_tool_runner, spawn_tool
 from effective.api import call_tool, gather, scoped
 from effective.budget import BUDGET_DEPTH_PARAM
 from effective.combinators import Again, Chain, Done, Turn, respawn
+from effective.compose import spawn_subagent_task
+from effective.contexts import LocalCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, Spawned, SpawnResult
 from effective.fork import spawn_fork
 from effective.govern import Refused
 from effective.handlers.absurd import DurableHandler, respawn_name, spawned_name
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, compose_key
 from effective.ops import Writer
 from effective.spawning import (

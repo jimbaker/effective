@@ -1788,3 +1788,49 @@ def test_the_legitimate_joins_are_designated_BY_POSITION():
     # spellings above, moved elsewhere.
     assert _forged("x = TERM_SEPARATOR.join([*kept, rest])\n")
     assert _forged("x = TERM_SEPARATOR.join(parts)\n")
+
+
+# --- configuration a larger tree adds -------------------------------------------------------
+
+
+def _tree(tmp_path, pyproject: str):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "pyproject.toml").write_text(pyproject)
+    (tmp_path / "priv").mkdir()
+    return tmp_path
+
+
+def test_a_configured_value_of_the_wrong_shape_raises(tmp_path, monkeypatch):
+    from effective.lint import configured
+
+    monkeypatch.chdir(_tree(tmp_path, '[tool.effective.lint]\nextra_paths = "priv"\n'))
+    with pytest.raises(TypeError, match="extra_paths"):
+        configured("extra_paths")
+
+
+def test_configured_roots_resolve_against_the_pyproject_that_names_them(tmp_path, monkeypatch):
+    from effective.lint import configured_roots
+
+    root = _tree(tmp_path, '[tool.effective.lint]\nextra_paths = ["priv"]\n')
+    (root / "sub").mkdir()
+    monkeypatch.chdir(root / "sub")
+    assert configured_roots("--deps", ["."]) == []  # `priv` is under neither root given
+    assert configured_roots("--deps", ["x"]) == ["../priv"]
+
+
+def test_a_configured_root_that_does_not_exist_raises(tmp_path, monkeypatch):
+    from effective.lint import configured_roots
+
+    monkeypatch.chdir(_tree(tmp_path, '[tool.effective.lint]\nextra_paths = ["gone"]\n'))
+    with pytest.raises(FileNotFoundError, match="gone"):
+        configured_roots("--deps", ["src"])
+
+
+def test_a_nearer_pyproject_without_the_table_does_not_hide_the_roots(tmp_path, monkeypatch):
+    from effective.lint import configured
+
+    root = _tree(tmp_path, '[tool.effective.lint]\nextra_paths = ["priv"]\n')
+    (root / "member").mkdir()
+    (root / "member" / "pyproject.toml").write_text('[project]\nname = "member"\n')
+    monkeypatch.chdir(root / "member")
+    assert configured("extra_paths") == ["priv"]

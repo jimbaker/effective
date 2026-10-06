@@ -186,8 +186,8 @@ def approval_name(op: WorkflowOp) -> Key:
     the generation is licensed as an identity source only because ordinary workflow code sets it
     from the task's own params, so a handler-applied version would be absent on the replay walk
     (`ops.CHAIN_GENERATION`'s docstring makes the argument). An author who both replaces this name
-    and respawns must carry the generation themselves, the way `agent/voi.py` passes an explicit
-    `generation=0` and says why."""
+    and respawns must carry the generation themselves, the way `effective/voi.py` passes an
+    explicit `generation=0` and says why."""
     # `generation` is bound to a NAME because a template's hole expressions become the registry's
     # field names, and `current_generation()` is not one. The op hole keeps its `placed_key(op)`
     # spelling, which two tests pin as the field name.

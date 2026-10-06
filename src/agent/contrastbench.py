@@ -36,11 +36,11 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
-from agent.compose import code_act
 from agent.tasks import task_scope
 from effective.api import Effect, ask_llm, scoped
 from effective.code import EXECUTE_TOOL, CodeOutcome, run_code
 from effective.combinators import route
+from effective.compose import code_act
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
 from effective.envelope import Envelope, JsonEnvelope

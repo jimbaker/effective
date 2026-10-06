@@ -166,7 +166,7 @@ def past_frames(key: str, *, drop: tuple[str, ...] = FRAME_ARMS) -> str:
     mint (`keys.marker.Index`).
 
     **Total over STRINGS, not just over the language.** A caller legitimately hands it text that
-    is deliberately not a key: `agent.lineage.canonical` rewrites a scope token to the hole
+    is deliberately not a key: `effective.lineage.canonical` rewrites a scope token to the hole
     `{run}`, and `gather:0,2;ledger;{run}:m-fan` must still fold. Such text falls back to a walk
     over the term separator alone, where a frame boundary needs no more than that — a term ends
     at `;`, and there are no terms to read a wrapper from."""

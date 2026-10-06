@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from _coder_script import FIXED, MODULE, SEED, Deployment, acting, fixing
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 from _fence import after, parse, within
 
 from effective.api import Effect
@@ -362,10 +362,8 @@ def test_the_run_survives_a_crash_at_every_op_on_both_engines(backend, position)
     unarmed = Fault(position=position)
     assert run_fixing(backend, unarmed).state == "completed"
     assert unarmed.count == FIXING_OPS[position], "the run changed shape; re-derive the bound"
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         snap = run_fixing(backend, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert fixed(snap.result) == FIXING, k
 

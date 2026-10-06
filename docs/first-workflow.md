@@ -1,9 +1,9 @@
 # Your first workflow
 
-One file, run four ways, with no model and no database. `examples/first_workflow.py` is a house
-agent: it asks a model for a setpoint, sets the thermostat, and records what it did. Running it
-records a run, replays it without the model, shows a guardrail refusing a bad answer, and shows
-replay refusing a program whose steps changed.
+One file, run three ways, with no model and no service. `examples/first_workflow.py` is a house
+agent: it asks a model for a setpoint, sets the thermostat, and records what it did. It runs as a
+durable task on the embedded SQLite engine, in a temporary file: once as it should, once through
+a thermostat outage that the retry resumes, and once with a guardrail refusing a bad answer.
 
 ## Run it
 
@@ -18,38 +18,44 @@ uv run python examples/first_workflow.py
 The first `uv sync` installs the whole development environment, so give it a minute or two. Then:
 
 ```text
-record:    22.0 via step:setpoint step;tool:thermostat ledger;setpoint:r1
-replay:    22.0 with no model and no thermostat
-guardrail: Repair(reason='celsius outside the allowed range') via step:setpoint
-drift:     ReplayMismatch: workflow ended after 1 ops but 3 were recorded
+run:       22.0 via step:setpoint step;tool:thermostat ledger;setpoint:r1
+resume:    22.0 after an outage: 2 attempts, and the model was asked 1 time
+guardrail: {'reason': 'celsius outside the allowed range'} via step:setpoint
 ```
 
 `uv run pytest --no-cov tests/test_first_workflow.py` pins each of those lines, and this block.
 
 ## The workflow
 
-<!-- splice: examples/first_workflow.py::imports -->
+<!-- source: examples/first_workflow.py -->
 ```python
-from typing import assert_never
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, assert_never
 
 from pydantic import BaseModel
 
 from effective import (
     Effect,
-    RecordingHandler,
-    ReplayHandler,
-    ReplayMismatch,
+    MeteredInterpreter,
     Subject,
+    Usage,
     append_ledger,
     ask_llm,
     call_tool,
     compose_key,
 )
 from effective.channels import Gated, Repair, render
+from effective.checkpoints import keys, read_sqlite_task
+from effective.domain import AskLLM, CallTool
+from effective.handlers.absurd import DurableHandler
+from effective.layers import OpLayer
 from effective.ops import LedgerRow
+from effective.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 ```
 
-<!-- splice: examples/first_workflow.py::Setpoint,set_temperature -->
+<!-- source: examples/first_workflow.py -->
 ```python
 class Setpoint(BaseModel):
     celsius: float
@@ -94,37 +100,89 @@ hand. It checks every function in the file, `main` included, so a driver that re
 belongs in its own module. `just lint` runs the same check over the workflow files registered in
 `WORKFLOW_ROLE_SRCS` (in `src/effective/lint.py`), and this example is one of them.
 
-## Running it four ways
+## Running it durably
 
-<!-- splice: examples/first_workflow.py::RESPONSES,main -->
+<!-- source: examples/first_workflow.py -->
 ```python
-RESPONSES = {"setpoint": {"celsius": 22}, "tool:thermostat": "set to 22°C"}
+@dataclass
+class House:
+    """The world the ops reach: a model that always answers `celsius`, and a thermostat that is
+    offline for its first `outages` calls. `attempts` counts the times the task ran."""
+
+    celsius: float = 22
+    outages: int = 0
+    asked: int = 0
+    attempts: int = 0
+
+    def model(self, op: AskLLM[Any]) -> tuple[dict[str, float], Usage]:
+        self.asked += 1
+        return {"celsius": self.celsius}, Usage()
+
+    def thermostat(self, op: CallTool[Any]) -> str:
+        if self.outages:
+            self.outages -= 1
+            raise ConnectionError("the thermostat is offline")
+        return f"set to {op.args['celsius']}°C"
+
+
+def run_durably(
+    house: House, request: str, layers: tuple[OpLayer[Any], ...] = ()
+) -> tuple[TaskSnapshot, tuple[str, ...]]:
+    """Run `set_temperature` as a task on the embedded SQLite engine, in one temporary file.
+
+    A failed attempt is retried, and the retry replays the steps the file already holds."""
+    with tempfile.TemporaryDirectory() as directory:
+        db = Path(directory) / "house.db"
+        app = SqliteApp(str(db))
+
+        @app.register_task("set-temperature")
+        def task(params: dict[str, str], ctx: Any) -> float | Repair:
+            house.attempts += 1
+            domain = MeteredInterpreter(llm=house.model, tools=house.thermostat)
+            ledger = SqliteLedger(app.conn, params["request_id"], app.write_lock)
+            handler = DurableHandler(ctx, domain, ledger=ledger, op_layers=layers)
+            return handler.run(lambda: set_temperature(params["request_id"], params["request"]))
+
+        try:
+            run = app.spawn("set-temperature", {"request_id": "r1", "request": request})
+            if (done := app.run_until_result(run)) is None:
+                raise RuntimeError("the task parked, and set_temperature never waits")
+            return done, keys(read_sqlite_task(db, run))
+        finally:
+            app.close()
 
 
 def main() -> None:
-    recorder = RecordingHandler(RESPONSES)
-    target = recorder.run(lambda: set_temperature("r1", "make it warmer"))
-    print("record:   ", target, "via", *(entry.key.stored() for entry in recorder.trace))
+    done, steps = run_durably(House(), "make it warmer")
+    print("run:      ", done.result, "via", *steps)
 
-    replayed = ReplayHandler(recorder.trace).run(lambda: set_temperature("r1", "make it warmer"))
-    print("replay:   ", replayed, "with no model and no thermostat")
+    house = House(outages=1)
+    done, _ = run_durably(house, "make it warmer")
+    print(
+        "resume:   ",
+        done.result,
+        f"after an outage: {house.attempts} attempts, and the model was asked {house.asked} time",
+    )
 
-    hot = RecordingHandler({"setpoint": {"celsius": 45}})
-    refused = hot.run(lambda: set_temperature("r2", "make it much warmer"))
-    print("guardrail:", refused, "via", *(entry.key.stored() for entry in hot.trace))
-
-    try:
-        ReplayHandler(recorder.trace).run(lambda: set_temperature("r1", "make it warmer", 20))
-    except ReplayMismatch as drift:
-        print("drift:     ReplayMismatch:", drift)
+    house = House(celsius=45)
+    done, steps = run_durably(house, "make it much warmer")
+    print("guardrail:", done.result, "via", *steps)
 ```
+
+`House` is the world the ops reach: a model that always gives the same answer, and a thermostat
+that can be offline. `MeteredInterpreter` connects the two to the op kinds: `llm` answers an
+`AskLLM` with the answer and its token usage, and `tools` answers a `CallTool`. `run_durably`
+registers the workflow as a task on `SqliteApp`, spawns it, and runs it until it ends.
 
 | output line | what happened |
 |---|---|
-| `record` | `RecordingHandler` answers each op from `RESPONSES`, keyed by the op's name: `setpoint` for the model step, and `tool:thermostat` for the tool. `run` takes a zero-argument function that builds the generator, hence each `lambda`. The trace prints each op's full key, where `;` joins the terms of one key: `step:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`. `recorder.ledger` holds the row itself |
-| `replay` | `ReplayHandler` takes the trace and no responses. It re-executes the workflow and serves each op its recorded result, which is how a durable engine resumes a run after a crash. The workflow never names its handler, so swapping one needs no edit to it |
-| `guardrail` | the model answers 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. This handler has no canned thermostat answer, so reaching the tool would have raised |
-| `drift` | lowering `ceiling` to 20 makes the same recorded answer fail the check, so the program stops after one op. Replay compares that with the three recorded ops and raises `ReplayMismatch`: the history no longer describes this program. Replay matches ops by name and order, so a changed prompt, tool argument, result type, or ledger field other than the row's id replays silently, served the recorded result |
+| `run` | `DurableHandler` runs each op as a checkpointed step of the task, so the file records each answer before the workflow sees it. The keys printed are those checkpoints: `step:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`, where `;` joins the terms of one key |
+| `resume` | the thermostat is offline on the first attempt, so the attempt fails and the engine retries the task: two attempts. The retry runs the workflow from the top, the file answers `setpoint` with the recorded result, and only the thermostat call runs again: the model was asked once. Nothing is captured from a frame; suspension is replay |
+| `guardrail` | the model answers 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. A task's result is stored as JSON, so the `Repair` comes back as its fields |
+
+The workflow never names its handler. `examples/testing_a_workflow.py` runs the same
+`set_temperature` under the two test handlers, with canned answers and then a replay that refuses
+a changed program; `wiki/concepts/testing.md` says what each is for.
 
 ## What you imported
 
@@ -132,16 +190,22 @@ def main() -> None:
 |---|---|---|
 | `Effect` | `effective` | the type of a workflow: a generator that yields ops and returns a result |
 | `ask_llm`, `call_tool`, `append_ledger`, `step` | `effective` | the author surface: typed wrappers you `yield from` |
-| `RecordingHandler`, `ReplayHandler`, `ReplayMismatch` | `effective` | two interpreters, and replay's refusal |
 | `compose_key`, `Subject`, `Run`, `Name`, `Index`, `Ordinal` | `effective` | identities built from t-strings, and what each coordinate means |
+| `MeteredInterpreter`, `Usage` | `effective` | what answers a model call and a tool call, and a model call's token usage |
 | `Gated`, `Repair`, `render` | `effective.channels` | the data axis: typed prompt channels |
 | `ChannelMismatchError` | `effective.channels` | what `render` raises when the channels and the fields of `output=` disagree |
 | `LedgerRow` | `effective.ops` | the typed shape of a ledger append |
 | `AskLLM`, `Judge`, `CallTool` | `effective.domain` | what a step carries; `ask_llm`, `judge` and `call_tool` build them for you |
+| `DurableHandler` | `effective.handlers.absurd` | the handler that runs each op as a checkpointed step, on either engine |
+| `SqliteApp`, `SqliteLedger`, `TaskSnapshot` | `effective.sqlite` | the embedded engine: one file, no service; its ledger; a task's ending |
+| `keys`, `read_sqlite_task` | `effective.checkpoints` | a task's checkpoints, read back in commit order |
+| `OpLayer` | `effective.layers` | the type of a layer, the hooks of `examples/hooks_as_layers.py` |
 
 ## Where next
 
 | to | read |
 |---|---|
+| the model in ten minutes: generator, handler, tape, layers, combinators | [intro.md](intro.md) |
 | the op set, the author surface, and why resume is replay | [effective-101.md](effective-101.md) §2, §3 and §5.3 |
 | park for a human with `await_event`, resumed by replay | [effective-101.md](effective-101.md) §5.3, and `await_event` in `src/effective/api.py` |
+| testing a workflow | `wiki/concepts/testing.md` |

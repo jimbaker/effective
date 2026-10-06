@@ -12,7 +12,7 @@ from typing import Any, assert_never
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 
 from effective.api import Effect, call_tool, qualified_event_name
 from effective.budget import Grant, depth_grant_name
@@ -232,10 +232,8 @@ def test_a_human_grant_adds_visits_across_a_crash_at_every_op_on_both_engines(ba
     assert unarmed.count == GRANT_CYCLE_OPS[position], (
         "the walk changed shape; re-derive the bound"
     )
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         snap, domain, run_id = run_granted(backend, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert snap.result == {"visits": 3, "stopped": "machine-parked"}, k
         assert backend.ledger_kinds(run_id) == ["machine-committed", "machine-parked"], k

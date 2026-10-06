@@ -11,7 +11,7 @@ A transcript's `effective.cache_hit_ratio` lands in the attribute the live GSM8K
 a recorded production trace and a controlled local experiment read on one dial. In a long agent
 session the cache ratio is the dominant term in cost.
 
-    python -m agent.session_telemetry <session.jsonl> [--sidecar out.jsonl]
+    python -m effective.session_telemetry <session.jsonl> [--sidecar out.jsonl]
 """
 
 import argparse

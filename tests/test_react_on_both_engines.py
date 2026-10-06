@@ -7,15 +7,15 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 from _gate import at_spend
 
-from agent.compose import ASK_HUMAN, Interrupted, make_act, tool_interrupt
 from effective import Allow, Deny, cascade, rules
 from effective.api import Effect, qualified_event_name, scoped
 from effective.budget import MeasuredBudget
 from effective.budget import as_policy as budget_policy
 from effective.combinators import Level
+from effective.compose import ASK_HUMAN, Interrupted, make_act, tool_interrupt
 from effective.domain import INTERRUPT_TOOL, AskLLM, CallTool, DomainOp
 from effective.govern import BudgetRefused, Proceed, Refused, govern, routable
 from effective.keys import Index, Run, compose_key
@@ -28,6 +28,8 @@ from effective.react import (
     TrajectorySummary,
     run_agent,
 )
+
+pytestmark = pytest.mark.conformance
 
 DANGER = AssistantTurn(thought="risky", tool=ToolRequest(name="danger"))
 SAFE = AssistantTurn(thought="safe", tool=ToolRequest(name="safe"))
@@ -243,10 +245,8 @@ def test_an_interrupted_compacting_asking_loop_survives_a_crash_at_every_op(back
     assert snap.result == MIXED
     assert golden.counts() == (4, 2, 8, 1)
     assert unarmed.count == MIXED_OPS[position], "the loop changed shape; re-derive the bound"
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         snap, domain = run_mixed(backend, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert snap.result == MIXED, k
         if position is FaultPosition.BEFORE_OP:

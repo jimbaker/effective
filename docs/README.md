@@ -16,9 +16,11 @@ tree as it is; what changed and why goes in the commit message.
 ## What a reader opens first
 
 ```
-run something first? ─────────────► first-workflow.md        (one command: record, replay)
+run something first? ─────────────► first-workflow.md        (one command: run, resume, guardrail)
                                        │
-new to Effective? ────────────────► effective-101.md         (the concepts, in order)
+new to Effective? ────────────────► intro.md                 (the model in ten minutes)
+                                       │
+the concepts in depth? ───────────► effective-101.md         (the concepts, in order)
                                        │
 need the semantics? ──────────────► effective-design.md      (ops, small-step rules, keys)
                                        │

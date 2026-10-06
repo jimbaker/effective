@@ -588,8 +588,8 @@ class KeyMap:
         **Not `_unframe`, and the difference is what each reads.** `_unframe` parses first, so a
         key outside the language comes back whole and no frame is reached. This splits TEXT, which
         is the totality `fold_cycles` is held to: a caller scrubs run ids to `{run}` before
-        comparing two runs (`agent.lineage.canonical`), and a scrubbed key must still fold. Over
-        the banked corpus **465 of 828 names do not parse** (2026-09-12; the corpus re-banks
+        comparing two runs (`effective.lineage.canonical`), and a scrubbed key must still fold.
+        Over the banked corpus **465 of 828 names do not parse** (2026-09-12; the corpus re-banks
         routinely, so recount).
 
             gather:0,0;{run}:m   ->  gather:*,*;{run}:m
@@ -656,11 +656,11 @@ class KeyMap:
 
         **Two readers, because a scrubbed key has no terms to read.** `wrapped` answers from the
         parse and is the authority. A caller comparing two runs rewrites run ids to `{run}` first
-        (`agent.lineage.canonical`), which puts the key outside the language, and a park behind a
-        wrapper would then keep the branch coordinate its unwrapped sibling drops. So off-language
-        text peels by tag. It needs no guard beyond that: only a term some variant claims is ever
-        substituted, so a payload in another vocabulary comes back byte for byte with `claimed`
-        False, which is the answer `wrapped` gives on the parseable side."""
+        (`effective.lineage.canonical`), which puts the key outside the language, and a park behind
+        a wrapper would then keep the branch coordinate its unwrapped sibling drops. So
+        off-language text peels by tag. It needs no guard beyond that: only a term some variant
+        claims is ever substituted, so a payload in another vocabulary comes back byte for byte
+        with `claimed` False, which is the answer `wrapped` gives on the parseable side."""
         payload: str | None
         try:
             payload = _wrapped_payload(parse(text))

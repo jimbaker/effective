@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 from _fence import within
 
 from effective.api import Effect
@@ -143,10 +143,8 @@ def test_the_recursion_survives_a_crash_at_every_op_on_both_engines(backend, pos
     _run_id, snap = run_recursive(backend, unarmed, depth=2)
     assert snap.state == "completed", snap
     assert unarmed.count == SWEEP_OPS[position], "the run changed shape; re-derive the bound"
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         _run_id, snap = run_recursive(backend, fault, depth=2)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert snap.result["summary"] == "the root goal", k
 

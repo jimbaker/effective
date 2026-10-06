@@ -21,11 +21,11 @@ import pytest
 from _conformance import IMMEDIATE_RETRY, private
 from _durable import DSN, pg_ready
 
-from agent.runtime import make_tool_runner, spawn_tool
 from effective.api import call_tool
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnResult
 from effective.handlers.absurd import DurableHandler, spawn_done_name
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, Writer
 

@@ -13,7 +13,6 @@ the sugar adds no replay machinery of its own.
 import pytest
 from pydantic import TypeAdapter
 
-from agent.compose import code_act
 from effective.api import GatherBranch, await_event, qualified_event_name, scoped, step
 from effective.budget import Grant, depth_grant_name
 from effective.code import CodeOutcome, run_code
@@ -36,6 +35,7 @@ from effective.combinators import (
     tree_search,
     unfold,
 )
+from effective.compose import code_act
 from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Index, Segment, compose_key

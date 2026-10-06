@@ -24,7 +24,6 @@ from _durable import run_until_result
 from _shapes import Program, Shape, agree, ledger_ids, placed, run, sweep, sweep_pairs
 from pydantic import TypeAdapter
 
-from agent.runtime import make_tool_runner, spawn_tool
 from effective.api import Effect, append_ledger, call_tool, gather, scoped
 from effective.budget import BUDGET_DEPTH_PARAM
 from effective.combinators import (
@@ -45,10 +44,13 @@ from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp, SpawnArgs, Spawned, SpawnResult
 from effective.handlers.absurd import spawn_done_name
 from effective.handlers.base import op_key
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Index, Key, Run, Segment, compose_key
 from effective.ops import DONE_EVENT_PARAM, LedgerRow, Step, Writer
 from effective.permission import APPROVE, Allow, Escalate, cascade, human, rules
 from effective.spawning import join_answer, spawn_child
+
+pytestmark = pytest.mark.conformance
 
 DEPTH = 3
 ROOT = ""

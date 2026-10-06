@@ -14,10 +14,9 @@ is measuring nothing.
 **Cover the DRIVER, not just the ctx, and that omission cost a blocker.** The first version of
 this module drove `peek_event` and `step` only, because the fix had been scoped by reading
 `SqliteTaskContext`. `SqliteApp.spawn` was equally unguarded and equally reachable from a branch
-thread (`agent.runtime.spawn_tool` is wired to the app's own connection), so the instrument was
-structurally incapable of seeing the second half of its own bug — a fresh-eyes review found it.
-The question to ask of anything added here is not "does this exercise the lock" but **"what else
-can a branch thread reach?"**
+thread (`effective.interpreters.tools.spawn_tool` is wired to the app's own connection), so the
+instrument could not see the second half of its own bug; a fresh-eyes review found it. Ask of
+anything added here **"what else can a branch thread reach?"**
 
 Why the seam and not the workflow: the conformance-lane version of this flake reproduced at a
 few percent, drifting with machine state (see `scripts/sqlite_flake_sweep.py`). Driving the
@@ -157,10 +156,10 @@ def test_a_lockless_context_still_serves_the_single_threaded_case(sqlite_app):
 def test_concurrent_spawns_never_alias_two_idempotency_keys_onto_one_task(sqlite_app):
     """The DRIVER half: concurrent spawns from gather branches.
 
-    A workflow may `spawn` from inside a gather branch (`agent.runtime.spawn_tool`, whose only
-    wiring hands it the app's own connection), and a branch thunk runs off-lock. Unguarded,
-    `SqliteApp.spawn` races on the shared connection and produces `InterfaceError`, a `None`
-    returned where the signature says `UUID`, lost task rows, and **two different
+    A workflow may `spawn` from inside a gather branch (`effective.interpreters.tools.spawn_tool`,
+    whose only wiring hands it the app's own connection), and a branch thunk runs off-lock.
+    Unguarded, `SqliteApp.spawn` races on the shared connection and produces `InterfaceError`, a
+    `None` returned where the signature says `UUID`, lost task rows, and **two different
     `idempotency_key`s answered with one `task_id`**.
 
     That last one is the reason this test is `adversarial` rather than a smoke test: it breaks

@@ -23,14 +23,16 @@ import sys
 
 import psycopg
 
+from effective.lint import configured
+
 QUEUE_TABLE_PREFIXES = ("t_", "c_", "e_", "r_")
 """Absurd's per-queue tables: tasks, checkpoints, events, runs (`absurd.sql`). One set per queue,
 so the list has to be discovered rather than hard-coded."""
 
-APP_TABLES = ("ledger",)
-"""The substrate's canonical record. A consumer that builds a projection from it adds that table
-here, so the two are truncated together: a ledger without its projection is a state no rebuild
-produces."""
+APP_TABLES = ("ledger", *(configured("app_tables", "test") or ()))
+"""The substrate's canonical record, and the projections a tree builds from it, declared in
+`[tool.effective.test].app_tables`. They are truncated together: a ledger without its projection
+is a state no rebuild produces."""
 
 
 def clean(dsn: str) -> str:

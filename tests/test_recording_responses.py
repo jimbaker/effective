@@ -14,8 +14,6 @@ from effective.api import Effect, ask_llm, step
 from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler
 
-pytestmark = pytest.mark.unit
-
 
 class Computed(Mapping[str, object]):
     """A responder with no items at all — every answer is derived from the key it is asked for.

@@ -248,7 +248,7 @@ class GateState:
     the same "a call site cannot forget it" discipline `combinators.respawn` applies to `descend`.
 
     **Defaulted, unlike `depth_grant_name`'s, and the difference is the caller set**.
-    That one refuses a default because `agent/voi.py` composes it from OUTSIDE the
+    That one refuses a default because `effective/voi.py` composes it from OUTSIDE the
     substrate and silently got 0; the danger there is real and unowned. This field has exactly one
     non-test construction site, inside `govern` itself, which reads the ambient — so a default
     cannot be silently taken by anyone who matters. It also sits beside `pass_n` and `occurrence`,

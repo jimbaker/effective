@@ -16,92 +16,18 @@ trajectory once. `recorded.cache_hit_ratio` carries the KV-cache metric a live r
 populates (here the scripted usages leave it 0).
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from agent.runtime import AgentTool, ToolFn, make_tool_runner
 from agent.tasks import Task
+from effective.contexts import RecordingCtx, ReplayCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
 from effective.handlers.absurd import DurableHandler
-from effective.keys import Key
+from effective.interpreters.scripted import scripted_caller
+from effective.interpreters.tools import AgentTool, ToolFn, make_tool_runner
 from effective.react import AssistantTurn, Trajectory, run_agent
-
-
-class RecordingCtx:
-    """A durable-shaped ctx that runs each step for real and logs its result by name."""
-
-    def __init__(self) -> None:
-        self.log: dict[Key, Any] = {}
-
-    def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
-        result = thunk()
-        self.log[name] = result
-        return result
-
-    def await_event(self, name: Key) -> Any:
-        raise NotImplementedError("bench tasks must not suspend — see test_hitl for HITL replay")
-
-    def sleep_until(self, when: Any, /, *, name: Any = None) -> None:
-        return None
-
-
-class ReplayCtx:
-    """Replays a `RecordingCtx.log`: a step returns its logged result, thunk never run.
-
-    Because the thunk is what would call the model or a tool, replay performs no I/O. A
-    step whose name is absent from the log is a control-flow divergence (`KeyError`)."""
-
-    def __init__(self, log: Mapping[Key, Any]) -> None:
-        self.log = dict(log)
-
-    def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
-        return self.log[name]
-
-    def await_event(self, name: Key) -> Any:
-        raise NotImplementedError("bench tasks must not suspend — see test_hitl for HITL replay")
-
-    def sleep_until(self, when: Any, /, *, name: Any = None) -> None:
-        return None
-
-
-class ResumeCtx:
-    """Resume after a crash: a step already in `log` replays (thunk not run); a step
-    missing from it re-executes (and is logged). Models recovery — only the steps that
-    had not checkpointed before the crash run again. `ran` records what re-executed, so a
-    test can assert a durable subagent *resumed* (only its tail re-ran) rather than restarted."""
-
-    def __init__(self, log: Mapping[Key, Any]) -> None:
-        self.log = dict(log)
-        self.ran: list[Key] = []
-
-    def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
-        if name in self.log:
-            return self.log[name]
-        result = thunk()
-        self.log[name] = result
-        self.ran.append(name)
-        return result
-
-    def await_event(self, name: Key) -> Any:
-        raise NotImplementedError("bench tasks must not suspend — see test_hitl for HITL replay")
-
-    def sleep_until(self, when: Any, /, *, name: Any = None) -> None:
-        return None
-
-
-def scripted_caller(turns: list[tuple[AssistantTurn, Usage]]) -> Callable[[AskLLM[Any]], Any]:
-    """A deterministic `LLMCall`: return each `(AssistantTurn, Usage)` in order.
-
-    The stand-in for a real model on the record pass, so a bench runs in CI with no
-    provider; swap in a real channel caller for a live cost/cache measurement."""
-    it = iter(turns)
-
-    def call(op: AskLLM[Any]) -> Any:
-        return next(it)
-
-    return call
 
 
 @dataclass(frozen=True)

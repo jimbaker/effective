@@ -70,6 +70,7 @@ import sys
 from ast_grep_py import SgRoot
 
 from effective.keys.grammar import KeySyntaxError, parse
+from effective.lint import configured
 
 REGISTRY = pathlib.Path("build/key-registry.json")
 
@@ -351,6 +352,7 @@ def sweep(roots, tags, want):
 # --- the baseline, and the stale rule that makes it a ratchet ----------------------------------
 
 BASELINE = pathlib.Path("scripts/key-sweep-baseline.txt")
+PRIVATE_BASELINE = pathlib.Path("scripts/key-sweep-private-baseline.txt")
 
 type Entry = tuple[str, str, str]
 """`(path, rule, token)` — deliberately NOT the line number.
@@ -361,10 +363,14 @@ MOVED is the same finding and a finding that was FIXED is the only thing that di
 
 
 def load_baseline() -> dict[Entry, str]:
-    if not BASELINE.exists():
-        return {}
+    """The shared baseline and, where a tree that ships more keeps one, its private baseline."""
     out: dict[Entry, str] = {}
-    for line in BASELINE.read_text().splitlines():
+    for line in (
+        line
+        for file in (BASELINE, PRIVATE_BASELINE)
+        if file.exists()
+        for line in file.read_text().splitlines()
+    ):
         if not (line := line.strip()) or line.startswith("#"):
             continue
         path, rule, token, reason = (part.strip() for part in line.split(" :: ", 3))
@@ -425,7 +431,10 @@ def main(argv: list[str]) -> int:
     want = {"compose"} if args.compose else {"prose"} if args.prose else {"compose", "prose"}
 
     tags = registry()
-    roots = args.paths or ["src", "docs", "tests", "scripts", "examples", ".claude"]
+    roots = args.paths or [
+        *("src", "docs", "tests", "scripts", "examples", ".claude"),
+        *(configured("extra_paths_key_sweep") or ()),
+    ]
     found = sweep(roots, tags, want)
 
     if args.init_baseline:

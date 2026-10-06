@@ -1,17 +1,13 @@
-"""Composing an agent loop — workflow-side `act` builders (HITL, …).
+"""Composing an agent loop: workflow-side `act` builders.
 
-The loop (`effective.react`) is a durable driver; *what an action does* is the `act`
-seam. This module builds `act`s that compose with algebraic effects:
+The loop (`effective.react`) is a durable driver, and what an action does is the `act` seam. This
+module builds `act`s from effects. Human-in-the-loop is a tool that suspends: `make_act` routes a
+designated "ask" tool to an `await_event` in place of a `call_tool`, so the loop parks durably
+until a person answers and threads the answer back as the next observation. It is the mechanism
+the permission `human` tier uses, lifted to the agent boundary: one tool name yields another op.
 
-- **HITL is a tool that suspends.** `make_act` routes a designated "ask" tool to an
-  `await_event` instead of a `call_tool` — so the loop *parks durably* until a human
-  answers, then threads the answer back as the next observation. This is the same
-  suspend/resume mechanism the permission `human` tier uses (proven to survive
-  crash/replay on the durable path), lifted to the agent boundary: no new machinery,
-  just a different op yielded for one tool name.
-
-The handler-side compositions (a subagent as an opaque tool, the local ctxs) live
-in `agent.runtime`; the two sides meet at the `CallTool` / `AwaitEvent` ops.
+The handler side (a subagent as an opaque tool) is in `effective.interpreters.tools`; the two
+sides meet at the `CallTool` and `AwaitEvent` ops.
 """
 
 import json
@@ -135,7 +131,7 @@ def spawn_subagent(
     max_iters: int = 4,
 ) -> Effect[ToolResult]:
     """Run a nested `run_agent` **inline** under the parent's handler, namespaced by
-    `name`: the *durable* subagent, complementing `runtime.subagent_runner`.
+    `name`: the *durable* subagent, complementing `effective.interpreters.tools.subagent_runner`.
 
     Because the child's ops flow through the parent's handler/ctx (inside
     `scoped(compose_key(t"sub:{Name(name)}"))`),
@@ -175,16 +171,17 @@ def spawn_subagent_task(
 ) -> Effect[ToolResult]:
     """Spawn `child_task` as its **own durable Absurd task** and await its completion.
 
-    The third corner of the subagent design (`runtime.subagent_runner` is opaque-but-
-    restart; `spawn_subagent` is durable-but-visible): this is **opaque AND durable**. The
-    parent's trace is just a `spawn` `CallTool` (checkpointed → idempotent on replay,
+    The third corner of the subagent design (`effective.interpreters.tools.subagent_runner` is
+    opaque but restarts; `spawn_subagent` is durable but visible): this is **opaque AND durable**.
+    The parent's trace is just a `spawn` `CallTool` (checkpointed → idempotent on replay,
     so a parent crash never re-spawns) followed by an `AwaitEvent` on the child's
     completion (which *suspends*, releasing the worker — deadlock-free on one queue). The
     child runs as a separate task with its **own** checkpoints, so a parent crash never
     restarts it and a child crash never restarts the parent. The true fork point.
 
     `correlation` names the spawn op, and the handler names the done event from where that op is
-    placed, so replay re-binds both. The handler-side `runtime.spawn_tool` performs the spawn.
+    placed, so replay re-binds both. The handler-side `effective.interpreters.tools.spawn_tool`
+    performs the spawn.
 
     The handler holds the spawn to this task's depth, refuses one past it with `Refused`, and
     gives the child one level less.

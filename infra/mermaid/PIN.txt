@@ -1,0 +1,10 @@
+# Pinned mermaid-cli image for rendering the Mermaid fences in README.md, docs/ and wiki/.
+# Reference it ONLY by digest, never by the mutable :latest tag. It runs under rootless
+# Podman with --network=none: mmdc renders a local file and needs nothing else.
+# GitHub renders the fences itself; this image is how an author looks at a diagram first.
+
+image:   docker.io/minlag/mermaid-cli
+version: 11.16.0
+digest:  sha256:eddb559ae44da41de9e1adfa04687516de53c26016b258fd7ab35c9999313d7e
+pulled:  2026-10-04
+engine:  podman (rootless)

@@ -20,13 +20,13 @@ import pytest
 from _conformance import Fault, private
 from _durable import DSN, IMMEDIATE_RETRY, pg_ready
 
-from agent.runtime import make_tool_runner, spawn_tool
 from effective.api import ask_llm, await_event, call_tool, gather
 from effective.budget import MeasuredBudget
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.handlers.absurd import DurableHandler
 from effective.handlers.recording import RecordingHandler
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Run, compose_key
 from effective.ops import CompositionRefused, leaves
 from effective.spawning import (

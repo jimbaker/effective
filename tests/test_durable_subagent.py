@@ -7,19 +7,24 @@ after the child's *tool* step but before its final turn, and resume: only the ch
 un-checkpointed tail re-runs — the already-checkpointed turn and tool replay, the tool
 never re-executes. The child *resumed* rather than restarted.
 
-Contrast with `runtime.subagent_runner` (the opaque, restart-on-crash child): there the
-whole child is one parent Step. Here the child trades trace-opacity for durability; its
+Contrast with `effective.interpreters.tools.subagent_runner` (the opaque, restart-on-crash child):
+there the whole child is one parent Step. Here the child trades trace-opacity for durability; its
 cost lands on the parent meter directly (no telemetry-peek needed).
 """
 
-from agent.bench import RecordingCtx, ResumeCtx, scripted_caller
-from agent.compose import spawn_subagent
-from agent.runtime import make_tool_runner
+import pytest
+
 from effective import call_tool
+from effective.compose import spawn_subagent
+from effective.contexts import RecordingCtx, ResumeCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.scripted import scripted_caller
+from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key
 from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+
+pytestmark = pytest.mark.spine
 
 U = Usage(prompt_tokens=10, completion_tokens=4, cost=0.001)
 ACT_DOUBLE = AssistantTurn(thought="compute", tool=ToolRequest(name="double", args={"n": 21}))

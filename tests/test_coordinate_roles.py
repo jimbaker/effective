@@ -311,10 +311,13 @@ def test_the_gate_asks_only_of_coordinates(source, nothing_to_declare):
 
 def test_the_excluded_tree_is_measured_rather_than_described():
     """`NOT_COORDINATE_ROLE_SCANNED`'s docstring says every shipped tree is scanned. That is a
-    claim like any other, so the empty table and the clean scan are both asserted here."""
+    claim like any other, so the table matching its declaration and the clean scan are both
+    asserted here."""
     from effective import lint
 
-    assert lint.NOT_COORDINATE_ROLE_SCANNED == {}
+    shipped = ("src", "examples")
+    excluded = lint.NOT_COORDINATE_ROLE_SCANNED
+    assert [k for k in excluded if k in shipped or k.startswith("src")] == []
     scanned = [f for root in ("src", "examples") for f in sorted(Path(root).rglob("*.py"))]
     assert {p.parts[0] for p in scanned} == {"src", "examples"}, "every root was reached"
     assert check_coordinate_roles(["src", "examples"]) == []
@@ -380,8 +383,9 @@ def test_the_files_the_codegen_rule_skips_are_counted():
     kept = dict(lint.NOT_PYTHON_CODEGEN_SCANNED)
     try:
         lint.NOT_PYTHON_CODEGEN_SCANNED.clear()
-        unscanned = lint.check_python_codegen(["src", "tests", "examples", "scripts"])
+        roots = {"src", "tests", "examples", "scripts"} | {path.split("/")[0] for path in kept}
+        unscanned = lint.check_python_codegen(sorted(roots))
     finally:
         lint.NOT_PYTHON_CODEGEN_SCANNED.update(kept)
-    assert len(unscanned) == 10
+    assert len([v for v in unscanned if v.filename.startswith("tests/")]) == 10
     assert {v.filename for v in unscanned} == set(kept)

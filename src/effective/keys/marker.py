@@ -246,9 +246,9 @@ class Run(Segment):
     so asking whether they unify under scope renaming is answered by dropping exactly these
     coordinates, while a fold keeps them because within one run they name distinct positions.
 
-    **This is what `agent.lineage.canonical` rewrote text to find.** It took scrub tokens from the
-    caller and `str.replace`d them, which reaches into content and cannot tell a coordinate from a
-    substring; the role says it at the mint instead."""
+    **This is what `effective.lineage.canonical` rewrote text to find.** It took scrub tokens from
+    the caller and `str.replace`d them, which reaches into content and cannot tell a coordinate
+    from a substring; the role says it at the mint instead."""
 
     __slots__ = ()
     role: ClassVar[str] = "run"

@@ -107,10 +107,10 @@ type DomainOp[T] = ModelCall[T] | CallTool[T]
 
 
 # --- the spawn tool's wire protocol: a well-known `CallTool` name + its result schema ----
-# Two callers yield this same `CallTool` (`agent.compose.spawn_subagent_task`, the N=1
+# Two callers yield this same `CallTool` (`effective.compose.spawn_subagent_task`, the N=1
 # subagent; `effective.fork.spawn_fork`, the counterfactual child) and one handler answers
-# it (`agent.runtime.spawn_tool`), so the pair is shared protocol, not any one of their
-# implementations. It lives with `CallTool` because that is exactly what it types.
+# it (`effective.interpreters.tools.spawn_tool`), so the pair is shared protocol, not any one of
+# their implementations. It lives with `CallTool` because that is exactly what it types.
 
 SPAWN_TOOL = "spawn"
 

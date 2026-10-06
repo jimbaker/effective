@@ -10,8 +10,8 @@ concurrent with the in-flight turn without cancelling it:
 Both are recorded `CallTool` polls, so the winner is a checkpoint and replay re-derives it.
 """
 
-from agent.compose import Interrupted, tool_interrupt
 from effective import RecordingHandler, ReplayHandler
+from effective.compose import Interrupted, tool_interrupt
 from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
 
 ANSWER = AssistantTurn(thought="redirected", answer="answered per the interrupt")

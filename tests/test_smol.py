@@ -6,14 +6,14 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultCtx, FaultPosition
+from _conformance import Fault, FaultCtx, FaultPosition, at_every_op
 
-from agent.runtime import spawn_tool
 from effective.api import qualified_event_name
 from effective.cancel import Cancelled
 from effective.combinators import Chain
 from effective.domain import INTERRUPT_TOOL, SPAWN_TOOL, AskLLM, CallTool, DomainOp
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, Phase, tool_interrupt
 from effective.keys import Index, Run, compose_key
 from effective.react import ESCAPED, AssistantTurn, ToolRequest, ToolResult
@@ -174,11 +174,9 @@ def test_a_cancelled_conversation_survives_a_crash_at_every_op(backend, position
     golden_snap, _ = converse(backend, Scripted(cancel_read=True), unarmed)
     assert contents(golden_snap) == CANCELLED_TURN
     assert unarmed.count > 0
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         domain = Scripted(cancel_read=True)
         snap, _ = converse(backend, domain, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert contents(snap) == CANCELLED_TURN, k
         if position is FaultPosition.BEFORE_OP:

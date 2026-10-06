@@ -12,9 +12,16 @@ The gate is pure over the recorded snapshot, so nothing here touches a real mode
 import json
 from types import SimpleNamespace
 
-from agent.precise_edit import Edit, EditResponse, edit_template, make_precise_editor
+import pytest
+
 from effective.channels import Repair, render
 from effective.domain import AskLLM
+from effective.interpreters.precise_edit import (
+    Edit,
+    EditResponse,
+    edit_template,
+    make_precise_editor,
+)
 
 # a recorded snapshot: `return 1` is unique; `x = 0` appears twice (a bad anchor)
 SNAP = {"src/foo.py": "x = 0\ndef foo():\n    x = 0\n    return 1\n"}
@@ -34,18 +41,14 @@ def test_unique_anchor_resolves_to_an_edit():
     assert out.edit == Edit(path="src/foo.py", old="return 1", new="return 2")
 
 
-def test_missing_anchor_is_a_repair():
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [("return 99", "return 2"), ("x = 0", "x = 1")],
+    ids=["anchor-matches-nothing", "anchor-matches-twice"],
+)
+def test_an_anchor_that_does_not_match_exactly_once_is_a_repair(old, new):
     prompt = render(edit_template(SNAP, "boom"), output=EditResponse)
-    match prompt.resolve(_resp("src/foo.py", "return 99", "return 2")):  # 0 matches
-        case Repair() as r:
-            assert "exactly once" in r.reason
-        case other:
-            raise AssertionError(f"expected Repair, got {other!r}")
-
-
-def test_non_unique_anchor_is_a_repair():
-    prompt = render(edit_template(SNAP, "boom"), output=EditResponse)
-    match prompt.resolve(_resp("src/foo.py", "x = 0", "x = 1")):  # 2 matches -> ambiguous
+    match prompt.resolve(_resp("src/foo.py", old, new)):
         case Repair() as r:
             assert "exactly once" in r.reason
         case other:

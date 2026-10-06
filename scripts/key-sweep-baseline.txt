@@ -23,9 +23,9 @@ scripts/key_sweep.py :: prose :: fork:r-fork;review:m1 -> absurd.py:153 :: unrev
 scripts/key_sweep.py :: prose :: gather:0,3;;ledger :: unreviewed — bootstrapped, replace with the judgement
 src/agent/bank.py :: prose :: task:{id}/react:{tag} :: deliberate — era-2 banked stores CONTAIN this; the era history moved here from tests/test_banked_corpus.py so the gate and the fixture read one source
 src/effective/improve.py :: prose :: cand:{r}:{i} :: unreviewed — bootstrapped, replace with the judgement
-src/agent/lineage.py :: prose :: budget-grant:{run_id}:{n} :: unreviewed — bootstrapped, replace with the judgement
-src/agent/lineage.py :: prose :: govern:{gate}:{run_id}:{pass}:{occ}:{op} :: unreviewed — bootstrapped, replace with the judgement
-src/agent/voi.py :: prose :: budget-grant:{run_id}:{K} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/lineage.py :: prose :: budget-grant:{run_id}:{n} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/lineage.py :: prose :: govern:{gate}:{run_id}:{pass}:{occ}:{op} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/voi.py :: prose :: budget-grant:{run_id}:{K} :: unreviewed — bootstrapped, replace with the judgement
 src/effective/budget.py :: prose :: budget-grant:{run_id}:% :: unreviewed — bootstrapped, replace with the judgement
 src/effective/combinators.py :: prose :: chain-grant:{run_id}:{generation} :: unreviewed — bootstrapped, replace with the judgement
 src/effective/counterfactual.py :: prose :: fork:r-fork:budget-grant:r-base:0 :: unreviewed — bootstrapped, replace with the judgement

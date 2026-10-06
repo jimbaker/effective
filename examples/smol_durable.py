@@ -43,7 +43,6 @@ from typing import Any
 
 from smol_door import door
 
-from agent.runtime import spawn_tool
 from effective.cancel import Cancelled, CancelToken
 from effective.combinators import Chain
 from effective.cost import MeteredInterpreter, Usage
@@ -58,6 +57,7 @@ from effective.domain import (
 )
 from effective.handlers.absurd import DurableHandler
 from effective.interpreters.shell import Shelled, run_shell
+from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, tool_interrupt
 from effective.keys.frame import split_frames
 from effective.ops import CARRY_PARAM

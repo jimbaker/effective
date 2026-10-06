@@ -3,6 +3,9 @@ set dotenv-load
 # Pass recipe args as real positional args ("$@") so quoting survives.
 set positional-arguments
 
+# A tree that holds more than this repository ships adds its recipes here.
+import? 'private.just'
+
 DATABASE_URL := env_var_or_default("DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective")
 PG_URL := "${DATABASE_URL:-postgresql://effective:effective@localhost:${PGTEST_PORT:-5432}/effective}"
 
@@ -11,7 +14,7 @@ PG_URL := "${DATABASE_URL:-postgresql://effective:effective@localhost:${PGTEST_P
 GATE_SEED := env_var_or_default("GATE_SEED", "0")
 
 # Source files holding channel templates, subject to the channel lint.
-CHANNEL_SRCS := "src/effective/cache.py src/effective/react.py src/effective/interpreters/cli.py src/effective/interpreters/openai.py src/agent/precise_edit.py src/agent/skillsbench.py src/examples/coder/tools.py src/examples/coder/machine.py src/examples/deep_research/research.py examples/first_workflow.py"
+CHANNEL_SRCS := "src/effective/cache.py src/effective/react.py src/effective/interpreters/cli.py src/effective/interpreters/openai.py src/effective/interpreters/precise_edit.py src/agent/skillsbench.py src/examples/coder/tools.py src/examples/coder/machine.py src/examples/deep_research/research.py examples/first_workflow.py"
 
 # List recipes
 default:
@@ -53,7 +56,7 @@ lint:
     uv run python -m effective.lint --terminal-holes tests
     uv run python -m effective.lint --authority-tags src/effective src/agent src/examples examples
     uv run python -m effective.lint --authority-scopes src/effective src/agent src/examples examples
-    uv run python -m effective.lint --key-registry src/effective src/agent src/examples examples
+    uv run python -m effective.lint --key-registry
     uv run python -m effective.lint --coordinate-roles src/effective src/agent src/examples examples
     uv run python -m effective.lint --python-codegen src tests examples scripts
     uv run python -m effective.lint --key-borrowing tests
@@ -99,15 +102,32 @@ key-sweep *ARGS:
 
 # Write build/key-registry.json, the source map of every key namespace production mints
 key-registry:
-    uv run python -m effective.lint --key-registry src/effective src/agent src/examples examples
+    uv run python -m effective.lint --key-registry
 
 # Browse the key registry
 key-view *ARGS:
     uv run python scripts/key_view.py "$@"
 
-# Mermaid fences in docs
+# Mermaid fences: a syntax check, milliseconds (defaults to README.md, docs/, wiki/)
 lint-mermaid *ARGS:
     uv run python scripts/lint_mermaid.py "$@"
+
+# Render each Mermaid fence in FILE to PNG under build/mermaid/<stem>/, to look at before
+# committing. mmdc runs in the digest-pinned image from infra/mermaid/PIN.txt, offline
+mermaid-render FILE WIDTH="1400":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    digest=$(awk '$1 == "digest:" {print $2}' infra/mermaid/PIN.txt)
+    image=$(awk '$1 == "image:" {print $2}' infra/mermaid/PIN.txt)
+    out="build/mermaid/$(basename "{{FILE}}" .md)"
+    rm -rf "$out" && mkdir -p "$out"
+    uv run python -c 'import sys, pathlib; from scripts.lint_mermaid import fences; [pathlib.Path(sys.argv[2], f"{i:02d}.mmd").write_text(b) for i, b in enumerate(fences(pathlib.Path(sys.argv[1]).read_text()))]' "{{FILE}}" "$out"
+    for f in "$out"/*.mmd; do
+      podman run --rm --network=none --userns=keep-id --user "$(id -u):$(id -g)" \
+        -v "$PWD/$out":/data:Z -w /data "$image@$digest" \
+        -i "$(basename "$f")" -o "$(basename "${f%.mmd}").png" -b white -w {{WIDTH}} >/dev/null
+    done
+    echo "rendered $(ls "$out"/*.png | wc -l) diagram(s) to $out"
 
 # Validate a span file as OTLP (offline, free)
 eval-jsonl FILE:

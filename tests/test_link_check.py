@@ -19,6 +19,7 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from effective.lint import configured  # noqa: E402
 from scripts import link_check as lc  # noqa: E402
 
 WIKI_STUB = """# wiki
@@ -257,25 +258,32 @@ def test_every_adr_citation_resolves_against_the_wiki_index():
     assert not unknown, f"ADR citations with no `## Decisions` row: {unknown}"
 
 
-# the ADR checker and its tests name ADRs as their subject
-_ADR_MECHANISM = {"scripts/link_check.py", "scripts/doc_inventory.py", "tests/test_link_check.py"}
+# the ADR checker and its tests name ADRs as their subject; a tree that ships more declares its
+# own exemptions, each a path prefix, in `[tool.effective.lint].adr_citation_exempt`
+_ADR_EXEMPT = (
+    "scripts/link_check.py",
+    "scripts/doc_inventory.py",
+    "tests/test_link_check.py",
+    *(configured("adr_citation_exempt") or ()),
+)
 
 
 def test_code_tests_and_models_cite_no_adr():
     """An ADR's sections move when it is rewritten, so code states its invariant in its own words.
     Scanned: every tracked file under the code, test, example, model and script trees."""
     tracked = subprocess.run(
-        ["git", "ls-files", "src", "tests", "examples", "formal", "scripts"],
+        ["git", "ls-files", "-z", "src", "tests", "examples", "formal", "scripts"],
         cwd=_ROOT,
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.split()
+    ).stdout.split("\0")
+    tracked = [path for path in tracked if path]
     assert tracked, "no tracked files: this test needs a git checkout"
     citing = [
         f"{path}:{n}"
         for path in tracked
-        if path not in _ADR_MECHANISM
+        if not path.startswith(_ADR_EXEMPT)
         for n, line in enumerate((_ROOT / path).read_text(errors="replace").splitlines(), 1)
         if lc.ADR_REF_RE.search(line)
     ]

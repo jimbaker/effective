@@ -38,15 +38,16 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
-from agent.runtime import LocalCtx, make_tool_runner
 from agent.tasks import task_scope
 from effective.api import scoped
 from effective.channels import Prompt, Repair, TypedField
 from effective.channels import render as channel_render
+from effective.contexts import LocalCtx
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.envelope import Envelope, JsonEnvelope
 from effective.handlers.absurd import DurableHandler
 from effective.interpreters.openai import OpenAITurnCaller, to_openai_messages, usage_from_openai
+from effective.interpreters.tools import make_tool_runner
 from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
 from effective.skills import Pin, SkillRegistry
 from effective.telemetry import Span, measurements, multi, otlp_jsonl_sink, traced

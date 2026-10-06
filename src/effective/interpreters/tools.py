@@ -1,31 +1,28 @@
-"""Handler-side runtime: tool running, local ctxs, and the opaque subagent.
+"""Running a tool call: plain tools, and the opaque subagent.
 
-The loop yields ops; *this* is where a `CallTool` actually runs. Two shapes:
+The loop yields ops, and this is where a `CallTool` runs:
 
-- a **plain tool** — a pure `dict -> value` callable, wrapped to a `ToolResult`;
-- a **subagent** — a tool whose execution runs a *nested* `run_agent` under its own
-  metered + traced interpreter. To the parent it is one opaque `CallTool` Step: the
-  parent records only the child's final answer and, on replay, binds it from the
-  checkpoint without ever re-running the child. Context isolation extends to *replay*
-  isolation — and it is also the KV-cache strategy (the child carries the narrow tool
-  subset on its own stable prefix; the parent's reasoning context stays lean).
+| tool | runs as |
+|---|---|
+| plain | a `dict -> value` callable, its result wrapped in a `ToolResult` |
+| subagent | a nested `run_agent` under its own metered, traced interpreter |
 
-Because the cost layer meters only model calls, a subagent's spend is invisible to the
-parent's meter *by design* — you **peek it through telemetry**: the child emits spans
-tagged with its `agent_name` (and its `Usage`) to the shared sink.
+To the parent a subagent is one opaque `CallTool` step: the parent records only the child's final
+answer and, on replay, is served it from the checkpoint without running the child again. The
+child carries its narrow tool set on its own stable prefix, so the parent's context stays lean.
 
-`LocalCtx` is the non-durable Absurd ctx (a step just runs its thunk). The durable
-record/replay ctxs for the bench live in `agent.bench`.
+The cost layer meters only model calls, so a subagent's spend does not reach the parent's meter;
+it reaches telemetry instead, as spans tagged with the child's `agent_name` and `Usage`. The
+in-process contexts that run these without an engine are in `effective.contexts`.
 """
 
 from collections.abc import Callable, Mapping
-from datetime import datetime
 from typing import Any, Protocol
 
+from effective.contexts import LocalCtx
 from effective.cost import LLMCall, MeteredInterpreter, ToolRunner, Usage
 from effective.domain import SPAWN_TOOL, CallTool, SpawnArgs, SpawnResult
 from effective.handlers.absurd import DurableHandler
-from effective.keys import Key
 from effective.react import ToolResult, Trajectory, run_agent
 from effective.spawning import answer_parent
 from effective.telemetry import Sink, traced
@@ -49,28 +46,6 @@ class Spawner(Protocol):
     ) -> str: ...
 
 
-class LocalCtx:
-    """Non-durable ``TaskContext``: a step just runs its thunk inline (no checkpointing).
-
-    For step-only workflows (the ReAct loop). It cannot durably suspend, so
-    ``await_event``/``sleep_until`` raise — a non-durable ctx has nowhere to park
-    (use ``DurableHandler`` over a real Absurd ctx or the SQLite engine for those).
-    """
-
-    def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
-        return thunk()
-
-    def await_event(self, name: Key) -> Any:
-        raise NotImplementedError(
-            "LocalCtx is non-durable: await_event needs a durable ctx (Absurd / SQLite engine)"
-        )
-
-    def sleep_until(self, when: datetime, /, *, name: Key) -> None:
-        raise NotImplementedError(
-            "LocalCtx is non-durable: sleep_until needs a durable ctx (Absurd / SQLite engine)"
-        )
-
-
 def make_tool_runner(
     tools: Mapping[str, ToolFn], agents: Mapping[str, AgentTool] | None = None
 ) -> ToolRunner:
@@ -79,7 +54,7 @@ def make_tool_runner(
     `agents` take precedence and receive the whole `CallTool` op (they need the args
     and may run a nested workflow); plain `tools` are pure `dict -> value` callables
     whose result is stringified into a `ToolResult`. An unknown name returns an error
-    observation rather than raising — the loop can route around it.
+    observation rather than raising, so the loop can route around it.
     """
     agents = agents or {}
 
@@ -106,7 +81,7 @@ def subagent_runner(
     max_iters: int = 4,
     task_key: str = "task",
 ) -> AgentTool:
-    """A tool whose execution runs a nested `run_agent` — opaque to the parent.
+    """A tool whose execution runs a nested `run_agent`, opaque to the parent.
 
     The child runs under its own `MeteredInterpreter` (so it has an independent meter
     and an independent, narrow tool set) with an optional `traced` layer (the telemetry

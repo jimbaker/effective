@@ -82,7 +82,7 @@ ADR-0017 rules that tunable seams take data and closures are for fixed policy;
 replay(trace[:at]) then interpret(tail under delta)`. The replay of the prefix is free, and only
 the divergent tail is paid for. `fork_at` and `replay_prefix` exist; the typed candidate (a
 `ForkDelta`) and its use as an `improve` proposal do not. The same fork already serves
-value-of-information probes (`src/agent/voi.py`) and counterfactual audit
+value-of-information probes (`src/effective/voi.py`) and counterfactual audit
 (`src/effective/counterfactual.py`), so optimization would be its third use.
 
 **Stage 3.** When marginal moves are regular enough to enumerate, the agent becomes a subroutine:

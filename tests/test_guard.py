@@ -10,15 +10,15 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultCtx, FaultPosition
+from _conformance import Fault, FaultCtx, FaultPosition, at_every_op
 
-from agent.runtime import spawn_tool
 from effective import Effect
 from effective.api import qualified_event_name
 from effective.combinators import Chain, Level
 from effective.domain import ASK_TOOL, SPAWN_TOOL, Answers, AskLLM, CallTool, DomainOp, Judge
 from effective.handlers.absurd import DurableHandler
 from effective.handlers.recording import RecordingHandler
+from effective.interpreters.tools import spawn_tool
 from effective.keys import Index, Run, compose_key
 from effective.react import (
     Allowed,
@@ -265,11 +265,9 @@ def test_a_judged_conversation_survives_a_crash_at_every_op(backend, position):
     unarmed = Fault(position=position)
     golden = converse(backend, House(), unarmed)
     assert unarmed.count > 0
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         domain = House()
         snap = converse(backend, domain, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert _tools(snap) == _tools(golden), k
         if position is FaultPosition.BEFORE_OP:

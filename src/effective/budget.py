@@ -357,9 +357,10 @@ class MeasuredBudget:
     answer a park and dying at the ceiling is the point.
 
     **Its sibling `Budget.on_exhaust` deliberately did NOT flip.** The structural budget is
-    enforced across the in-process subagent boundary (`runtime.subagent_runner` over `LocalCtx`),
-    which cannot park at all — an `await_event` there raises — so `"fail"` is not a default there
-    but the only option, as this module's header says."""
+    enforced across the in-process subagent boundary
+    (`effective.interpreters.tools.subagent_runner` over `LocalCtx`), which cannot park at all:
+    an `await_event` there raises, so `"fail"` is the only option there, as this module's header
+    says."""
 
     def __post_init__(self) -> None:
         # Assembly-time, loudly — the shape `govern()` uses for a gate with no policies and

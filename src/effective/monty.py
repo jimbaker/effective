@@ -4,7 +4,7 @@ Deployment infrastructure, exactly like the model caller and the tool registry:
 ``effective.code`` never imports this module. A deployment builds
 ``MontyEngine(functions=...)`` and registers ``execute_tool(engine)`` under
 ``EXECUTE_TOOL`` in its domain interpreter (the ``agents`` slot of
-``agent.runtime.make_tool_runner`` fits: it hands over the whole op).
+``effective.interpreters.tools.make_tool_runner`` fits: it hands over the whole op).
 
 Monty (pydantic-monty, pinned; alpha, API in flux) is capability-based: no
 ``import``/``eval``/filesystem/network, and every ambient-looking call, even

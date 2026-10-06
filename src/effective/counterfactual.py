@@ -17,8 +17,8 @@ bookkeeper), never the ledger — two bookkeepers, cleanly.
 
 This is substrate, not domain: any workflow can be forked, so `Forked` lives in `effective`,
 deliberately NOT a member of any domain's event union, so a domain projection filters those
-rows out and never sees a `forked` genesis. The complement to `agent.lineage`, which COMPARES two
-recorded lineages; this one RECORDS the fork that produced the second.
+rows out and never sees a `forked` genesis. The complement to `effective.lineage`, which COMPARES
+two recorded lineages; this one RECORDS the fork that produced the second.
 """
 
 from datetime import datetime
@@ -208,7 +208,7 @@ class ForkSealed(BaseModel):
     A fork's genesis is appended BEFORE the handler runs and its boundary checks run AFTER it
     completes, so a fork `run_fork` declares corrupt has already durably committed its whole tail —
     byte-identical in shape to a valid one. The refusal was loud to the caller and **silent in the
-    canonical bookkeeper**, and `agent.lineage` reads the ledger, not the task row. One
+    canonical bookkeeper**, and `effective.lineage` reads the ledger, not the task row. One
     bookkeeper's truth is never derived from the other's, so without the seal a VOI consumer has
     no way to know the marginal it reads is invalid.
 
@@ -290,8 +290,8 @@ def genesis_row(
 # `UNIQUE(event_id)`, and `ON CONFLICT DO NOTHING` would silently DROP the fork's divergent row
 # (on both engines). Hence a lineage-scoped identity:
 # every hypothetical row's event id carries the child run id, so a fork's `reviewed:m1` and the
-# base's `reviewed:m1` are distinct rows that `agent.lineage.marginal` re-aligns by stripping the
-# scope token (the divergence then surfaces at the event's *content*, not its id).
+# base's `reviewed:m1` are distinct rows that `effective.lineage.marginal` re-aligns by stripping
+# the scope token (the divergence then surfaces at the event's *content*, not its id).
 #
 # ONE scheme, two directions: `fork_scoped` WRITES the scope, `fork_unscoped` REMOVES it. If the
 # two drifted, alignment would fail *silently*, so both read the same `FORK_SCOPE` tag off the
@@ -322,7 +322,7 @@ def fork_unscoped(event_id: str, child_run_id: str) -> str:
     unchanged.
 
     What alignment needs — a fork's `hyp:cf-a;reviewed:m1` has to compare equal to the base's
-    `reviewed:m1` by IDENTITY, which is `agent.lineage.marginal`'s contract.
+    `reviewed:m1` by IDENTITY, which is `effective.lineage.marginal`'s contract.
 
     Matches the FRAME. The scope is one leading term whose tag is `FORK_SCOPE` and whose
     coordinate is this child, so recognizing it is a `match` over two fields. Stripping a built

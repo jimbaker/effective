@@ -13,7 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 from test_coding_agent_worker_tools import BROKEN, FIXED, MODULE, specs
 
 from effective.coding.runners import CODING_TOOLS, serve_tool
@@ -124,10 +124,8 @@ def test_a_crash_at_every_op_commits_what_a_run_without_one_commits(backend, pos
     unarmed = Fault(position=position)
     clean, _ = committed(backend, unarmed)
     assert unarmed.count > 0
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         commit, outcome = committed(backend, fault)
-        assert not fault.armed, f"the crash at op {k} never fired"
         assert commit["artifact_id"] == clean["artifact_id"] == EXPECTED_ID, (k, commit)
         assert outcome["passed"] is True, (k, outcome)
 

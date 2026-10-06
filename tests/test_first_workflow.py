@@ -15,8 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from effective import RecordingHandler, ReplayHandler, ReplayMismatch
-from effective.channels import Repair
+pytestmark = pytest.mark.journey
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "first_workflow.py"
 PAGE = Path(__file__).parent.parent / "docs" / "first-workflow.md"
@@ -26,10 +25,6 @@ assert _SPEC is not None
 assert _SPEC.loader is not None
 first = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(first)
-
-
-def warmer(ceiling: float = 30):
-    return lambda: first.set_temperature("r1", "make it warmer", ceiling)
 
 
 def section(title: str) -> str:
@@ -47,42 +42,36 @@ def imported_names() -> list[tuple[str, str]]:
     return pairs
 
 
-def test_recording_asks_the_model_sets_the_thermostat_and_appends_one_row():
-    recorder = RecordingHandler(first.RESPONSES)
-    assert recorder.run(warmer()) == 22.0
-    assert [entry.key.stored() for entry in recorder.trace] == [
-        "step:setpoint",
-        "step;tool:thermostat",
-        "ledger;setpoint:r1",
-    ]
-    assert [(row.kind, row.get("celsius")) for row in recorder.ledger] == [("setpoint", 22.0)]
+def test_a_durable_run_asks_the_model_sets_the_thermostat_and_appends_one_row():
+    house = first.House()
+    done, steps = first.run_durably(house, "make it warmer")
+    assert (done.state, done.result) == ("completed", 22.0)
+    assert steps == ("step:setpoint", "step;tool:thermostat", "ledger;setpoint:r1")
+    assert house.asked == 1
 
 
-def test_replay_takes_no_responses_and_returns_the_recorded_answer():
-    recorder = RecordingHandler(first.RESPONSES)
-    recorder.run(warmer())
-    assert ReplayHandler(recorder.trace).run(warmer()) == 22.0
+def test_a_retry_after_an_outage_replays_the_answer_it_already_has():
+    house = first.House(outages=1)
+    done, steps = first.run_durably(house, "make it warmer")
+    assert (done.state, done.result, house.outages) == ("completed", 22.0, 0)
+    assert house.attempts == 2, "the outage failed the first attempt and the task ran again"
+    assert house.asked == 1, "the retry was served the setpoint from the file"
+    assert steps == ("step:setpoint", "step;tool:thermostat", "ledger;setpoint:r1")
+
+
+def test_an_outage_past_the_last_attempt_fails_the_run_and_still_asks_once():
+    house = first.House(outages=10)
+    done, steps = first.run_durably(house, "make it warmer")
+    assert done.state == "failed"
+    assert house.asked == 1
+    assert steps == ("step:setpoint",)
 
 
 def test_the_guardrail_refuses_before_the_thermostat_runs():
-    hot = RecordingHandler({"setpoint": {"celsius": 45}})
-    refused = hot.run(lambda: first.set_temperature("r2", "make it much warmer"))
-    assert isinstance(refused, Repair)
-    assert [entry.key.stored() for entry in hot.trace] == ["step:setpoint"]
-    assert hot.ledger == []
-
-
-def test_past_the_guardrail_an_uncanned_thermostat_raises():
-    hot = RecordingHandler({"setpoint": {"celsius": 45}})
-    with pytest.raises(KeyError, match="tool:thermostat"):
-        hot.run(lambda: first.set_temperature("r2", "make it much warmer", ceiling=50))
-
-
-def test_lowering_the_ceiling_makes_the_recorded_history_refuse_to_replay():
-    recorder = RecordingHandler(first.RESPONSES)
-    recorder.run(warmer())
-    with pytest.raises(ReplayMismatch, match="ended after 1 ops but 3 were recorded"):
-        ReplayHandler(recorder.trace).run(warmer(ceiling=20))
+    house = first.House(celsius=45)
+    done, steps = first.run_durably(house, "make it much warmer")
+    assert done.result == {"reason": "celsius outside the allowed range"}
+    assert steps == ("step:setpoint",)
 
 
 def _run_as_script() -> str:

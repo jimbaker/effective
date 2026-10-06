@@ -17,11 +17,19 @@ htmlcov/
 .envrc
 .env
 *.env
-.claude/
+
+# Claude Code: shared skills, agents, hooks and settings are committed; the rest is local
+.claude/*
+!.claude/skills/
+!.claude/agents/
+!.claude/hooks/
+!.claude/settings.json
+.claude/delegation-ledger.jsonl
 
 # Generated: the key registry and other derived build output
 build/
 benches/
+/data/
 
 # Formal toolchain output
 formal/lean/.lake/

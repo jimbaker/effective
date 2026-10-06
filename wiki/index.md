@@ -8,6 +8,7 @@ deliverables written from it.
 
 | document | what it holds |
 |---|---|
+| `docs/intro.md` | the model in ten minutes: an agent loop as a generator, the handler, the tape, layers as hooks, combinators |
 | `docs/first-workflow.md` | a first workflow on the package, recorded and replayed with no model |
 | `docs/effective-101.md` | the core concepts in order: the two seams, the op set, the author surface, the combinator algebra, the temporal shapes, the t-string grammars, the read side, the invariants |
 | `docs/effective-design.md` | the substrate written down whole: the op alphabet, the small-step semantics the handlers refine, the identity grammar, the combinator algebra, the channel processor, the formal estate |
@@ -66,6 +67,7 @@ models cite none, and state their invariants in their own words. Numbers with no
 | [[concepts/forced-schedules]] | what a schedule instrument can decide and what it cannot, and why a race is outside it |
 | [[concepts/witness-quotient]] | the admission witness as a quotient of what a checkpoint keeps, its one runtime obligation, and the classes it merges |
 | [[concepts/enforcer-domain]] | a gate is bounded by what it scans, with worked cases and what a zero really means |
+| [[concepts/testing]] | testing a workflow: an instrument per question, replay as the strict judge, why production resume is lenient, the test roles |
 | [[concepts/evidence]] | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
 
 ## References

@@ -1,8 +1,8 @@
 """A respawned generation lands on its PARENT's queue, on the real engine.
 
 `_respawn` builds the successor's spawn itself, and must pass the caller's queue through as
-`fork.py` and `agent/compose.py` do. A literal `"default"` would aim generation *n+1* of a chain
-started on any other queue at a queue nobody is working.
+`fork.py` and `effective/compose.py` do. A literal `"default"` would aim generation *n+1* of a
+chain started on any other queue at a queue nobody is working.
 
 **How that presents depends on a precondition, and the loud case is the common one.** If the
 spawning app has REGISTERED the task for its own queue, as this test's does, the SDK refuses the
@@ -75,7 +75,7 @@ class _SpawningDomain:
     function returning `Again`/`Done` is not an `Effect` and never drives the engine."""
 
     def __init__(self, app: Any) -> None:
-        from agent.runtime import spawn_tool
+        from effective.interpreters.tools import spawn_tool
 
         self._spawn = spawn_tool(_absurd_spawner(app))
 

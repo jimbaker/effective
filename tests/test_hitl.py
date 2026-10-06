@@ -6,8 +6,8 @@ back as the next observation. The whole trajectory (including the human turn) th
 replays deterministically with no model and no human.
 """
 
-from agent.compose import ASK_HUMAN, HumanAnswer, make_act
 from effective import RecordingHandler, ReplayHandler, Suspended
+from effective.compose import ASK_HUMAN, HumanAnswer, make_act
 from effective.react import AssistantTurn, ToolRequest, Trajectory, run_agent
 
 

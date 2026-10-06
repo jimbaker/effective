@@ -4,7 +4,7 @@ prediction P1.
 P1 (preregistered): informed grants beat a fixed policy over a mixed, headroom-stratified batch
 **only when `probe ≪ grant`**; when the probe costs as much as the grant it informs, informed is
 dominated. Scored here on a synthetic task family driven through the REAL fork driver
-(`effective.fork`/`agent.voi`): the (quality, cost) come from actual `ForkTail.usage` and an
+(`effective.fork`/`effective.voi`): the (quality, cost) come from actual `ForkTail.usage` and an
 external grader. Infra-free.
 """
 
@@ -13,13 +13,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from agent.voi import GrantPrompt, grant_full, probe_prompt, should_grant
 from effective.api import step
 from effective.budget import depth_grant_name
 from effective.combinators import Answered, Deeper, descend
 from effective.cost import Usage
 from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler, Suspended
+from effective.voi import GrantPrompt, grant_full, probe_prompt, should_grant
 
 UNIT = 0.001  # dollars per level (the surrogate's per-call cost)
 THRESHOLD = 0.10  # grant iff a probe reveals >= this quality gain

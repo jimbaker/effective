@@ -66,8 +66,8 @@ Two consequences. **A node knows where it came from:** `compose_key` is handed a
 each hole's source expression survives into `build/key-registry.json`, and
 `effective.keys.registry.explain` decodes a key into its field names and producing line, a source
 map for the graph. And **two runs of one workflow share an alphabet**, which is what makes
-`agent.lineage.align`, `compare` and `equivalent` meaningful: run-scoped tokens are scrubbed to
-`{run}` by `agent.lineage.canonical(scrub=…)`, and what is left is comparable across runs.
+`effective.lineage.align`, `compare` and `equivalent` meaningful: run-scoped tokens are scrubbed to
+`{run}` by `effective.lineage.canonical(scrub=…)`, and what is left is comparable across runs.
 
 ## 3. Three growth axes, three ceilings
 
@@ -75,7 +75,7 @@ map for the graph. And **two runs of one workflow share an alphabet**, which is 
 |---|---|---|---|
 | **width** | `gather([...])` | before any branch runs (applicative) | the list is data |
 | **length** | a loop of rounds; `recurse`, `descend` | round *r+1* may depend on round *r* | `max_iters` or a budget |
-| **depth** | any spawn a workflow yields: `spawning.spawn_child` and its uses (`spawn_fork`, `agent.compose.spawn_subagent_task`, `unfold` with `AcrossTasks`), a model's `spawn` request | at each spawn | the spawn depth budget, refused by the durable handler before enqueue |
+| **depth** | any spawn a workflow yields: `spawning.spawn_child` and its uses (`spawn_fork`, `effective.compose.spawn_subagent_task`, `unfold` with `AcrossTasks`), a model's `spawn` request | at each spawn | the spawn depth budget, refused by the durable handler before enqueue |
 
 Every dynamic graph in the substrate is a composition of the three. Each axis is otherwise
 unbounded, so each ceiling is structural: the depth ceiling refuses before any child is enqueued
@@ -241,7 +241,7 @@ graph TD
 
 | fact | what holds |
 |---|---|
-| the prefix is shared by copy | each child re-commits the seeded prefix into its own key space, so the lineages are disjoint node sets isomorphic on the prefix, which is why `agent.lineage.fork_marginal` aligns them by address |
+| the prefix is shared by copy | each child re-commits the seeded prefix into its own key space, so the lineages are disjoint node sets isomorphic on the prefix, which is why `effective.lineage.fork_marginal` aligns them by address |
 | `Ask()` leaves the fork point open | with a delta, the child pre-delivers its own substitution and runs to a marginal; with `Ask()` it parks at the fork point as the base did. The marker is required, so a forgotten delta is a call-site `TypeError` |
 | the join edge is optional | `spawn_fork` without `join_fork` is a lineage nobody is blocked on, which is why the two calls are separate |
 
@@ -281,8 +281,8 @@ end**: a view is a fold over the ledger, never a second place the state lives (A
 | what a key means | `effective.keys.registry.explain`, from `build/key-registry.json` |
 | the graph as nodes and edges | `effective.graphview.from_keys`, a `RunGraph`; `to_mermaid` and `to_text` draw it |
 | the program's shape | `effective.graphview.fold_cycles` drops the unrolling coordinates and folds the chain back into its loop; `project` discovers the axes from the tape; `restrict` selects rows |
-| two runs compared | `agent.lineage.align`, `compare`, `equivalent`, `key_distance`, over `canonical(scrub=…)` |
-| a counterfactual's difference | `agent.lineage.fork_marginal`, address-aligned |
+| two runs compared | `effective.lineage.align`, `compare`, `equivalent`, `key_distance`, over `canonical(scrub=…)` |
+| a counterfactual's difference | `effective.lineage.fork_marginal`, address-aligned |
 | the canonical history | the `ledger` table `WHERE NOT hypothetical`; `effective.lint --ledger-reads` keeps the predicate on |
 | what a run cost, and how long | `effective.telemetry` spans: the same nodes, a different projection |
 
@@ -309,10 +309,10 @@ counterfactual lineages, and identities that decode back to source.
 | **read** a run's graph | the readers and `effective.graphview` in §5e | built, both engines |
 | **explain** a node | `effective.keys.registry.explain` | built |
 | **edit** counterfactually | `spawn_fork` or `run_fork` with a delta, applied by re-running | built, sweep pinned on both engines |
-| **measure** the edit | `agent.lineage.fork_marginal` | built, address-aligned |
+| **measure** the edit | `effective.lineage.fork_marginal` | built, address-aligned |
 | **debug** | ledger, then checkpoints, then spans, then logs: a walk over the graph, where a refused fork raises a named error such as `ForkedPrefixAwait` | a practice, without one surface |
 | **optimize** | `effective.improve`: propose candidates, score each into a vector, keep the Pareto frontier (`effective.pareto`) | built |
-| **learn** across runs | N runs of one shape are N projections over one alphabet, so they align (`agent.lineage`) | pieces exist; no curve-over-time artifact |
+| **learn** across runs | N runs of one shape are N projections over one alphabet, so they align (`effective.lineage`) | pieces exist; no curve-over-time artifact |
 
 Everything that records is built; what aggregates across many runs is the open edge.
 

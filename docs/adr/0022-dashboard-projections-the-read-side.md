@@ -250,7 +250,7 @@ and the fold recognizes repetition.
 **The fan case** folds to 6, not 3, because each branch's ledger row carries a branch-varying
 `event_id` its author chose. The branch coordinate folds; a data-dependent name does not, because
 as ledger rows those are different rows. The remedy is the one cross-run alignment uses:
-canonicalize the varying tokens first (`agent.lineage.canonical(scrub=…)`), then fold. It stays the
+canonicalize the varying tokens first (`effective.lineage.canonical(scrub=…)`), then fold. It stays the
 caller's choice, because only the caller knows which tokens are scope and which are content.
 
 **Combinator traces fold because the fold reads declared roles.** A fold that dropped only
@@ -342,7 +342,7 @@ a drain. Built: `effective.parked`, `from_keys(pending=…)`, `effective.dashboa
 1. **The live feed** (§6). Not built; §12a says what specifies it.
 2. **The interactive surface**, a Shiny `Slot` or comparable, and the choice of which graph shapes
    are worth showing. One candidate lifts a coding-agent session into an Effective program on the
-   control axis, as `agent/session_telemetry.py` lifts a transcript's token counts into `Usage` and
+   control axis, as `effective/session_telemetry.py` lifts a transcript's token counts into `Usage` and
    `Span` on the cost axis. Not built.
 3. **Node states.** Two of four have producers (§4).
 4. **The telemetry mapping.** Built (§4a). It needed no seam change: once `traced` read

@@ -7,7 +7,7 @@ span file the live GSM8K bench writes.
 
 import json
 
-from agent.session_telemetry import session_spans, summarize, usage_from_claude_message
+from effective.session_telemetry import session_spans, summarize, usage_from_claude_message
 from effective.telemetry import check_otlp_line, otlp_jsonl_sink
 
 

@@ -4,7 +4,7 @@
 - **Status:** Accepted. Built: `run_code` (`src/effective/code.py`), the Monty engine
   (`src/effective/monty.py`), pinned skill scripts (`Pin.script` in `src/effective/skills.py`),
   the `hoisted` / `recurse` / `route` / `descend` combinators (`src/effective/combinators.py`),
-  the structural `scoped` frame (`effective.api.scoped`), and `code_act` (`src/agent/compose.py`).
+  the structural `scoped` frame (`effective.api.scoped`), and `code_act` (`src/effective/compose.py`).
   Unbuilt: a second interpreter (the Pyodide fallback), a container tier, the prewarmed image.
 - **Relates to:** ADR-0002 (the permission cascade that actions flow through), ADR-0008
   (a fleet run's sealed nondeterminism, the `fork` reservation, `gather` keying), ADR-0009 (the

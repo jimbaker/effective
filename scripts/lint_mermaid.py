@@ -5,14 +5,14 @@ renders mermaid. Two of the three sequence diagrams in `docs/effective-101.md`
 shipped that way and nothing caught it: the link gate checks that a document's
 *paths* resolve, not that its *diagrams* render.
 
-Deliberately a SYNTAX check. `mmdc` needs a ~500 MB container, so gating on a render
-would put podman between you and a green suite; this runs in milliseconds and catches
-the fatal-and-silent class. Render to PNG and look at the raster when authoring, and
-run this every time.
+Deliberately a SYNTAX check. `mmdc` needs a 2 GB container, so gating on a render would
+put podman between you and a green suite; this runs in milliseconds and catches the
+fatal-and-silent class. Render with `just mermaid-render <file>` and look at the raster
+when authoring, and run this every time.
 
     just lint-mermaid docs/effective-101.md   # one file
     just lint-mermaid docs/                   # a directory
-    just lint-mermaid                         # defaults to docs/
+    just lint-mermaid                         # README.md, docs/ and wiki/
 
 Provenance decides how much to trust each rule: the two SEQUENCE rules are failures
 this repo actually hit. The flowchart rule came from authoring guidance, and it
@@ -135,13 +135,11 @@ def check_file(path: Path) -> list[Finding]:
     return [f for i, block in enumerate(fences(text), 1) for f in check_block(path, i, block)]
 
 
-DEFAULT_ROOTS = ("docs",)
+DEFAULT_ROOTS = ("README.md", "docs", "wiki")
 
 
 def targets(args: list[str]) -> list[Path]:
-    """Explicit paths, else `docs/`, which is undated and maintained, so "current and clean"
-    is its contract.
-    """
+    """Explicit paths, else the maintained documents, whose contract is "current and clean"."""
     roots = [Path(a) for a in args if not a.startswith("-")] or [REPO / r for r in DEFAULT_ROOTS]
     out: list[Path] = []
     for root in roots:

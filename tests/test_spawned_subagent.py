@@ -18,17 +18,23 @@ from uuid import uuid4
 
 import pytest
 from _durable import IMMEDIATE_RETRY, Fault, FaultCtx, absurd, pg_ready, run_until_result
+from _spawning import absurd_spawner
 
-from agent.bench import scripted_caller
-from agent.compose import spawn_subagent_task
-from agent.runtime import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective import call_tool
+from effective.budget import BUDGET_DEPTH_PARAM
+from effective.compose import spawn_subagent_task
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL
+from effective.govern import Refused
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.scripted import scripted_caller
+from effective.interpreters.tools import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective.react import AssistantTurn, ToolRequest, ToolResult, run_agent
 
-pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
+pytestmark = [
+    pytest.mark.spine,
+    pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)"),
+]
 
 U = Usage(prompt_tokens=8, completion_tokens=3, cost=0.001)
 ACT_DOUBLE = AssistantTurn(thought="compute", tool=ToolRequest(name="double", args={"n": 21}))
@@ -50,8 +56,15 @@ def _register_child(app, child_name: str) -> None:
         return run_subagent_as_task(params, ctx, domain=domain, max_iters=3)
 
 
-def _register_parent(app, parent_name: str, child_name: str, spawner, fault: Fault | None = None):
-    @app.register_task(parent_name)
+def _register_parent(
+    app,
+    parent_name: str,
+    child_name: str,
+    spawner,
+    fault: Fault | None = None,
+    max_attempts: int | None = None,
+):
+    @app.register_task(parent_name, default_max_attempts=max_attempts)
     def parent(params, ctx):
         mid = params["mid"]
 
@@ -63,8 +76,12 @@ def _register_parent(app, parent_name: str, child_name: str, spawner, fault: Fau
 
         def act(request, tag):
             if request.name == "delegate":
-                result = yield from spawn_subagent_task(child_name, "double 21", correlation=mid)
-                return result
+                try:
+                    return (
+                        yield from spawn_subagent_task(child_name, "double 21", correlation=mid)
+                    )
+                except Refused:
+                    return ToolResult(content="ceiling: depth exhausted")
             result = yield from call_tool(request.name, request.args, ToolResult)
             return result
 
@@ -72,27 +89,8 @@ def _register_parent(app, parent_name: str, child_name: str, spawner, fault: Fau
             llm=_boom_llm, tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(spawner)})
         )
         run_ctx = FaultCtx(ctx, fault) if fault is not None else ctx
-        return DurableHandler(run_ctx, domain).run(lambda: run_agent("go", decide=decide, act=act))
-
-
-def _make_spawner(spawner_app, seen_ids: list[str]):
-    """Spawn the child on an *independent* connection (never the running task's ctx
-    connection). Records each returned id so a test can assert no duplicate child."""
-
-    def spawn(task_name, params, idempotency_key, queue, *, max_attempts=None):
-        result = spawner_app.spawn(
-            task_name,
-            params,
-            queue=queue,
-            idempotency_key=idempotency_key,
-            max_attempts=max_attempts,
-            retry_strategy=IMMEDIATE_RETRY,
-        )
-        task_id = str(result["task_id"])  # the SDK returns a UUID; the channel schema is str
-        seen_ids.append(task_id)
-        return task_id
-
-    return spawn
+        handler = DurableHandler(run_ctx, domain, params=params)
+        return handler.run(lambda: run_agent("go", decide=decide, act=act))
 
 
 def test_spawned_child_is_its_own_task_and_the_parent_awaits_it():
@@ -102,7 +100,7 @@ def test_spawned_child_is_its_own_task_and_the_parent_awaits_it():
         pname, cname = f"p-{mid}", f"c-{mid}"
         ids: list[str] = []
         _register_child(app, cname)
-        _register_parent(app, pname, cname, _make_spawner(spawner_app, ids))
+        _register_parent(app, pname, cname, absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids))
 
         spawned = app.spawn(pname, {"mid": mid}, retry_strategy=IMMEDIATE_RETRY)
         snap = run_until_result(app, spawned["task_id"])
@@ -131,7 +129,9 @@ def test_parent_crash_at_the_await_does_not_respawn_or_restart_the_child():
         ids: list[str] = []
         _register_child(app, cname)
         # crash before the parent's 2nd ctx op (the await) — after the spawn has committed.
-        _register_parent(app, pname, cname, _make_spawner(spawner_app, ids), fault=Fault(2))
+        _register_parent(
+            app, pname, cname, absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids), fault=Fault(2)
+        )
 
         spawned = app.spawn(pname, {"mid": mid}, retry_strategy=IMMEDIATE_RETRY)
         snap = run_until_result(app, spawned["task_id"])
@@ -141,6 +141,37 @@ def test_parent_crash_at_the_await_does_not_respawn_or_restart_the_child():
         assert snap.result["answer"] == "child said: 42"
         # the spawn was checkpointed: across the crash + retry the child was spawned once
         assert len(set(ids)) == 1, ids
+    finally:
+        app.close()
+        spawner_app.close()
+
+
+@pytest.mark.parametrize(
+    ("depth", "answered", "children"),
+    [(0, "ceiling: depth exhausted", 0), (1, "42", 1)],
+    ids=["depth-0-refuses-before-enqueuing", "depth-1-permits-one-level"],
+)
+def test_the_depth_ceiling_holds_on_the_engine(depth, answered, children):
+    """The handler holds a spawn to its task's depth: a refused spawn reaches the parent as a
+    `Refused` it can answer, and enqueues nothing."""
+    app, spawner_app = absurd(), absurd()
+    try:
+        mid = f"depth-{uuid4().hex[:8]}"
+        pname, cname = f"p-{mid}", f"c-{mid}"
+        ids: list[str] = []
+        _register_child(app, cname)
+        # One attempt: a retry would hide a refusal path that failed the first time.
+        spawner = absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids)
+        _register_parent(app, pname, cname, spawner, max_attempts=1)
+
+        params = {"mid": mid, BUDGET_DEPTH_PARAM: depth}
+        spawned = app.spawn(pname, params, retry_strategy=IMMEDIATE_RETRY)
+        snap = run_until_result(app, spawned["task_id"])
+
+        assert snap is not None
+        assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
+        assert answered in snap.result["answer"]
+        assert len(ids) == children
     finally:
         app.close()
         spawner_app.close()

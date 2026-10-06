@@ -20,7 +20,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
-from agent.compose import tool_interrupt  # noqa: E402
+from effective.compose import tool_interrupt  # noqa: E402
 from effective.keys.registry import KeyMap  # noqa: E402
 from effective.lint import build_key_registry  # noqa: E402
 from scripts.key_view import rows  # noqa: E402

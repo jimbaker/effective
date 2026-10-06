@@ -15,9 +15,9 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from _spawning import sqlite_spawner
 from pydantic import BaseModel
 
-from agent.runtime import spawn_tool
 from effective.api import append_ledger, ask_llm, call_tool, gather, scoped
 from effective.budget import Budget, MeasuredBudget
 from effective.combinators import Again, Chain, Done, Turn, respawn
@@ -25,6 +25,7 @@ from effective.cost import CONTRACT_PARAM, Contract, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.handlers.absurd import DurableHandler
 from effective.handlers.recording import RecordingHandler, Respawned
+from effective.interpreters.tools import spawn_tool
 from effective.keys import compose_key
 from effective.ops import LedgerRow
 from effective.sqlite import SqliteApp, SqliteLedger
@@ -39,28 +40,12 @@ class Watch(BaseModel):
 BATCH = 2
 
 
-def _spawner(app: SqliteApp):
-    def spawn(
-        task_name: str,
-        params: dict,
-        idempotency_key: str,
-        queue: str,
-        *,
-        max_attempts: int | None = None,
-    ) -> UUID:
-        return app.spawn(
-            task_name, params, idempotency_key=idempotency_key, max_attempts=max_attempts
-        )
-
-    return spawn
-
-
 class _SpendingDomain:
     """Answers the spawn tool and a metered `AskLLM` — the `(value, Usage)` V1 shape, which is
     what makes the handler's meter move at all."""
 
     def __init__(self, app: SqliteApp, cost: float) -> None:
-        self._spawn = spawn_tool(_spawner(app))
+        self._spawn = spawn_tool(sqlite_spawner(app))
         self.cost = cost
 
     def run(self, op: DomainOp[Any]) -> Any:
@@ -79,7 +64,7 @@ class _Domain:
     """Answers the substrate's spawn tool and one observational call per batch item."""
 
     def __init__(self, app: SqliteApp) -> None:
-        self._spawn = spawn_tool(_spawner(app))
+        self._spawn = spawn_tool(sqlite_spawner(app))
         self.polls: list[str] = []
 
     def run(self, op: DomainOp[Any]) -> Any:

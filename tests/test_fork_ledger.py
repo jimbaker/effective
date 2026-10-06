@@ -4,7 +4,7 @@ A fork's divergent tail row authors the SAME event id the base did (`reviewed:{m
 embeds no run id), so unscoped it collides with the base's canonical row on the ledger's global
 `UNIQUE(event_id)` and is silently dropped by `ON CONFLICT DO NOTHING`, on both engines.
 `ForkLedger` gives the child its own identity by rescoping every event id to
-`hyp:{child_run_id};{event_id}`; `agent.lineage.marginal` re-aligns by stripping the same scope
+`hyp:{child_run_id};{event_id}`; `effective.lineage.marginal` re-aligns by stripping the same scope
 token. These pins cover the rescope, the merge-gate guard, the single-source-of-truth
 scheme, and that the write-scheme and the strip-token compose into a correct marginal.
 
@@ -17,7 +17,6 @@ import json
 import pytest
 from pydantic_core import to_jsonable_python
 
-from agent.lineage import marginal
 from effective.counterfactual import (
     FORK_SCOPE,
     ForkLedger,
@@ -27,6 +26,7 @@ from effective.counterfactual import (
 )
 from effective.keys import Key, Segment, compose_key
 from effective.keys.grammar import KeySyntaxError
+from effective.lineage import marginal
 from effective.ops import LedgerRow
 from effective.sqlite import SqliteLedger
 
@@ -391,7 +391,7 @@ def test_the_seal_is_idempotent_under_replay(tmp_path, sqlite_app):
 
 def test_fork_marginal_works_on_a_real_run_fork_lineage(tmp_path, sqlite_app):
     """The deliverable, against output `run_fork` actually produced — not a fixture."""
-    from agent.lineage import fork_marginal
+    from effective.lineage import fork_marginal
 
     snap, _kinds = _seal_scenario(tmp_path, sqlite_app)
     assert snap is not None
@@ -412,7 +412,7 @@ def test_fork_marginal_refuses_a_provenance_address_the_base_does_not_contain(
 ):
     """A genesis naming an address absent from the base is a provenance error, not something to
     silently align at 0 — which is precisely how the discovery form failed."""
-    from agent.lineage import fork_marginal
+    from effective.lineage import fork_marginal
 
     snap, _ = _seal_scenario(tmp_path, sqlite_app)
     assert snap is not None

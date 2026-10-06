@@ -15,7 +15,7 @@ import json
 import os
 import sqlite3
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from enum import StrEnum
 from typing import Any, assert_never
 from uuid import UUID, uuid4
@@ -1382,6 +1382,17 @@ class Fault:
                 self.pending, self.armed = None, True
 
 
+def at_every_op(unarmed: Fault) -> Iterator[tuple[int, Fault]]:
+    """Each op an unarmed run reached, as a fault armed to crash there at the same position.
+
+    After the caller's run with the fault, it must have fired: a fault that never fires is a run
+    that did not crash, which would pass every assertion a crash test makes."""
+    for k in range(1, unarmed.count + 1):
+        fault = Fault(k, position=unarmed.position)
+        yield k, fault
+        assert fault.armed is False, f"k={k}: the fault never fired"
+
+
 class FaultCtx:
     """Proxies a durable ctx, crashing once at the configured step/await/sleep — in the
     half of the op named by ``fault.position``."""
@@ -1770,7 +1781,8 @@ class SqliteBackend:
         *,
         max_attempts: int | None = None,
     ) -> str:
-        """The `agent.runtime.Spawner` a spawn tool enqueues through on this engine."""
+        """The `effective.interpreters.tools.Spawner` a spawn tool enqueues through on this
+        engine."""
         return str(
             self.app.spawn(
                 task_name, params, idempotency_key=idempotency_key, max_attempts=max_attempts
@@ -2075,8 +2087,9 @@ class AbsurdBackend:
         *,
         max_attempts: int | None = None,
     ) -> str:
-        """The `agent.runtime.Spawner` a spawn tool enqueues through on this engine, on its own
-        app so an enqueue from inside a running task does not share the worker's connection."""
+        """The `effective.interpreters.tools.Spawner` a spawn tool enqueues through on this engine,
+        on its own app so an enqueue from inside a running task does not share the worker's
+        connection."""
         if self._spawner_app is None:
             from absurd_sdk import Absurd
 

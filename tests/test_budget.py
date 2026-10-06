@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from effective.budget import (
+    BUDGET_DEPTH_PARAM,
     Budget,
     Cleared,
     Exceeded,
@@ -212,3 +213,11 @@ def test_a_MEASURED_budget_PARKS_by_default():
     assert Budget().on_exhaust == "fail"
     # still selectable, because an unattended batch wants the ceiling to be fatal
     assert MeasuredBudget(run_id="r1", overall=1.0, on_exhaust="fail").on_exhaust == "fail"
+
+
+def test_from_spawn_params_roundtrip_and_unbounded_default():
+    parent = Budget(depth=2)
+    child_params = {"task": "t", BUDGET_DEPTH_PARAM: parent.descend_one().depth}
+    assert Budget.from_spawn_params(child_params).depth == 1
+    # Absent key → unbounded (a spawn that carried no budget).
+    assert Budget.from_spawn_params({"task": "t"}).depth is None

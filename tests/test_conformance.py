@@ -1478,7 +1478,7 @@ def test_measured_trip_inside_a_scope_parks_on_the_UNSCOPED_grant_name(backend):
     scope frame — so the SAME emitter drives it.
 
     The pin is that `_drain_with_grants` is reused UNCHANGED: it composes the bare name, exactly
-    as every real emitter does (`agent.voi`, the grant-injection seam). If the park were
+    as every real emitter does (`effective.voi`, the grant-injection seam). If the park were
     scope-qualified this test would hang at the first trip.
 
     Everything else must match `test_measured_trip_parks_grants_and_resumes` — same park count,

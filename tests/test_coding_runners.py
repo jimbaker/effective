@@ -18,8 +18,6 @@ from effective.coding import runners
 from effective.coding.runners import ToolError, Workspace, run_tool
 from effective.machine.evidence import CommandRun
 
-pytestmark = pytest.mark.unit
-
 HANDLER_SIDE = {"mod.py": "# what the workspace happens to hold\n"}
 WORKFLOW_SIDE = {"mod.py": "# what the workflow asked to measure\n"}
 

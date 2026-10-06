@@ -8,9 +8,9 @@ shows it does not re-run on replay (the opaque boundary holds under replay).
 """
 
 from agent.bench import record_then_replay
-from agent.runtime import subagent_runner
 from agent.tasks import Task, has_number, has_text
 from effective.cost import Usage
+from effective.interpreters.tools import subagent_runner
 from effective.react import AssistantTurn, ToolRequest
 
 U = Usage(prompt_tokens=20, completion_tokens=8, cost=0.0012)

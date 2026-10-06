@@ -3,7 +3,7 @@
 - **Date:** 2026-06-14
 - **Status:** Accepted; D4's stop of an op in flight is ruled by ADR-0026. Built: `run_agent` in
   `src/effective/react.py` with its policy seams, the interrupt race (`src/effective/interrupts.py`),
-  refusal-as-observation, three subagent forms (`src/agent/runtime.py`, `src/agent/compose.py`),
+  refusal-as-observation, three subagent forms (`src/effective/interpreters/tools.py`, `src/effective/compose.py`),
   the record-then-replay bench (`src/agent/bench.py`, `src/agent/bench_telemetry.py`) and the tool
   bracketing strategies (`src/agent/bracket.py`). Not built: an RLM module in the `decide` slot, a
   cross-framework harness ablation.
@@ -67,9 +67,9 @@ three forms cover the design space:
 
 | form | where | to the parent | on a parent crash |
 |---|---|---|---|
-| `subagent_runner` | `src/agent/runtime.py` | one opaque `CallTool` step; replay binds the child's answer from the checkpoint | the child re-runs from scratch |
-| `spawn_subagent` | `src/agent/compose.py` | the child's ops inline under the parent's handler, namespaced by `scoped` | the child resumes from its checkpoints |
-| `spawn_subagent_task` | `src/agent/compose.py` | a `spawn` step and an `AwaitEvent` on the child's completion; the child is its own durable task | the child is neither restarted nor re-spawned |
+| `subagent_runner` | `src/effective/interpreters/tools.py` | one opaque `CallTool` step; replay binds the child's answer from the checkpoint | the child re-runs from scratch |
+| `spawn_subagent` | `src/effective/compose.py` | the child's ops inline under the parent's handler, namespaced by `scoped` | the child resumes from its checkpoints |
+| `spawn_subagent_task` | `src/effective/compose.py` | a `spawn` step and an `AwaitEvent` on the child's completion; the child is its own durable task | the child is neither restarted nor re-spawned |
 
 Context isolation is also replay isolation and the cache strategy (D5): the child carries the
 bulky tool schemas on its own stable prefix, and the parent's context stays lean. An opaque

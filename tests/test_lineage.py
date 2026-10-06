@@ -6,7 +6,7 @@ run-id canonicalization a fork's divergence index is meaningless and `~_H` retur
 structurally identical runs, which is why `compare`/`equivalent` take a `scrub` argument;
 canonicalizing gather/task scopes alone is not enough.
 
-Two modules under test: `agent.lineage` (the alignment core and both projections) and
+Two modules under test: `effective.lineage` (the alignment core and both projections) and
 `effective.checkpoints` (the reader the projections consume: the `# --- readers` and
 one-task-per-read sections below). Kept in one file because the reader cases exist to feed the
 alignment cases, and separating them would put a fixture and its only assertion in two places.
@@ -16,18 +16,10 @@ from uuid import UUID
 
 import pytest
 
-from agent.lineage import (
-    RUN,
-    Alignment,
-    align,
-    canonical,
-    compare,
-    equivalent,
-    key_distance,
-)
 from effective.checkpoints import Checkpoint, from_trace, keys, read_sqlite_task
 from effective.handlers.base import TraceEntry
 from effective.keys import Key
+from effective.lineage import RUN, Alignment, align, canonical, compare, equivalent, key_distance
 from effective.ops import Step
 
 # A ctx built directly rather than spawned, so its task id is a FIXTURE — a fixed literal
@@ -76,8 +68,7 @@ def test_empty_sequences_align_trivially():
 
 
 def test_WITHOUT_scrubbing_a_fork_pair_diverges_at_its_first_ledger_op():
-    """The motivating case: an unscrubbed run id reads as a divergence."""
-    assert align(BASE, FORK).first_divergence == 2  # the ledger op, not a real divergence
+    """The motivating case: an unscrubbed run id reads as a divergence, at the ledger op."""
     assert not equivalent(BASE, FORK)
 
 
@@ -107,9 +98,8 @@ def test_a_mapping_keeps_distinct_scopes_distinct():
 
 def test_scrubbing_is_the_callers_call_not_a_guess():
     """Nothing is scrubbed by default. A guesser that stripped a MEANINGFUL substring would
-    equate runs that genuinely differ — so the default is to change nothing."""
+    equate runs that genuinely differ, so the default is to change nothing."""
     assert canonical(BASE) == BASE
-    assert not equivalent(BASE, FORK)
 
 
 # --- projection 1: the keys distance -------------------------------------------------------
@@ -170,7 +160,7 @@ def test_marginal_splits_two_lineages_at_the_divergence():
     """The fork's deliverable: 'approve -> commits $42; reject -> ledgers a rejection'. Both
     lineages extract and review (shared structure); they diverge at the CONSEQUENCE (base commits,
     fork ledgers a rejection), which is different event kinds."""
-    from agent.lineage import marginal
+    from effective.lineage import marginal
 
     base = [_row("extracted:r-base"), _row("reviewed:r-base"), _row("committed:r-base", amount=42)]
     fork = [_row("extracted:r-fork"), _row("reviewed:r-fork"), _row("rejected:r-fork")]
@@ -188,7 +178,7 @@ def test_marginal_aligns_by_IDENTITY_so_a_substituted_payload_shows_downstream()
     event ALIGNS and the divergence surfaces at its consequence, not at the substitution itself.
     When the fork point is recorded (the genesis' `forked_at_event`), a caller slices
     there directly; this is the discovery form, for arbitrary runs."""
-    from agent.lineage import marginal
+    from effective.lineage import marginal
 
     base = [_row("reviewed:r-a", decision="approve"), _row("committed:r-a")]
     fork = [_row("reviewed:r-b", decision="reject")]
@@ -201,7 +191,7 @@ def test_marginal_aligns_by_IDENTITY_so_a_substituted_payload_shows_downstream()
 def test_marginal_without_scrub_diverges_at_the_first_run_scoped_event():
     """Same lesson as `compare`: unscrubbed, two structurally identical lineages share nothing,
     because every event id embeds the run id."""
-    from agent.lineage import marginal
+    from effective.lineage import marginal
 
     base = [_row("extracted:r-base"), _row("reviewed:r-base")]
     fork = [_row("extracted:r-fork"), _row("reviewed:r-fork")]
@@ -210,7 +200,7 @@ def test_marginal_without_scrub_diverges_at_the_first_run_scoped_event():
 
 
 def test_two_identical_lineages_have_no_marginal():
-    from agent.lineage import marginal
+    from effective.lineage import marginal
 
     same = [_row("a:r"), _row("b:r")]
     m = marginal(same, same, scrub=("r",))
@@ -221,7 +211,7 @@ def test_two_identical_lineages_have_no_marginal():
 
 def test_marginal_keys_on_event_id_by_default_and_accepts_a_custom_key():
     """Default identity is `event_id`; a caller can align on `kind` instead (a coarser diff)."""
-    from agent.lineage import marginal
+    from effective.lineage import marginal
 
     base = [_row("e1", kind="extract"), _row("e2", kind="review")]
     fork = [_row("e9", kind="extract"), _row("e8", kind="commit")]

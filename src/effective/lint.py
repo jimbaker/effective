@@ -27,17 +27,20 @@ into CI.
 
 import ast
 import io
+import os
 import re
 import sys
 import tokenize
+import tomllib
 import typing
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, TypeAliasType, assert_never, get_args, get_origin
+from typing import Any, TypeAliasType, TypedDict, assert_never, get_args, get_origin
 
 from ast_grep_py import SgRoot
+from pydantic import TypeAdapter, ValidationError
 
 from effective.domain import DomainOp
 from effective.keys import DOMAIN_DIRECTIVE, RESERVED_AUTHORITY_TAGS
@@ -58,6 +61,59 @@ from effective.keys.grammar import (
 from effective.keys.marker import Index, Name, Ordinal, Run, Subject
 from effective.keys.registry import KeyMap, Shape, UnknownTag, _render_skeleton, separated
 from effective.ops import WorkflowOp
+
+
+def config_root() -> tuple[Path, dict[str, Any]] | None:
+    """The nearest `pyproject.toml` at or above the cwd with a `[tool.effective]` table, and that
+    table. The search stops at the repository root, so a workspace member's own `pyproject.toml`
+    does not hide the root's."""
+    for directory in (Path.cwd(), *Path.cwd().parents):
+        if (pyproject := directory / "pyproject.toml").is_file():
+            with pyproject.open("rb") as f:
+                tool = tomllib.load(f).get("tool", {})
+            if "effective" in tool:
+                return directory, tool["effective"]
+        if (directory / ".git").exists():
+            return None
+    return None
+
+
+class _LazyImport(TypedDict):
+    path: str
+    module: str
+    reason: str
+
+
+_SHAPES: tuple[tuple[re.Pattern[str], TypeAdapter[Any]], ...] = (
+    (
+        re.compile(r"_srcs$|^extra_paths|^private_ops_nouns$|_exempt$|^app_tables$"),
+        TypeAdapter(list[str]),
+    ),
+    (re.compile(r"^seam_forbidden$"), TypeAdapter(dict[str, list[str]])),
+    (re.compile(r"^not_"), TypeAdapter(dict[str, str])),
+    (re.compile(r"^lazy_import_allowed$"), TypeAdapter(list[_LazyImport])),
+)
+"""The shape each configured name must have, so a string where a list belongs raises rather than
+extending nothing."""
+
+
+def configured(name: str, table: str = "lint") -> Any:
+    """`[tool.effective.<table>].<name>`, from `config_root`, checked against `_SHAPES`.
+
+    A tree that holds more than this repository ships (more workflow modules, more packages a seam
+    keeps out) declares the extension there, so every tree runs the same lint."""
+    found = config_root()
+    value = None if found is None else found[1].get(table, {}).get(name)
+    if value is None:
+        return None
+    for pattern, shape in _SHAPES:
+        if pattern.search(name):
+            try:
+                shape.validate_python(value, strict=True)
+            except ValidationError as wrong:
+                raise TypeError(f"[tool.effective.{table}].{name} has the wrong shape") from wrong
+    return value
+
 
 FORBIDDEN_IMPORT_ROOTS: frozenset[str] = frozenset(
     {
@@ -141,6 +197,10 @@ SEAM_FORBIDDEN: dict[str, frozenset[str]] = {
         {"effective.coding.gate", "effective.coding.runners", "effective.coding.edits"}
     ),
 }
+SEAM_FORBIDDEN |= {
+    package: SEAM_FORBIDDEN.get(package, frozenset()) | frozenset(more)
+    for package, more in (configured("seam_forbidden") or {}).items()
+}
 
 # Why each forbidden prefix is forbidden, keyed by the TARGET rather than by the (owner, target)
 # pair, because that is the grain the reason actually has. A rule that reports "this is forbidden"
@@ -180,7 +240,7 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "src/effective/react.py",
     "src/effective/interrupts.py",
     "src/effective/smol.py",
-    "src/agent/compose.py",
+    "src/effective/compose.py",
     "src/agent/debug.py",
     "src/effective/improve.py",
     "src/agent/bench_sweep.py",
@@ -213,6 +273,7 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "examples/smol_door.py",
     "examples/tui_demo.py",
 )
+WORKFLOW_ROLE_SRCS += tuple(configured("workflow_role_srcs") or ())
 # COVERAGE BOUNDARY: the layer-authority lint scans only these files and keys on a
 # `@op_layer`/`@domain_layer` *decorated def* at the def site. A service authored outside them
 # (tests/, an adopter's tree) or as a bound-object `__call__` (the tunable-service pattern) is
@@ -226,7 +287,9 @@ LAYER_ROLE_SRCS: tuple[str, ...] = (
     "src/effective/permission.py",
     "src/effective/telemetry.py",
     "src/effective/tape.py",
+    "examples/hooks_as_layers.py",
 )
+LAYER_ROLE_SRCS += tuple(configured("layer_role_srcs") or ())
 """The layer-authority gate's domain. `--layer-coverage` proves it complete, so the gate
 maintains this list and a reader need not remember it."""
 
@@ -649,6 +712,10 @@ LAZY_IMPORT_ALLOWED: dict[tuple[str, str], str] = {
     ("agent/skillsbench.py", "yaml"): "dev-group dep; bench tooling only",
     # 3. An SDK name kept private to its one use.
     ("effective/handlers/absurd.py", "absurd_sdk"): "a PRIVATE SDK name; kept at its one use",
+}
+LAZY_IMPORT_ALLOWED |= {
+    (entry["path"], entry["module"]): entry["reason"]
+    for entry in configured("lazy_import_allowed") or ()
 }
 """Every lazy import that is warranted, and why. Adding an entry is a review decision.
 
@@ -1367,7 +1434,7 @@ def check_working_notes_file(path: str | Path) -> list[Violation]:
 # Deliberately a small list of NOUNS rather than a general "is this operational?" judgment: a gate
 # is bounded by what it scans, and a short list that never false-fires is worth more than a broad
 # one nobody trusts. A deployment adds the nouns of its own moving parts here; this tree has none.
-_PRIVATE_OPS_NOUNS: tuple[str, ...] = ()
+_PRIVATE_OPS_NOUNS: tuple[str, ...] = tuple(configured("private_ops_nouns") or ())
 # A first list including `S3` and `BigQuery` produced hits that were mostly legitimate: a vendor
 # noun that is also a PROTOCOL or DIALECT name, or an analogy. A gate whose escape hatch is the
 # common case has stopped meaning anything, so the list is only services that can name nothing BUT
@@ -1988,11 +2055,12 @@ def _same_variant(a: Shape, b: Shape) -> bool:
     return a.skeleton == b.skeleton
 
 
-NOT_COORDINATE_ROLE_SCANNED: dict[str, str] = {}
+NOT_COORDINATE_ROLE_SCANNED: dict[str, str] = configured("not_coordinate_role_scanned") or {}
 """Path prefixes this rule does not scan, each with the decision that put it there.
 
 A gate's domain is what it scans, so an exclusion is a sentence on the record rather than a quiet
-skip. It is empty: every shipped tree is scanned."""
+skip. The shipped table is empty: every shipped tree is scanned, and a tree that ships more
+declares its exclusions in `[tool.effective.lint]`."""
 
 _UNDECLARED_COORDINATE = (
     "this coordinate declares no role, so a projection reading the composed key back off a tape "
@@ -2038,6 +2106,7 @@ NOT_PYTHON_CODEGEN_SCANNED: dict[str, str] = {
     "tests/test_exec_tier.py": "2 sites to convert to source literals",
     "tests/test_artifact_addressing.py": "1 site to convert to source literals",
 }
+NOT_PYTHON_CODEGEN_SCANNED |= configured("not_python_codegen_scanned") or {}
 """Files this rule does not scan, each with what sits behind it (2026-09-12).
 
 The exclusion is per FILE, so a new assembly in one of these is not reported. That is the blind
@@ -2169,6 +2238,7 @@ KEY_REGISTRY_SRCS: tuple[str, ...] = (
     "src/examples",
     "examples",
 )
+KEY_REGISTRY_SRCS += tuple(configured("key_registry_srcs") or ())
 """What "production mints" MEANS, in one place, because two rules now depend on the answer.
 
 `--key-registry` builds the source map from these and `--key-borrowing` asks which tags they own.
@@ -3864,6 +3934,7 @@ follows. Widen the regex before widening the claim.
 _TEST_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)", re.M)
 
 ALLOWLIST = Path(__file__).resolve().parents[2] / "scripts" / "test-citation-allowlist.txt"
+PRIVATE_ALLOWLIST = ALLOWLIST.with_name("test-citation-private-allowlist.txt")
 
 
 def _defined_tests(tests_dir: Path) -> set[str]:
@@ -3876,10 +3947,13 @@ def _defined_tests(tests_dir: Path) -> set[str]:
 
 
 def _allowlisted() -> set[str]:
-    if not ALLOWLIST.exists():
-        return set()
     out = set()
-    for raw in ALLOWLIST.read_text().splitlines():
+    for raw in (
+        raw
+        for file in (ALLOWLIST, PRIVATE_ALLOWLIST)
+        if file.exists()
+        for raw in file.read_text().splitlines()
+    ):
         if line := raw.split("#", 1)[0].strip():
             out.add(line)
     return out
@@ -4008,6 +4082,25 @@ def _run_mode(mode: str, paths: list[str]) -> list[Violation]:
     return [v for p in paths for v in check(p)]
 
 
+def configured_roots(mode: str, given: list[str]) -> list[str]:
+    """The roots a tree adds for `mode`: `extra_paths_<mode>` in `[tool.effective.lint]`, else
+    `extra_paths`, resolved against the `pyproject.toml` that names them. A root under one already
+    given is left out, and a named root that does not exist raises."""
+    own = configured("extra_paths_" + mode.removeprefix("--").replace("-", "_"))
+    extra = own if own is not None else configured("extra_paths") or ()
+    found = config_root()
+    if not extra or found is None:
+        return []
+    roots: list[str] = []
+    for entry in extra:
+        path = Path(os.path.relpath(found[0] / entry))
+        if not path.exists():
+            raise FileNotFoundError(f"[tool.effective.lint] names {entry}, which is absent")
+        if not any(path.is_relative_to(r) for r in given):
+            roots.append(str(path))
+    return roots
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI: ``python -m effective.lint <workflow.py> ...`` — exit 1 on violations."""
     args = argv if argv is not None else sys.argv[1:]
@@ -4018,6 +4111,8 @@ def main(argv: list[str] | None = None) -> int:
     known = (*_PER_FILE, *_WHOLE_SET, "--key-registry")
     mode = next((a for a in args if a in known), "")
     raw = [a for a in args if not a.startswith("--")]
+    if raw:
+        raw += configured_roots(mode, raw)
     # --deps and --ledger-reads apply to every file in a tree, so accept directories and glob
     # them; a new file is covered automatically rather than needing to join a hand-list.
     paths: list[str] = []
@@ -4035,7 +4130,9 @@ def main(argv: list[str] | None = None) -> int:
     # Role default (the single source of truth): with no explicit files, the
     # determinism-boundary mode lints the workflow-role set and `--layers` the
     # layer-role set — so the justfile carries no hand-list to drift from the gate.
-    if not paths:
+    if not paths and mode == "--key-registry":
+        paths = [str(path) for path in _expanded(KEY_REGISTRY_SRCS)]
+    elif not paths:
         role = WORKFLOW_ROLE_SRCS if mode == "" else LAYER_ROLE_SRCS if mode == "--layers" else ()
         paths = _resolve_role_default(role)
     violations = _run_mode(mode, paths)

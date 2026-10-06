@@ -18,7 +18,6 @@ ROWS = {
 }
 
 
-@pytest.mark.unit
 @pytest.mark.parametrize(("seed", "tree", "changed"), ROWS.values(), ids=ROWS.keys())
 def test_changed_paths(seed: dict[str, str], tree: dict[str, str], changed: tuple[str, ...]):
     assert changed_paths(seed, tree) == changed

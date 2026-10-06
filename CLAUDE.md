@@ -46,7 +46,7 @@ as a t-string processor; psycopg takes a `Template` directly on the Postgres sid
 
 | directory | contract |
 |---|---|
-| `docs/` | maintained deliverables: the first workflow, the concepts tour, the design note. A disagreement with source is a bug |
+| `docs/` | maintained deliverables: the intro, the first workflow, the concepts tour, the design note. A disagreement with source is a bug |
 | `docs/adr/` | the architecture decision records, each the definitive statement of one decision, rewritten in place when the decision moves. A document cites one by number (`ADR-0020 §3`), never by path |
 | `wiki/` | what is true now, one concept a page, rewritten in place and interlinked. `wiki/index.md` is the catalog, and its `## Decisions` table is the one ADR index |
 
@@ -55,6 +55,31 @@ grades repo-rooted paths and ADR numbers, and `just wiki-lint` grades `[[links]]
 
 **Start at `wiki/index.md`**, then `docs/effective-101.md` for the concepts and
 `wiki/concepts/architecture.md` for where each subsystem lives.
+
+A diagram in a maintained document is a Mermaid fence, which GitHub renders: `just lint-mermaid`
+checks the syntax in milliseconds, and `just mermaid-render FILE` draws it to look at. A Python
+block in `README.md`, `docs/intro.md` or `docs/first-workflow.md` names the example it comes from,
+and `tests/test_readme.py` holds it to that file.
+
+## Layout
+
+```
+src/effective/        the substrate: ops, the authoring API, handlers, channels, keys, layers,
+                      combinators, the SQLite engine, the ledger
+src/effective/interpreters/   what answers a domain op
+src/agent/            evaluation: bench harnesses, scoring, subagent runtimes
+src/examples/         two packaged example agents: coder, deep_research
+src/tui/              a terminal view over a durable run
+examples/             single-file examples: react_toy, hooks_as_layers, first_workflow, testing_a_workflow,
+                      smol_*, demos
+tests/                the suite, including cross-engine conformance
+formal/               Lean proofs of the pure facts, Quint models of the interleavings
+infra/                vendored and pinned dependencies, and container recipes
+migrations/           Alembic migrations for the ledger
+scripts/              the gate scripts and database setup
+docs/                 the intro, the first workflow, the concepts, the design note, the ADRs
+wiki/                 one concept a page; wiki/index.md catalogs it and indexes the ADRs
+```
 
 ## Invariants: do not break these
 
@@ -155,6 +180,7 @@ parameter instead of explaining it**.
 | `just formal-verify` | every registered model check, sandboxed under rootless Podman with no network (`formal-image` builds the image once; `formal-verify-host` runs without Podman) |
 | `just migrate` | Alembic migrations against `DATABASE_URL` |
 | `just tui-demo`, `just dashboard` | the terminal run view and the run dashboard, on seeded demo runs |
+| `just lint-mermaid`, `just mermaid-render FILE` | the Mermaid syntax check over `README.md`, `docs/` and `wiki/`; a render to PNG from the digest-pinned image |
 
 `DATABASE_URL` defaults to `postgresql://effective:effective@localhost:5432/effective`; the test
 Postgres may come up on another port (`PGTEST_PORT`), which the recipes read.

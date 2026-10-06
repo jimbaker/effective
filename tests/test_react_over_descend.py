@@ -10,12 +10,12 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition
+from _conformance import Fault, FaultPosition, at_every_op
 
-from agent.compose import ASK_HUMAN, make_act
 from effective.api import Effect, qualified_event_name, scoped
 from effective.budget import Grant, depth_grant_name
 from effective.combinators import grant_cascade, human_grant
+from effective.compose import ASK_HUMAN, make_act
 from effective.domain import AskLLM, CallTool, DomainOp
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
@@ -143,10 +143,8 @@ def test_a_human_grant_adds_turns_across_a_crash_at_every_op_on_both_engines(bac
     assert unarmed.count == GRANT_CYCLE_OPS[position], (
         "the loop changed shape; re-derive the bound"
     )
-    for k in range(1, unarmed.count + 1):
-        fault = Fault(k, position=position)
+    for k, fault in at_every_op(unarmed):
         snap, domain = run_granted(backend, fault)
-        assert fault.armed is False, f"k={k}: the fault never fired"
         assert snap.state == "completed", (k, snap)
         assert snap.result == {"steps": 3, "stop": "max_iters"}, k
         if position is FaultPosition.BEFORE_OP:

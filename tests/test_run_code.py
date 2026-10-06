@@ -427,7 +427,7 @@ class _CodeInterp:
 
 
 def test_run_code_end_to_end_action_runs_exactly_once():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     sent: list[dict] = []
 
@@ -475,7 +475,7 @@ def test_skill_script_activates_pins_and_executes(tmp_path):
     its script in the sandbox — the source comes off the activation checkpoint
     (a registry swap after activation changes nothing), and the segment records
     the hash-keyed origin."""
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
     from effective.skills import DISCLOSE_TOOL, SkillRegistry, activate_skill
 
     pack = tmp_path / "summarize"

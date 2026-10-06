@@ -1,10 +1,10 @@
 """debug_loop: a debugging objective loop, built on `improve`.
 
-Debugging is not a new capability: it is the objective loop (`effective.improve.improve`)
-with **propose = the precise-edit `Gated` channel** (`agent.precise_edit`), **score = run
-the tests *and* rate the quality**, and **done = the hard objective is met, then the soft
-one**. It composes existing seams with no new op, and delegates its control to `improve`
-rather than hand-rolling a `while`.
+Debugging is not a new capability: it is the objective loop (`effective.improve.improve`) with
+**propose = the precise-edit `Gated` channel** (`effective.interpreters.precise_edit`), **score =
+run the tests *and* rate the quality**, and **done = the hard objective is met, then the soft
+one**. It composes existing seams with no new op, and delegates its control to `improve` rather
+than hand-rolling a `while`.
 
 **The Pareto tension, made concrete.** Passing the tests is not the only objective: the
 code must also meet the project's constraints — in this repo, **CLAUDE.md is the quality
@@ -41,12 +41,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from agent.precise_edit import Edit, make_precise_editor
 from effective import Effect, Refused, ask_llm, step
 from effective.cost import CostBudget, MeteredInterpreter
 from effective.domain import CallTool
 from effective.govern import routable
 from effective.improve import Measurement, Reflection, Summarize, improve
+from effective.interpreters.precise_edit import Edit, make_precise_editor
 from effective.pareto import Objective
 
 

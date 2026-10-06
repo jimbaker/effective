@@ -59,7 +59,7 @@ two expressions is the demonstration that they are one topology.
 
 **The fleet op has no op kind of its own.** It decomposes into ops that exist: a checkpointed
 spawn of a child task and an `AwaitEvent` on that child's done event (`spawn_child` and
-`join_child` in `src/effective/spawning.py`; `agent.compose.spawn_subagent_task` composes them,
+`join_child` in `src/effective/spawning.py`; `effective.compose.spawn_subagent_task` composes them,
 and `tests/test_spawned_subagent.py` proves a parent crash neither re-spawns nor restarts the
 child). The handler holds a spawn to the task's depth budget and refuses one past it. An N-way
 fleet is a loop of spawns followed by a loop of joins (`marginal_sweep` in

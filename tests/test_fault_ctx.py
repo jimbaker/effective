@@ -20,7 +20,7 @@ from contextlib import suppress
 from typing import Any
 
 import pytest
-from _conformance import Fault, FaultCtx, FaultInjected, FaultPosition
+from _conformance import Fault, FaultCtx, FaultInjected, FaultPosition, at_every_op
 
 
 class _Store:
@@ -121,3 +121,14 @@ def test_a_settle_the_store_holds_crashes_only_before_the_op(position, crashes):
     with suppress(FaultInjected):
         FaultCtx(store, fault).settle("choice", {"kind": "timeout"})
     assert (fault.fired, store.values["choice"]) == (int(crashes), {"kind": "winners"})
+
+
+def test_at_every_op_refuses_a_fault_that_never_fired():
+    """The crash sweeps share this check, so a run that skipped the crash cannot pass as one."""
+    unarmed = Fault()
+    unarmed.count = 2
+    walk = at_every_op(unarmed)
+    k, fault = next(walk)
+    assert (k, fault.k, fault.armed) == (1, 1, True)
+    with pytest.raises(AssertionError, match="never fired"):
+        next(walk)

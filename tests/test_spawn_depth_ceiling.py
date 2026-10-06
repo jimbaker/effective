@@ -10,9 +10,8 @@ from functools import partial
 from typing import Any
 
 import pytest
+from _spawning import sqlite_spawner
 
-from agent.bench import scripted_caller
-from agent.runtime import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective.api import append_ledger, await_event, call_tool, gather
 from effective.budget import BUDGET_DEPTH_PARAM
 from effective.checkpoints import read_sqlite_conn
@@ -23,6 +22,8 @@ from effective.fork import ForkOutcome, join_fork, run_fork_as_task, spawn_fork
 from effective.govern import Refused
 from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
+from effective.interpreters.scripted import scripted_caller
+from effective.interpreters.tools import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ops import ACCRUAL_PARAM, CARRY_PARAM, GENERATION_PARAM, AppendLedgerRow, LedgerRow
 from effective.react import AssistantTurn, ToolRequest
@@ -44,21 +45,7 @@ def no_model(op: AskLLM[Any]) -> tuple[Any, Usage]:
 
 
 def spawning_domain(app: SqliteApp, llm: LLMCall = no_model) -> MeteredInterpreter:
-    def spawner(
-        task_name: str,
-        params: dict,
-        idempotency_key: str,
-        queue: str,
-        *,
-        max_attempts: int | None = None,
-    ) -> str:
-        return str(
-            app.spawn(
-                task_name, params, idempotency_key=idempotency_key, max_attempts=max_attempts
-            )
-        )
-
-    agents = {SPAWN_TOOL: spawn_tool(spawner)}
+    agents = {SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}
     return MeteredInterpreter(llm=llm, tools=make_tool_runner({}, agents=agents))
 
 
@@ -321,22 +308,9 @@ def test_the_spawn_capability_answers_only_its_reserved_name(app):
     name, so the capability must not answer any other."""
     register_noop_child(app)
 
-    def spawner(
-        task_name: str,
-        params: dict,
-        idempotency_key: str,
-        queue: str,
-        *,
-        max_attempts: int | None = None,
-    ) -> str:
-        return str(
-            app.spawn(
-                task_name, params, idempotency_key=idempotency_key, max_attempts=max_attempts
-            )
-        )
-
     aliased = MeteredInterpreter(
-        llm=no_model, tools=make_tool_runner({}, agents={"delegate": spawn_tool(spawner)})
+        llm=no_model,
+        tools=make_tool_runner({}, agents={"delegate": spawn_tool(sqlite_spawner(app))}),
     )
 
     @app.register_task("parent")

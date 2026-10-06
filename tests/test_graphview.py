@@ -432,11 +432,11 @@ def test_the_fold_is_TOTAL_over_what_callers_hand_it_not_only_over_the_language(
     """The regression that decided how the drop is implemented, and it is not hypothetical: it
     reddened `test_experiment_legibility_at_three_scales` before it was a pin of its own.
 
-    `agent.lineage.canonical` rewrites a scope token to the hole `{run}` — deliberately not in the
-    key language, because it marks the place a token was scrubbed. A drop that requires a valid
+    `effective.lineage.canonical` rewrites a scope token to the hole `{run}`, deliberately not in
+    the key language, because it marks the place a token was scrubbed. A drop that requires a valid
     `parse` returns such a key unchanged, silently keeping the gather coordinate the fold has just
     reported as `dropped`. Nothing about a frame boundary needs the atoms to validate."""
-    from agent.lineage import canonical
+    from effective.lineage import canonical
 
     scrubbed = canonical(
         ["gather:0,1;ledger;r-fan:m", "gather:0,2;ledger;r-fan:m"], scrub=["r-fan"]
@@ -478,8 +478,8 @@ def test_dropping_the_frames_never_rewrites_the_key_that_survives():
 @pytest.mark.parametrize("frames", ["", "gather:0,0;", "gather:0,0;gather:1,1;", "rec:0;"])
 def test_the_frame_walk_agrees_with_the_anchored_pattern_it_replaced(key, frames):
     """A differential over the shapes a real graph carries, so the new walk cannot quietly change
-    an answer `strip_branches` was already giving. `rec:0;` is the row where they are MEANT to
-    differ — the walk drops it, the anchored `^gather:` pattern never could."""
+    an answer `strip_branches` was already giving. `rec:0;` is a frame neither strips: `rec` is
+    no frame arm, so both leave it in place, and a walk that began dropping it would differ."""
     from effective.keys.frame import FRAME_ARMS, past_frames
 
     framed = frames + key
@@ -851,9 +851,9 @@ def test_experiment_legibility_at_three_scales(tmp_path, capsys, sqlite_app):
     assert next(n.count for n in fan_folded.nodes if n.key == "gather:*,*;step;tool:fetch") == 4
 
     # The remedy already exists and is the same one cross-run alignment uses: canonicalize the
-    # varying tokens first (`agent.lineage.canonical`), then fold. That is a CALLER's choice:
+    # varying tokens first (`effective.lineage.canonical`), then fold. That is a CALLER's choice:
     # only the caller knows which tokens are scope and which are content.
-    from agent.lineage import canonical
+    from effective.lineage import canonical
 
     scrubbed = fold_cycles(
         from_keys(

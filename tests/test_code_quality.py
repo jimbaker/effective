@@ -89,7 +89,7 @@ def _edit(old: str, new: str) -> str:
 
 
 def test_debug_loop_stages_fix_then_lint_cleanup_against_real_ruff():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     ws = Workspace({"calc.py": BUGGY_UNCLEAN})
     client, completions = _client(

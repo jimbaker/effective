@@ -86,7 +86,7 @@ def _no_llm(op):
 
 
 def test_tune_permits_finds_the_safe_high_auto_policy():
-    from agent.runtime import LocalCtx
+    from effective.contexts import LocalCtx
 
     interp = MeteredInterpreter(
         llm=_no_llm, tools=make_policy_scorer(CORPUS), budget=CostBudget(1.0)

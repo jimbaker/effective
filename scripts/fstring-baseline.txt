@@ -57,18 +57,18 @@ src/agent/hotpotqa.py :: "() — read the paragraph titled ''" :: text
 src/agent/hotpotqa.py :: 'hotpot_' :: text
 src/agent/hotpotqa.py :: 'p' :: key -> compose_key
 src/agent/permit_tuning.py :: ' (human: deny)' :: text
-src/agent/precise_edit.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
-src/agent/runtime.py :: 'error: ' :: text
-src/agent/runtime.py :: 'unknown tool: ' :: text
-src/agent/session_telemetry.py :: '  cache-read tokens  : ' :: text
-src/agent/session_telemetry.py :: '  cache_hit_ratio    :    <- same dial as the GSM8K bench' :: text
-src/agent/session_telemetry.py :: '  est. cost (Opus)   : $' :: text
-src/agent/session_telemetry.py :: '  output tokens      : ' :: text
-src/agent/session_telemetry.py :: '  sidecar ->   (, OTLP)' :: text
-src/agent/session_telemetry.py :: '  total input tokens : ' :: text
-src/agent/session_telemetry.py :: ' violation(s)' :: text
-src/agent/session_telemetry.py :: 'LM.' :: text
-src/agent/session_telemetry.py :: 'session:   ( LLM turns)' :: text
+src/effective/interpreters/precise_edit.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
+src/effective/interpreters/tools.py :: 'error: ' :: text
+src/effective/interpreters/tools.py :: 'unknown tool: ' :: text
+src/effective/session_telemetry.py :: '  cache-read tokens  : ' :: text
+src/effective/session_telemetry.py :: '  cache_hit_ratio    :    <- same dial as the GSM8K bench' :: text
+src/effective/session_telemetry.py :: '  est. cost (Opus)   : $' :: text
+src/effective/session_telemetry.py :: '  output tokens      : ' :: text
+src/effective/session_telemetry.py :: '  sidecar ->   (, OTLP)' :: text
+src/effective/session_telemetry.py :: '  total input tokens : ' :: text
+src/effective/session_telemetry.py :: ' violation(s)' :: text
+src/effective/session_telemetry.py :: 'LM.' :: text
+src/effective/session_telemetry.py :: 'session:   ( LLM turns)' :: text
 src/agent/skillsbench.py :: '\n...[ chars elided]...\n' :: prompt -> channels
 src/agent/skillsbench.py :: '\n[exit code: ]' :: prompt -> channels
 src/agent/skillsbench.py :: '### Skill: \n\n' :: prompt -> channels
@@ -94,8 +94,8 @@ src/agent/tape_bank.py :: 'tape is vacuous for the walk:  turn(s) and  action(s)
 src/agent/tape_bank.py :: 'the fresh tape VIOLATES the transcript property ( violation(s) over  witnessed turn(s)):\n\n\nThat is a defect in the loop, not in the run — banking it would install a fixture that agrees with the bug. Nothing was displaced.' :: text
 src/agent/tape_bank.py :: 'this tape is vacuous for the walk ( turns,  actions; need /). The model gave up rather than working the problem, which happens. Re-run to try again; nothing was displaced.' :: text
 src/agent/tasks.py :: '(?<!\\d)(?!\\d)' :: text
-src/agent/voi.py :: 'probe+' :: text
-src/agent/voi.py :: 'probe+$' :: text
+src/effective/voi.py :: 'probe+' :: text
+src/effective/voi.py :: 'probe+$' :: text
 src/effective/bridge_absurd.py :: 'c_' :: text
 src/effective/bridge_absurd.py :: 'e_' :: text
 src/effective/bridge_absurd.py :: 'r_' :: text

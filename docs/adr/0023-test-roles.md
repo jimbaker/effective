@@ -1,9 +1,9 @@
 # ADR-0023: Test roles: what a test is for decides what its pass proves
 
 - **Date:** 2026-08-04
-- **Status:** Accepted. `pyproject.toml` registers five role markers, and the exemplars in §4
-  declare theirs; no gate requires every test to declare one. The set is open: a new role is
-  expected, with BDD a named candidate.
+- **Status:** Accepted. `pyproject.toml` registers five role markers under `--strict-markers`, a
+  test with no role is a `unit` test, and every other role is declared. The set is open: a new
+  role is expected, with BDD a named candidate.
 - **Relates to:** ADR-0016 (the three-tier proof partition; this names the test tier's internal
   structure and adds a second Lean-to-tests edge), ADR-0009 (the cross-backend conformance suite,
   the `conformance` role's exemplar).
@@ -140,9 +140,11 @@ re-running `just formal-vectors`.
 
 ## 6. Mechanics
 
-Markers are registered in `pyproject.toml` and applied to exemplars. No gate requires every test to
-declare a role: classification elsewhere is by filename and skip guard, and a universal migration
-is not what makes the vocabulary useful.
+Markers are registered in `pyproject.toml`, and `--strict-markers` refuses an unregistered one.
+A test that declares no role is a `unit` test: a collection hook in `tests/conftest.py` marks it,
+so `-m unit` selects every test whose pass proves one seam in isolation, and a test that proves
+more declares `spine`, `journey`, `adversarial` or `conformance`. The default is the common case,
+and the declaration marks the exception.
 
 `just cov-contexts` (`scripts/cov_contexts.py`, under `COVERAGE_CORE=pytrace`) records which test
 ran each line, so the unit-role overlap rule is queryable. Scope the query by marker, or it indicts

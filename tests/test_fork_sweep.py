@@ -19,9 +19,9 @@ from uuid import UUID, uuid4
 
 import pytest
 from _conformance import refusals_of
+from _spawning import sqlite_spawner
 from pydantic import BaseModel
 
-from agent.runtime import make_tool_runner, spawn_tool
 from effective.api import append_ledger, ask_llm, await_event
 from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, respawn
@@ -29,6 +29,7 @@ from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnResult
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.handlers.absurd import DurableHandler
+from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ops import LedgerRow
 from effective.parked import read_sqlite_parked_conn
@@ -65,9 +66,9 @@ def new_message_id() -> str:
 
     And it goes SILENTLY, which is the sharp half. Measured 2026-08-06:
     `json.dumps({"message_id": Segment("m1")})` is `{"message_id": "m1"}` and reads back a plain
-    `str` — because a `Segment` IS a `str`, the encoder has nothing to object to. Compare
-    `_spawner` below, where a `UUID` in the same payload raises `Object of type UUID is not JSON
-    serializable`; that one is an explicit exit precisely because it is loud. So the wrap goes
+    `str`: a `Segment` IS a `str`, so the encoder has nothing to object to. A `UUID` in the
+    same payload raises `Object of type UUID is not JSON serializable`, an exit that is explicit
+    because it is loud. So the wrap goes
     where the key is COMPOSED, which is downstream of every boundary."""
     return f"m{uuid4().hex[:8]}"
 
@@ -143,31 +144,6 @@ def failure_of(app: SqliteApp, outcome: ForkOutcome) -> tuple[tuple[str, str], t
     raise AssertionError(f"the fork child did not answer a failure: {outcome.answer!r}")
 
 
-def _spawner(app: SqliteApp):
-    """The engine-specific injection point.
-
-    ONE engine fact lives here now: the SQLite spawn takes an `idempotency_key`, so a crash
-    between the enqueue and the `Step`'s commit cannot enqueue a second child.
-
-    Delivery is broadcast on both engines, so the done-event name is the whole address and the
-    child needs no `reply_to`. The `idempotency_key`/`queue` difference is why the two spawners
-    are two."""
-
-    def spawn(
-        task_name: str,
-        params: dict,
-        idempotency_key: str,
-        queue: str,
-        *,
-        max_attempts: int | None = None,
-    ) -> UUID:
-        return app.spawn(
-            task_name, params, idempotency_key=idempotency_key, max_attempts=max_attempts
-        )
-
-    return spawn
-
-
 def _register_base(app: SqliteApp, message_id: str) -> None:
     @app.register_task("base")
     def base_task(params, ctx):
@@ -212,7 +188,7 @@ def _register(app: SqliteApp, base_task_id: UUID, message_id: str) -> None:
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -304,7 +280,7 @@ def test_a_refused_child_answers_instead_of_hanging_its_parent(tmp_path, sqlite_
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -348,7 +324,7 @@ def test_an_unjoined_spawn_is_a_detached_lineage_that_still_runs(tmp_path, sqlit
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(detach)
 
@@ -401,7 +377,7 @@ def test_ask_leaves_the_fork_point_open_for_a_human(tmp_path, sqlite_app):
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -494,7 +470,7 @@ def test_the_workflow_argument_is_the_BASE_run_id_so_a_workflow_may_use_it(tmp_p
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -581,7 +557,7 @@ def test_a_generation_boundary_inside_a_fork_is_refused_and_names_promotion(tmp_
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -684,7 +660,7 @@ def test_a_composition_refusal_in_a_child_answers_instead_of_hanging_the_sweep(
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
@@ -760,7 +736,7 @@ def test_a_GOVERNED_denial_in_a_forked_tail_answers_the_parent(tmp_path, sqlite_
 
         domain = MeteredInterpreter(
             llm=lambda _op: ("unused", Usage()),
-            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(_spawner(app))}),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
         )
         return DurableHandler(ctx, domain).run(sweep)
 
