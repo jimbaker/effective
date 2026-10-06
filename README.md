@@ -9,13 +9,13 @@ the same generator is recorded in a test, replayed from that recording, or run d
 crashed worker resumes by replaying the steps it already took.
 
 The prompts are **t-strings**. A prompt is a `t"..."` whose interpolations are typed channels:
-inputs render in, and outputs declare the schema the answer must parse into. A `Gated` output runs a
-check over the answer, which is a guardrail on the data boundary.
+inputs render in, and outputs declare the schema the response must parse into. A `Gated` output runs a
+check over the response, which is a guardrail on the data boundary.
 
 ## An agent loop is a state machine
 
-A ReAct agent reasons, acts and observes, and something drives it: it asks the model, runs the
-tool, and sends the answer back. Agent frameworks let you customize that machine with hooks on its
+A ReAct agent reasons, acts and observes, and something drives it: it calls the model, runs the
+tool, and sends the result back. Agent frameworks let you customize that machine with hooks on its
 edges: before a call, after a call, on a prompt, before stopping. Claude Code calls them
 `PreToolUse`, `PostToolUse`, `UserPromptSubmit` and `Stop`.
 
@@ -24,12 +24,12 @@ block-beta
     columns 5
     space:2 world["<b>World</b><br/>the model, tools, people"] prompt(["on a prompt"]) space
     space before(["before a call"]) space after(["after a call"]) space
-    workflow["<b>Workflow</b><br/>a generator: its frames<br/>hold the state"] space handler["<b>Handler</b><br/>drives the loop,<br/>answers ops"] space:2
+    workflow["<b>Workflow</b><br/>a generator: its frames<br/>hold the state"] space handler["<b>Handler</b><br/>drives the loop,<br/>interprets ops"] space:2
     stopping(["before stopping"]) space:4
     space:5
-    tape["<b>Tape</b><br/>one row per answer; on replay it answers first"]:5
+    tape["<b>Tape</b><br/>one row per result; on replay it serves results first"]:5
     workflow -- "yield op ⇄ send" --- handler
-    handler -- "ask ⇄ answer" --- world
+    handler -- "call ⇄ result" --- world
     handler -- "append ⇄ replay" --- tape
     classDef hook fill:#fdebd9,stroke:#c2410c,color:#9a3412
     classDef hub stroke:#1d6fd6,stroke-width:2px
@@ -89,7 +89,7 @@ A layer runs again when a run replays: it sees each replayed op and its recorded
 effect that must happen once belongs in an op. A layer that yields an `AwaitEvent` parks the run
 until a person answers. `govern` composes
 several checks into one gate that proceeds, parks or refuses. Retry belongs one level down, in
-`retry_domain` on the interpreter that answers the op
+`retry_domain` on the interpreter that interprets the op
 (`MeteredInterpreter(..., domain_layers=[retry_domain()])`): it retries inside the op's one
 checkpoint, where a re-yielded op would take a new checkpoint name and a crash would run it again.
 
@@ -109,8 +109,8 @@ def set_temperature(request_id: str, request: str, ceiling: float = 30) -> Effec
     celsius = Gated(float, lambda c: 10 <= c <= ceiling, "celsius outside the allowed range")
     prompt = t"The occupant said: {request}\nSet the thermostat to {celsius}"
     setpoint = render(prompt, output=Setpoint)
-    answer = yield from ask_llm("setpoint", setpoint.messages, dict)
-    match setpoint.resolve(answer):
+    response = yield from ask_llm("setpoint", setpoint.messages, dict)
+    match setpoint.resolve(response):
         case Repair() as repair:
             return repair
         case Setpoint(celsius=target):
@@ -125,15 +125,15 @@ It runs as a task on the embedded SQLite engine, in a temporary file, and prints
 |---|---|
 | `run` | each op is a checkpointed step, and the keys printed are the checkpoints |
 | `resume` | the thermostat is offline on the first attempt; the retry replays the setpoint from the file and asks the model nothing more |
-| `guardrail` | the model answers 45°C, the `Gated` check fails, and the workflow returns a `Repair` before it reaches the thermostat |
+| `guardrail` | the model responds with 45°C, the `Gated` check fails, and the workflow returns a `Repair` before it reaches the thermostat |
 
 `resolve` returns `Repair(reason)` when a check fails; the workflow decides what to do with it:
 return it, as here, or re-prompt with the reason.
 
 ## Durability is a tape
 
-A durable handler writes each answer down before the workflow sees it. After a crash, a new worker
-runs the workflow from the top, and the tape answers every op it holds an answer for:
+A durable handler writes each result down before the workflow sees it. After a crash, a new worker
+runs the workflow from the top, and the tape serves every op it holds a result for:
 
 ```mermaid
 sequenceDiagram
@@ -144,7 +144,7 @@ sequenceDiagram
     W->>H: yield ask_llm("setpoint")
     H->>M: ask
     M-->>H: {"celsius": 22}
-    H->>T: append the answer
+    H->>T: append the result
     H-->>W: send {"celsius": 22}
     Note over W,M: the worker crashes, and a new one runs the workflow from the top
     W->>H: yield ask_llm("setpoint")
@@ -154,7 +154,7 @@ sequenceDiagram
 ```
 
 Nothing is captured from a frame: suspension is replay. A durable handler finds each recorded
-answer **by the op's name**. It serves an op it has an answer for and runs an op it has none for.
+result **by the op's name**. It serves an op it has a result for and runs an op it has none for.
 A changed prompt or tool argument keeps the name, so it is served the recorded result; a changed
 result type validates that result against the new type, and fails the run if it does not fit.
 A test is where a change in which ops are yielded, under which names, or in what order is caught:
@@ -172,7 +172,7 @@ step of a task, and a wait is the engine's own await. The engine holds the tape:
 
 The two engines run one conformance suite through the same handler (`tests/_conformance.py`), and
 the durable tests crash a run at every op and resume it. Testing a workflow needs neither: two
-in-memory handlers answer from canned responses and replay a recording (`wiki/concepts/testing.md`).
+in-memory handlers serve canned results and replay a recording (`wiki/concepts/testing.md`).
 
 ## What's in the box
 
@@ -192,10 +192,10 @@ All under `src/effective/` unless noted.
 | permission: a fail-closed cascade of rules and a human | `permission.py`, `parked.py` |
 | cost: metered model calls, spend caps that survive a crash, a cache | `cost.py`, `budget.py`, `spend.py`, `cache.py` |
 | telemetry: OTLP/JSON spans under the OpenTelemetry GenAI conventions, joined to the run by key | `telemetry.py` |
-| counterfactuals: fork a recorded run at an op, change one answer, replay the rest | `fork.py`, `counterfactual.py` |
+| counterfactuals: fork a recorded run at an op, change one result, replay the rest | `fork.py`, `counterfactual.py` |
 | optimization: `improve` (reflective prompt evolution) over a Pareto frontier of cost, quality and latency | `improve.py`, `pareto.py`, and the benches in `src/agent/` |
 | the read side: a run as a graph, cards, a dashboard, a terminal viewer | `graphview.py`, `cards/`, `dashboard.py`, `runview.py`, `src/tui/` |
-| interpreters that answer ops: OpenAI, the `claude -p` and `codex exec` CLIs, a judge service, a shell, the web | `interpreters/` |
+| interpreters for ops: OpenAI, the `claude -p` and `codex exec` CLIs, a judge service, a shell, the web | `interpreters/` |
 
 ## Examples
 
@@ -216,7 +216,7 @@ All under `src/effective/` unless noted.
 |---|---|
 | `docs/intro.md` | the model in ten minutes: generator, handler, tape, layers, combinators |
 | `docs/first-workflow.md` | the first workflow, line by line |
-| `wiki/concepts/testing.md` | testing a workflow: canned answers, replay as the determinism oracle, crash at every op |
+| `wiki/concepts/testing.md` | testing a workflow: canned results, replay as the determinism oracle, crash at every op |
 | `docs/effective-101.md` | the concepts in depth: the op set, the combinator algebra, the temporal shapes |
 | `wiki/index.md` | one concept a page, and the index of architecture decisions |
 | `wiki/references.md` | the work Effective builds on: Recursive Language Models, GEPA, ReAct, Absurd, tdom and more |

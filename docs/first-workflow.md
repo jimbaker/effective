@@ -3,7 +3,7 @@
 One file, run three ways, with no model and no service. `examples/first_workflow.py` is a house
 agent: it asks a model for a setpoint, sets the thermostat, and records what it did. It runs as a
 durable task on the embedded SQLite engine, in a temporary file: once as it should, once through
-a thermostat outage that the retry resumes, and once with a guardrail refusing a bad answer.
+a thermostat outage that the retry resumes, and once with a guardrail refusing a bad response.
 
 ## Run it
 
@@ -65,8 +65,8 @@ def set_temperature(request_id: str, request: str, ceiling: float = 30) -> Effec
     celsius = Gated(float, lambda c: 10 <= c <= ceiling, "celsius outside the allowed range")
     prompt = t"The occupant said: {request}\nSet the thermostat to {celsius}"
     setpoint = render(prompt, output=Setpoint)
-    answer = yield from ask_llm("setpoint", setpoint.messages, dict)
-    match setpoint.resolve(answer):
+    response = yield from ask_llm("setpoint", setpoint.messages, dict)
+    match setpoint.resolve(response):
         case Repair() as repair:
             return repair
         case Setpoint(celsius=target):
@@ -84,9 +84,9 @@ generator: it yields ops and returns a `float` or a `Repair`.
 
 | line | what it does |
 |---|---|
-| `t"…"` | a PEP 750 template. `render` walks it: `{request}` is an input, rendered into the prompt; `{celsius}` is a `Gated` **output channel**, declaring a field the answer must carry and a check it must pass. A channel is named by what is inside its braces, and the channels must match the fields of `output=` one to one: rename the variable to `temp`, or give `Setpoint` a field no channel fills, and `render` raises `ChannelMismatchError` |
-| `ask_llm("setpoint", setpoint.messages, dict)` | one model step. The first argument is the step's **name**, the identity replay matches on. A name like `setpoint` or `set_point.v2` is one atom; the handler refuses one that is not, such as `water plan`, when it mints the step's key, and its error lists the forms an atom takes. The last is the type of the raw answer. It is shorthand for `step("setpoint", AskLLM(setpoint.messages, dict))` |
-| `setpoint.resolve(answer)` | parses the answer into a `Setpoint`, or returns a `Repair` whose `reason` says what was wrong: a missing field, a bad value, a failed check, or an answer that is not a mapping of fields at all. The `reason` is the text a re-prompt would send back |
+| `t"…"` | a PEP 750 template. `render` walks it: `{request}` is an input, rendered into the prompt; `{celsius}` is a `Gated` **output channel**, declaring a field the response must carry and a check it must pass. A channel is named by what is inside its braces, and the channels must match the fields of `output=` one to one: rename the variable to `temp`, or give `Setpoint` a field no channel fills, and `render` raises `ChannelMismatchError` |
+| `ask_llm("setpoint", setpoint.messages, dict)` | one model step. The first argument is the step's **name**, the identity replay matches on. A name like `setpoint` or `set_point.v2` is one atom; the handler refuses one that is not, such as `water plan`, when it mints the step's key, and its error lists the forms an atom takes. The last is the type of the raw response. It is shorthand for `step("setpoint", AskLLM(setpoint.messages, dict))` |
+| `setpoint.resolve(response)` | parses the response into a `Setpoint`, or returns a `Repair` whose `reason` says what was wrong: a missing field, a bad value, a failed check, or a response that is not a mapping of fields at all. The `reason` is the text a re-prompt would send back |
 | `call_tool("thermostat", {"celsius": target}, str)` | one tool step: the tool's name, its arguments, and the type of its result. Its step is named `tool:` plus the tool, so it is shorthand for `step("tool:thermostat", CallTool(name="thermostat", result_schema=str, args={"celsius": target}))` |
 | `append_ledger(LedgerRow(…))` | one row on the append-only ledger. `LedgerRow` is a pydantic model, and fields past `event_id` and `kind`, like `celsius`, ride on the row |
 | `compose_key(t"setpoint:{Subject(request_id)}")` | the row's id. A bare `str` is refused because it could carry a separator and make two ids collide. A marker says what the coordinate is: `Subject` for the domain's own value, `Run` for a run id, `Name` for a position, `Index` for a counter over re-executions of ONE position, `Ordinal` for a counter over distinct positions of one kind. The last two read alike and a view treats them oppositely: it folds the `Index` away and keeps the `Ordinal`. Each marks one atom, such as `r1` or `bed-1`, and `compose_key` refuses what is not one, such as `a:b`, `007` or `2026-09-11`. A second coordinate follows a comma: `t"setpoint:{Name(house)},{Index(n)}"` |
@@ -106,8 +106,8 @@ belongs in its own module. `just lint` runs the same check over the workflow fil
 ```python
 @dataclass
 class House:
-    """The world the ops reach: a model that always answers `celsius`, and a thermostat that is
-    offline for its first `outages` calls. `attempts` counts the times the task ran."""
+    """The world the ops reach: a model that always responds with `celsius`, and a thermostat
+    that is offline for its first `outages` calls. `attempts` counts the times the task ran."""
 
     celsius: float = 22
     outages: int = 0
@@ -169,19 +169,19 @@ def main() -> None:
     print("guardrail:", done.result, "via", *steps)
 ```
 
-`House` is the world the ops reach: a model that always gives the same answer, and a thermostat
-that can be offline. `MeteredInterpreter` connects the two to the op kinds: `llm` answers an
-`AskLLM` with the answer and its token usage, and `tools` answers a `CallTool`. `run_durably`
+`House` is the world the ops reach: a model that always gives the same response, and a thermostat
+that can be offline. `MeteredInterpreter` connects the two to the op kinds: `llm` interprets an
+`AskLLM` with the response and its token usage, and `tools` interprets a `CallTool`. `run_durably`
 registers the workflow as a task on `SqliteApp`, spawns it, and runs it until it ends.
 
 | output line | what happened |
 |---|---|
-| `run` | `DurableHandler` runs each op as a checkpointed step of the task, so the file records each answer before the workflow sees it. The keys printed are those checkpoints: `step:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`, where `;` joins the terms of one key |
-| `resume` | the thermostat is offline on the first attempt, so the attempt fails and the engine retries the task: two attempts. The retry runs the workflow from the top, the file answers `setpoint` with the recorded result, and only the thermostat call runs again: the model was asked once. Nothing is captured from a frame; suspension is replay |
-| `guardrail` | the model answers 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. A task's result is stored as JSON, so the `Repair` comes back as its fields |
+| `run` | `DurableHandler` runs each op as a checkpointed step of the task, so the file records each result before the workflow sees it. The keys printed are those checkpoints: `step:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`, where `;` joins the terms of one key |
+| `resume` | the thermostat is offline on the first attempt, so the attempt fails and the engine retries the task: two attempts. The retry runs the workflow from the top, the file serves `setpoint` its recorded result, and only the thermostat call runs again: the model was asked once. Nothing is captured from a frame; suspension is replay |
+| `guardrail` | the model responds with 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. A task's result is stored as JSON, so the `Repair` comes back as its fields |
 
 The workflow never names its handler. `examples/testing_a_workflow.py` runs the same
-`set_temperature` under the two test handlers, with canned answers and then a replay that refuses
+`set_temperature` under the two test handlers, with canned results and then a replay that refuses
 a changed program; `wiki/concepts/testing.md` says what each is for.
 
 ## What you imported
@@ -191,7 +191,7 @@ a changed program; `wiki/concepts/testing.md` says what each is for.
 | `Effect` | `effective` | the type of a workflow: a generator that yields ops and returns a result |
 | `ask_llm`, `call_tool`, `append_ledger`, `step` | `effective` | the author surface: typed wrappers you `yield from` |
 | `compose_key`, `Subject`, `Run`, `Name`, `Index`, `Ordinal` | `effective` | identities built from t-strings, and what each coordinate means |
-| `MeteredInterpreter`, `Usage` | `effective` | what answers a model call and a tool call, and a model call's token usage |
+| `MeteredInterpreter`, `Usage` | `effective` | what interprets a model call and a tool call, and a model call's token usage |
 | `Gated`, `Repair`, `render` | `effective.channels` | the data axis: typed prompt channels |
 | `ChannelMismatchError` | `effective.channels` | what `render` raises when the channels and the fields of `output=` disagree |
 | `LedgerRow` | `effective.ops` | the typed shape of a ledger append |

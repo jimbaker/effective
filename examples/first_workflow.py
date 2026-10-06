@@ -37,8 +37,8 @@ def set_temperature(request_id: str, request: str, ceiling: float = 30) -> Effec
     celsius = Gated(float, lambda c: 10 <= c <= ceiling, "celsius outside the allowed range")
     prompt = t"The occupant said: {request}\nSet the thermostat to {celsius}"
     setpoint = render(prompt, output=Setpoint)
-    answer = yield from ask_llm("setpoint", setpoint.messages, dict)
-    match setpoint.resolve(answer):
+    response = yield from ask_llm("setpoint", setpoint.messages, dict)
+    match setpoint.resolve(response):
         case Repair() as repair:
             return repair
         case Setpoint(celsius=target):
@@ -52,8 +52,8 @@ def set_temperature(request_id: str, request: str, ceiling: float = 30) -> Effec
 
 @dataclass
 class House:
-    """The world the ops reach: a model that always answers `celsius`, and a thermostat that is
-    offline for its first `outages` calls. `attempts` counts the times the task ran."""
+    """The world the ops reach: a model that always responds with `celsius`, and a thermostat
+    that is offline for its first `outages` calls. `attempts` counts the times the task ran."""
 
     celsius: float = 22
     outages: int = 0
