@@ -1,6 +1,6 @@
 # Effective
 
-Durable workflows and agents on algebraic effects, with PEP 750 t-strings as typed I/O channels.
+Agentic workflows as plain Python generators: composable, replayable, and durable. Model calls, Jev judgments, tools, and human approvals are typed ops.
 
 A workflow is a plain Python generator that **yields typed op descriptions**: ask a model, call a
 tool, wait for a human, append to the ledger, the run's append-only record. It performs none of

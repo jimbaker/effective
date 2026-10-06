@@ -1,7 +1,7 @@
 [project]
 name = "effective"
 version = "0.1.0"
-description = "Durable workflows on algebraic effects, with PEP 750 t-strings as typed I/O channels"
+description = "Agentic workflows as plain Python generators: composable, replayable, and durable. Model calls, Jev judgments, tools, and human approvals are typed ops."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
