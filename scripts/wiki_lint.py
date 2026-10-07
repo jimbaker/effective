@@ -1,7 +1,9 @@
 """The wiki's structural lint, made runnable.
 
-Structure only. It checks that every `[[link]]` resolves and that every page is
-reachable, since both rot silently as pages are added. Contradictions between
+Structure only. It checks that every link between pages resolves and that every
+page is reachable, since both rot silently as pages are added. A link between
+pages is a relative markdown link, `[name](other.md)`, so GitHub and an editor
+follow it as written. Contradictions between
 pages, a claim a newer document has superseded, and a task that is quietly done
 need a reader, and that half of the lint pass stays a reading job.
 
@@ -24,14 +26,20 @@ ones that were checked.
 
 This is a sibling of `scripts/link_check.py`, which grades the *citation* forms
 the maintained layer uses (repo-rooted paths, ADR numbers, `see §N` pointers).
-Neither sees what the other does: a `[[link]]` is invisible to link_check, and a
-repo path is invisible here.
+This one grades the links that join wiki pages; link_check grades the citations
+that leave the wiki.
 """
 
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+try:  # imported as a package member (tests, `from scripts.wiki_lint import …`)
+    from scripts.link_check import destinations
+except ImportError:  # run as a script: scripts/ is on sys.path, the repo root is not
+    from link_check import destinations
 
 ROOT = Path(__file__).resolve().parent.parent
 WIKI = ROOT / "wiki"
@@ -40,17 +48,28 @@ ENTRY = {"index", "log"}
 
 LINK = re.compile(r"\[\[([^\]]+)\]\]")
 CODE = re.compile(r"`[^`]*`")
+FENCED = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 
 
 def pages() -> dict[str, set[str]]:
-    """Page name to the pages it links out to, code spans ignored."""
+    """Page name to the pages it links out to, code ignored."""
     found = {}
     for path in sorted(WIKI.rglob("*.md")):
-        name = str(path.relative_to(WIKI).with_suffix(""))
+        name = path.relative_to(WIKI).with_suffix("").as_posix()
         if name == SCHEMA:
             continue
-        found[name] = set(LINK.findall(CODE.sub("", path.read_text(encoding="utf-8"))))
+        found[name] = outbound(path)
     return found
+
+
+def outbound(path: Path) -> set[str]:
+    """The wiki pages the page at `path` links to, each link resolved from it."""
+    names = set()
+    for target in destinations(path.read_text(encoding="utf-8")):
+        resolved = Path(os.path.normpath(path.parent / target))
+        if resolved.suffix == ".md" and resolved.is_relative_to(WIKI):
+            names.add(resolved.relative_to(WIKI).with_suffix("").as_posix())
+    return names
 
 
 DEFERRED = WIKI / "deferred.md"
@@ -115,25 +134,47 @@ def overlong_items() -> list[str]:
     ]
 
 
+def bracketed() -> list[str]:
+    """`[[page]]` links outside code, which GitHub renders as text."""
+    return [
+        f"{path.relative_to(WIKI).as_posix()}: [[{target}]]"
+        for path in sorted(WIKI.rglob("*.md"))
+        if path.stem != SCHEMA
+        for target in LINK.findall(CODE.sub("", FENCED.sub("", path.read_text(encoding="utf-8"))))
+    ]
+
+
+def structure(out: dict[str, set[str]]) -> list[str]:
+    """Dead links, orphan pages, and bracketed links, one line each."""
+    inbound = {to for tos in out.values() for to in tos}
+    return [
+        *(
+            f"DEAD   {src} links to {to}, which is not a page"
+            for src, tos in sorted(out.items())
+            for to in sorted(tos)
+            if to not in out
+        ),
+        *(f"ORPHAN {name} has no inbound link" for name in sorted(set(out) - inbound - ENTRY)),
+        *(
+            f"OLD    {link}: write a relative markdown link, [page](page.md)"
+            for link in bracketed()
+        ),
+    ]
+
+
 def main() -> int:
     out = pages()
     if not out:
         print("no wiki pages found; wiki/ is missing or empty")
         return 1
-    dead = sorted((src, to) for src, tos in out.items() for to in tos if to not in out)
-    inbound = {to for tos in out.values() for to in tos}
-    orphans = sorted(set(out) - inbound - ENTRY)
-
     print(f"{len(out)} pages, {sum(len(v) for v in out.values())} links\n")
     for name in sorted(out):
         n_in = sum(name in tos for tos in out.values())
         print(f"  {name:34} in:{n_in:3}  out:{len(out[name]):3}")
     print()
-    for src, to in dead:
-        print(f"DEAD   {src} links to [[{to}]], which is not a page")
-    for name in orphans:
-        print(f"ORPHAN {name} has no inbound link")
-    if not dead and not orphans:
+    for finding in (broken := structure(out)):
+        print(finding)
+    if not broken:
         print("no dead links, no orphans")
 
     if bloated := overlong_items():
@@ -149,7 +190,7 @@ def main() -> int:
         print(f"FIRED  {entry}")
     if fired:
         print("  act on it, or restate the condition -- a fired condition may not sit")
-    return 1 if dead or orphans or fired or bloated else 0
+    return 1 if broken or fired or bloated else 0
 
 
 if __name__ == "__main__":

@@ -212,12 +212,12 @@ parallel composition introduces none between siblings merely because one committ
 hands `grow` to `_grow_children`, which gathers over it, so any two-level `Branch` tree nests
 (`combinators.py:489-540`). The suite asserts the multiset half and says why: the ledger holds both
 branches' events, their relative order is a race, and so it is asserted as a set
-(`tests/test_conformance.py:532-541`). Whether the concurrent path should be
+([`tests/test_conformance.py:532-541`](../tests/test_conformance.py#L532-L541)). Whether the concurrent path should be
 canonicalized up to the recorder's guarantee is open, and §3.6 states it as such.
 
 **There are two ordered stores under a gather and they are separate questions.** The checkpoint
 sequence has its own race and its own quotient, asserted over `checkpoint_keys` rather than over
-rows (`tests/test_conformance.py:1737-1776`), and it is the checkpoint order, not the ledger, that
+rows ([`tests/test_conformance.py:1737-1776`](../tests/test_conformance.py#L1737-L1776)), and it is the checkpoint order, not the ledger, that
 a `fork_seed` cut walks (`fork.py:727-747`). Canonicalizing one settles nothing about the other.
 
 Two branches with disjoint checkpoint namespaces can still both touch one database row, cache key,
@@ -290,7 +290,7 @@ always-extending prefix reads a guarantee the storage does not give.
 idiom does not pay it.** Measured on both engines, with one shape written by `fix` and by `unfold`
 and two schedules forced through the op-layer seam of §3.6: the rows as a set agree, a fold whose
 keys are disjoint agrees, and last-write-wins over one shared key answers the schedule
-(`tests/test_reader_quotient.py`, `test_last_write_wins_over_a_shared_key_reads_the_schedule`). The
+([`tests/test_reader_quotient.py`](../tests/test_reader_quotient.py), `test_last_write_wins_over_a_shared_key_reads_the_schedule`). The
 substrate supplies no defense, since the key grammar makes every `event_id` distinct while the
 reader folds on a domain key it never sees, which is §3.3's identity-is-not-independence made live.
 
@@ -298,30 +298,30 @@ The same quotient is taken over
 the checkpoint sequence, in
 a test that records how it was learned: *"a first draft pinned one total sequence and the SQLite run
 matched it while Absurd interleaved the branches … pinning a total order would pin a schedule"*
-(`tests/test_conformance.py:1737-1776`).
+([`tests/test_conformance.py:1737-1776`](../tests/test_conformance.py#L1737-L1776)).
 
 **Only the multiset half is pinned for the ledger.** The precedence half is asserted for checkpoints
 and for nothing in the ledger, so the quotient above is the intended contract rather than a defended
-one. One exception: `tests/test_gather.py:137` does assert branch order on the recorder, over one
+one. One exception: [`tests/test_gather.py:137`](../tests/test_gather.py#L137) does assert branch order on the recorder, over one
 row per branch.
 
 **And the quotient alone does not buy the metatheorem**, which is the trap to avoid here. Two
 things survive it. Schedule-dependent *payloads* differ across handlers whatever the order, and a
 repeated `event_id` diverges by **outcome**: the recorder completes with two rows, while both
 durable engines refuse the run with `PlacedWriterCollision` and keep the one row that won (measured,
-both engines, `tests/test_conformance.py:2305`). No permutation of rows repairs that. So the
+both engines, [`tests/test_conformance.py:2305`](../tests/test_conformance.py#L2305)). No permutation of rows repairs that. So the
 statement needs a **well-formedness quantifier** over workflows with distinct authored identities,
 and that quantifier is necessary without being sufficient: an installed layer is a shared cell two
 distinct identities both touch, and it moves the payloads themselves (§9.4).
 
 The runtime `ReplayMismatch` check is this theorem for one trace. The conformance suite
-(`tests/_conformance.py`) checks it by example: **one workflow set, identical assertions, driven
+([`tests/_conformance.py`](../tests/_conformance.py)) checks it by example: **one workflow set, identical assertions, driven
 through the same handler against both engines.** A reimplementation that skips cross-engine
 conformance will ship an isolation its production engine cannot provide; that exact defect is what
 forced the discipline here.
 
 **A note on citations.** A bare basename below is under `src/effective/`, with the three handlers
-under `src/effective/handlers/`. `sqlite.py` is the exception: it sits at `src/effective/sqlite.py`,
+under `src/effective/handlers/`. `sqlite.py` is the exception: it sits at [`src/effective/sqlite.py`](../src/effective/sqlite.py),
 beside the handlers rather than among them.
 
 ### 3.6 Concurrency as it stands
@@ -360,7 +360,7 @@ needs uniquely labelled fixtures until that asymmetry closes.
 The only enabled-set in the repo is in a model rather than in the code: `gather.qnt` picks
 `oneOf(activeBranches)` and explores every interleaving, and it declines to impose the recorder's
 branch order, saying that branch rows append *in completion order* and that the index-ordered
-concatenation is not re-imposed there (`formal/quint/gather.qnt:123-134`, `:126-130`).
+concatenation is not re-imposed there ([`formal/quint/gather.qnt:123-134`](../formal/quint/gather.qnt#L123-L134), `:126-130`).
 
 **Branch-index ledger order is owned by nobody.** `gather.qnt` refers it outward to Lean's T2, and
 `Step.lean:25-29` defers gather back as compound, "inheriting determinism from the sub-relation".
@@ -426,11 +426,10 @@ returns holds a frame. So what bounds depth is whether a transition is a tail ca
 | tail, across tasks | `respawn`, whose generation boundary ends the task | constant per task |
 | continuation kept | `Branch` and its join; `recurse`; plain `yield from` recursion; nested `scoped` | a frame per level, a thread per `Branch` level |
 
-Measured on a one-child chain (2026-09-14): at the default recursion limit of 1000, 200 levels
-completed and 260 raised `RecursionError`; 260 completed with the limit raised to 4000
-by a one-child chain probe. The
-number reads the host's recursion limit with the thread budget behind it, so it is a property of
-neither the engine nor the shape; tuning a budget to "under 200" learns a false invariant. **Rewriting
+At the default recursion limit of 1000, a one-child chain raises `RecursionError` within a few
+hundred levels, and raising the limit raises the depth. The depth reads the host's recursion
+limit with the thread budget behind it, so it is a property of neither the engine nor the shape;
+tuning a budget to the depth one host reaches learns a false invariant. **Rewriting
 a recursion buys no depth; cutting its continuation does.** `Deeper(narrowed)` is a tail call
 returned as data, which is what lets the driver drop the level and loop.
 
@@ -830,7 +829,7 @@ checker can see, and the $\lambda$-calculus form stays in the docstring as the d
 at every node, so a boundary that does not compose shows up as a disagreement. Recursion is the
 forcing function; the defects it finds are rarely recursion bugs.
 
-`tests/_shapes.py` is the pattern, and `tests/test_shape_conformance.py` its first table. Each
+[`tests/_shapes.py`](../tests/_shapes.py) is the pattern, and [`tests/test_shape_conformance.py`](../tests/test_shape_conformance.py) its first table. Each
 shape is spelled **twice**: once by its combinator, once as open recursion closed with `fix`. The `fix` spelling is the reference, written
 directly with each level's ops scoped under `d:{depth}` and the recursive call outside that scope.
 `unfold` then has to reproduce its answer, its checkpoint names **and** its ledger rows, on both
@@ -843,7 +842,7 @@ $$
 
 A differential oracle written in the substrate's own vocabulary, with no mock and no golden file.
 
-**What it found.** `tests/test_coder_under_fix.py` runs a coding state machine that runs itself,
+**What it found.** [`tests/test_coder_under_fix.py`](../tests/test_coder_under_fix.py) runs a coding state machine that runs itself,
 each level handing the level below as its delegate. Three disagreements surfaced, none a recursion
 bug:
 
@@ -860,7 +859,7 @@ was found first by two plain nested calls. `fix` is the showcase because it make
 to write and hard to fudge, and the credit belongs to the nesting.
 
 **The assertions are spelled whole, not built.** A literal pins the bytes
-(`tests/test_coder_under_fix.py:124-133`):
+([`tests/test_coder_under_fix.py:124-133`](../tests/test_coder_under_fix.py#L124-L133)):
 
 ```python
 assert placements(ids) == [
@@ -1096,7 +1095,7 @@ and it is a partition, so Lean hands Quint a precondition that shrinks an *indep
 | file | theorems | what they discharge |
 |---|---|---|
 | `Keys.lean` | `keyBad_not_injective`, `key_injective`, `branch_disjoint`, `gather_naming_injective` | the Gather rule's $\biguplus$ side condition, plus a keying that drops the gather id, refuted as a `decide`-checked regression |
-| `Scopes.lean` | `flatten_injective_on` | the scope string layer, in a model whose separator is `/` (the code's is `;`, ADR-0016 names the gap): split at the last `/` uniquely recovers $(s,n)$ |
+| `Scopes.lean` | `flatten_injective_on` | the scope string layer, in a model whose separator is `/` (the code's is `;`, [ADR-0016](adr/0016-formalization-and-operational-semantics.md) names the gap): split at the last `/` uniquely recovers $(s,n)$ |
 | `Step.lean` | `step_deterministic` (T2), `replay_stable` (L2.5) | the same op in the same state yields the same outcome, for a fixed oracle |
 | `Ledger.lean` | `ledger_monotone` (T3), `ledger_idem`, `advance_nodup`, `L_not_function_of_C`, `C_not_function_of_L` | append-only, idempotent by `eid`, and the two bookkeepers' non-derivability |
 | `Govern.lean` | `refuse_dominates`, `park_asks_fuse`, `no_silent_proceed`, `combine_kind_perm_invariant`, `empty_refusal_still_refuses`, `combineBad_diverges` | the verdict fold's fail-closed direction, order-freedom and constructor-based classification |
@@ -1155,10 +1154,10 @@ Three kinds of entry are registered and all are enforced: checks that must pass,
 guards that must *fail*, and **teeth**, which flip a toggle and must fail. A tooth is what stops a
 model from passing because it stopped modeling anything.
 
-**The list lives in `scripts/formal_checks.sh` and nowhere else.** Read that file for the count and
+**The list lives in [`scripts/formal_checks.sh`](../scripts/formal_checks.sh) and nowhere else.** Read that file for the count and
 the bounds. This is not fastidiousness: both gate scripts once carried independent hand-lists, the
 host ran a subset and printed *"all four checks passed"*, and **four doc sites disagreed about the
-count**. `formal/quint/README.md:139-141` states the rule that follows, *"do
+count**. [`formal/quint/README.md:139-141`](../formal/quint/README.md) states the rule that follows, *"do
 not re-list them here, because a second list is a list that drifts"*, and this note obeys it.
 
 The fast gate (`just formal`: `lake build` + quint typecheck) runs in seconds and is in CI. The
@@ -1249,7 +1248,7 @@ entry and gather branches inherit the root's reader (`layers.py`'s `_metering`),
 subtotal reaches what a gate reads only when the barrier folds it (`absurd.py:1899-1900`), and a
 parked branch's partial subtotal is never folded at all. Measured on both engines: every leaf of a
 nested gather reads the \$1 committed before the outer gather, and the ask after the barrier reads
-\$5 (`tests/test_gate_meter.py`, `test_a_gate_in_a_branch_reads_the_root_spend`).
+\$5 ([`tests/test_gate_meter.py`](../tests/test_gate_meter.py), `test_a_gate_in_a_branch_reads_the_root_spend`).
 
 **And measured under a schedule chosen to break it**, which is the §3.6 seam used as an instrument
 rather than described. That test runs three arms: one takes whichever interleaving the run gives,
@@ -1298,7 +1297,7 @@ deliberate: *not turtles all the way down, but we have turtles.*
 |---|---|---|---|
 | I1 | injectivity | Lean `key_injective`, `branch_disjoint`, `gather_naming_injective`, `flatten_injective_on`; Quint imports the gather one | **discharged**, with (A-serialize) named and discharged in code. The composed gather × scope node stays open |
 | I2 | totality | Quint `gather.qnt total`, `noDeadlock` | **totality by rejection, in one place only.** An await in a branch under a ctx with no `peek_event` is a loud `NotImplementedError`. Await and sleep inside a branch otherwise **park** (fact 4) rather than being refused |
-| I3 | liveness | Quint `gather.qnt liveness` under fairness | **partial.** Covers the suspend-in-gather instance; lease reclaim is unmodeled formally, though `tests/test_absurd_lease_reclaim.py` covers it on the deployed engine |
+| I3 | liveness | Quint `gather.qnt liveness` under fairness | **partial.** Covers the suspend-in-gather instance; lease reclaim is unmodeled formally, though [`tests/test_absurd_lease_reclaim.py`](../tests/test_absurd_lease_reclaim.py) covers it on the deployed engine |
 | I4 | observer termination | none | **out of scope.** No op carries an observer: watching a run is telemetry, outside the op set |
 | I5 | two bookkeepers | Lean `ledger_monotone`, `ledger_idem`, `L_not_function_of_C` | **partial by design.** The architectural seal (a DB trigger plus a sealed inspect view) is out of model and held by tests |
 | I6 | determinism | Lean `step_deterministic`, `replay_stable`, `operational_confluent`; Quint assumes T2 | **partial, and the split is the useful part.** Schedule-independence of the executed *set* is proved for accrual; the *order* of the branch-index join is not, on either tier. The split runs along concurrency rather than along order: `ledger_monotone` proves a positive `List`-valued prefix order (`Ledger.lean:59`), over `Advances`, a **sequential** relation with no branch in it. Where a schedule exists, in `Budget.Step` over a bag of branches, every positive result is `Multiset`-valued and the two `List`-valued ones are the negatives `shared_gate_order_dependent` and `shared_lock_insufficient`. So order is proved where nothing interleaves, and refuted where something does |
@@ -1316,12 +1315,12 @@ claim about coverage that nobody can audit.
 | cancelling a loser's own work | a quorum stops its losers at op admission, which is not the same as stopping a request already sent: an op past admission runs to its end and records its result, and its spend reaches the meter at the barrier. Stopping an op mid-stream exists for an op a face stops, recorded as a `Cancelled` result; a loser does not use it, and whether a provider stops billing on disconnect is unmeasured |
 | a race's alternatives parking | an await or a sleep inside a race branch is refused by the op's kind, so a race today is among branches that are running. Lifting it reuses a gather's park-and-replay path, and racing several alternatives parked on DISTINCT events needs an engine wait-any, which neither engine has |
 | a deadline over branches that PARK | a race's deadline is built and so is a bounded wait, both taking an absolute instant. Neither reaches a race whose branches are parked, since a race branch may not park at all. The ctx surfaces also still differ: `await_until` answers a `WaitOutcome` on SQLite alone |
-| compensating what a stopped loser committed | cancellation's residue is reversal, and forced: a committed row is undone only by a later row, and a cancel that unwound a captured stack is what the no-`call/cc` invariant refuses. The cut is voluntary, so no enumeration over cuts is owed, and the signal races the loser, so the footprint to compensate is the one the barrier sees. `wiki/concepts/recursion-shapes.md` |
+| compensating what a stopped loser committed | cancellation's residue is reversal, and forced: a committed row is undone only by a later row, and a cancel that unwound a captured stack is what the no-`call/cc` invariant refuses. The cut is voluntary, so no enumeration over cuts is owed, and the signal races the loser, so the footprint to compensate is the one the barrier sees. [`wiki/concepts/recursion-shapes.md`](../wiki/concepts/recursion-shapes.md) |
 | sharing | memoization and dynamic programming need two paths to reach one durable result. A naming rule where placement always separates footprints cannot express it, so a sharing combinator must name its subproblem by a semantic key the author supplies |
 | `monitor` | the name is reserved for evaluation over outside arrivals, which waits on a bridge that delivers them. Watching a run while it goes is telemetry, with no op |
 | await inside a `gather` branch | an author's relative `await_event` works and parks the round, given a ctx with `peek_event`; a spawn *done-event* await is refused because it is `ABSOLUTE` and no frame may complete it, which is why `AcrossTasks` exists |
 | sleep inside a `gather` branch | the durable path parks; the recorder makes it a silent no-op, a named divergence between the two |
-| a schedule DERIVED rather than named | a named schedule is test data now (`tests/_schedules.py` blocks at the §3.6 seam and releases on completion), and nothing in `src/` chooses one. `tests/_shapes.py` derives two per shape row from a first run, its innermost branches in index order and reversed. What is missing is enumeration: a suite tests those two and the interleavings someone thought of, and none of them survives a crash |
+| a schedule DERIVED rather than named | a named schedule is test data now ([`tests/_schedules.py`](../tests/_schedules.py) blocks at the §3.6 seam and releases on completion), and nothing in `src/` chooses one. [`tests/_shapes.py`](../tests/_shapes.py) derives two per shape row from a first run, its innermost branches in index order and reversed. What is missing is enumeration: a suite tests those two and the interleavings someone thought of, and none of them survives a crash |
 | an independence relation | (A-independence) is named in §9.4 and discharged nowhere. Until something supplies it, a reducer treats every pair of events as dependent and prunes nothing |
 | a reduction that survives a crash | reducing schedules and then sweeping crashes needs a theorem nobody has. Keep $ab$ of a commuting pair and crash at every boundary, and the surviving sets are $\varnothing$, $\{a\}$, $\{a,b\}$: never $\{b\}$, which a crash during $ba$ reaches. Equivalence on completed runs licenses nothing about recovery |
 | `gather` determinism in Lean | the index-ordered join is argued in a docstring and pinned by test. Quint refers the order outward to Lean and `Step.lean:25-29` defers gather back, so the referral closes a circle |
@@ -1369,9 +1368,9 @@ claim about coverage that nobody can audit.
 
 Source: `src/effective/{ops,api,layers,govern,cost,channels,combinators}.py`,
 `src/effective/keys/{grammar,marker,processor,frame,registry}.py`,
-`src/effective/handlers/{base,recording,replay,absurd}.py`, `examples/first_workflow.py`.
-Tests: `tests/{_conformance,_durable}.py`, `tests/test_shape_conformance.py`,
-`tests/test_coder_under_fix.py`, `tests/test_op_key_injectivity.py`.
+`src/effective/handlers/{base,recording,replay,absurd}.py`, [`examples/first_workflow.py`](../examples/first_workflow.py).
+Tests: `tests/{_conformance,_durable}.py`, [`tests/test_shape_conformance.py`](../tests/test_shape_conformance.py),
+[`tests/test_coder_under_fix.py`](../tests/test_coder_under_fix.py), [`tests/test_op_key_injectivity.py`](../tests/test_op_key_injectivity.py).
 Formal: `formal/lean/Effective/*.lean`, `formal/quint/*.qnt`; gates `just formal`,
 `just formal-verify`.
 Wiki: `wiki/concepts/{architecture,flatten,recursion-shapes,machine,evidence}.md`.

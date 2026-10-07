@@ -5,7 +5,7 @@ coordinate is more than an engine fix. `depth-grant:` is declared `Scope.SETTLEM
 settles one op-occurrence, and the substrate cannot keep that promise unless every interpreter
 agrees on *which* occurrence is asking.
 
-Measured 2026-08-05, and it is **one walk of six** once the fork drivers are counted:
+It is **one walk of six** once the fork drivers are counted:
 
 ===========================  =========================================  ==========
 walk                         per-await identity                         distinct

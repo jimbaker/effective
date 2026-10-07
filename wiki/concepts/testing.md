@@ -7,8 +7,8 @@ responses or from a recording. Each question a test asks has its own instrument.
 |---|---|---|
 | does it do the right thing on known answers? | `RecordingHandler` with canned responses; assert the result and the trace of ops it yielded | `effective.handlers.recording` |
 | is it deterministic, with stable keys? | `ReplayHandler` over that trace: the test oracle | `effective.handlers.replay` |
-| does it survive a crash at every op? | the durable tests: `FaultCtx` crashes a run at its k-th op, before or after the op commits, and the retry resumes it | `tests/_conformance.py` (`at_every_op`), `just pgt-test` |
-| do the two engines agree? | one conformance suite through `DurableHandler` on Absurd and on SQLite | `tests/_conformance.py` |
+| does it survive a crash at every op? | the durable tests: `FaultCtx` crashes a run at its k-th op, before or after the op commits, and the retry resumes it | [`tests/_conformance.py`](../../tests/_conformance.py) (`at_every_op`), `just pgt-test` |
+| do the two engines agree? | one conformance suite through `DurableHandler` on Absurd and on SQLite | [`tests/_conformance.py`](../../tests/_conformance.py) |
 
 ## `ReplayHandler` is the strict judge
 
@@ -24,7 +24,7 @@ result type replays clean. That catches what a passing run cannot show:
 | the control flow changed | a new check, a reordered pair of calls, a branch taken differently |
 
 It serves each recorded value as it was recorded, without validating it against a changed result
-type, and it runs no layers. `examples/testing_a_workflow.py` shows it pass and then refuse a
+type, and it runs no layers. [`examples/testing_a_workflow.py`](../../examples/testing_a_workflow.py) shows it pass and then refuse a
 changed program.
 
 ## Production resume is lenient on purpose
@@ -45,7 +45,7 @@ production runs through `ReplayHandler` before a deploy would close that gap; it
 ## Test roles
 
 A test's role says what a pass proves. The markers are registered in `pyproject.toml` under
-`--strict-markers`, and a test that declares no role is a `unit` test: `tests/conftest.py` marks
+`--strict-markers`, and a test that declares no role is a `unit` test: [`tests/conftest.py`](../../tests/conftest.py) marks
 it, so a test declares a role only when its pass proves more than one seam.
 
 | marker | a pass means |
@@ -56,6 +56,6 @@ it, so a test declares a role only when its pass proves more than one seam.
 | `adversarial` | an attack failed; the test owes a mutation check |
 | `conformance` | interpreters agree on one model; overlap across them is the design |
 
-[[concepts/tapes]] says what a checkpoint holds and why replay can serve it;
-[[concepts/forced-schedules]] covers what a schedule instrument can decide;
-[[concepts/evidence]] covers how a green test can be weaker than it looks.
+[concepts/tapes](tapes.md) says what a checkpoint holds and why replay can serve it;
+[concepts/forced-schedules](forced-schedules.md) covers what a schedule instrument can decide;
+[concepts/evidence](evidence.md) covers how a green test can be weaker than it looks.

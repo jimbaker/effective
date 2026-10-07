@@ -328,8 +328,8 @@ def test_lunas_recorded_price_is_the_short_context_tier():
 
 
 def _responses_usage(inp: int, out: int, cached: int) -> SimpleNamespace:
-    """The `/v1/responses` shape, verified against a live reply on 2026-08-24: `input_tokens`,
-    `output_tokens`, `input_tokens_details.cached_tokens`, and NO `prompt_tokens`."""
+    """The `/v1/responses` usage shape: `input_tokens`, `output_tokens`,
+    `input_tokens_details.cached_tokens`, and NO `prompt_tokens`."""
     return SimpleNamespace(
         input_tokens=inp,
         output_tokens=out,

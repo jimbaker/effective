@@ -1,24 +1,24 @@
 # ADR-0005: The optimizer is a coding agent in a loop: legible GEPA over reasonable workflows, staged to bandits
 
 - **Date:** 2026-06-16
-- **Status:** Accepted. The loop is built as the `improve` combinator (`src/effective/improve.py`),
-  with three consumers: `debug_loop` (`src/agent/debug.py`), `bench_sweep`
-  (`src/agent/bench_sweep.py`) and `tune_permits` (`src/agent/permit_tuning.py`). Fork-as-replay
-  is built (`fork_at`, `src/effective/fork.py`) and serves value-of-information probes; wiring it
+- **Status:** Accepted. The loop is built as the `improve` combinator ([`src/effective/improve.py`](../../src/effective/improve.py)),
+  with three consumers: `debug_loop` ([`src/agent/debug.py`](../../src/agent/debug.py)), `bench_sweep`
+  ([`src/agent/bench_sweep.py`](../../src/agent/bench_sweep.py)) and `tune_permits` ([`src/agent/permit_tuning.py`](../../src/agent/permit_tuning.py)). Fork-as-replay
+  is built (`fork_at`, [`src/effective/fork.py`](../../src/effective/fork.py)) and serves value-of-information probes; wiring it
   in as `improve`'s marginal move is not. Not built: a typed `ForkDelta` candidate, bandit
   allocation, the legibility ratchet, and a ledger promotion of a winner by any consumer.
 
 ## Context
 
-ADR-0001 deferred categorical strategy seams until an optimizer exists, picturing the optimizer
+[ADR-0001](0001-channel-processor.md) deferred categorical strategy seams until an optimizer exists, picturing the optimizer
 as a separate subsystem to be built later. That framing is too narrow. GEPA (reflective prompt
 evolution that selects on a Pareto frontier and learns from natural-language traces) has four
 ingredients, and the substrate already supplies three:
 
 | GEPA ingredient | Effective substrate |
 |---|---|
-| optimizable components | typed channels and `Prompt.seams` (ADR-0001); config dimensions such as catalog rendering, retrieval `k`, gate thresholds, model choice |
-| rollouts and multi-objective fitness | `BenchSpec`, `Scorer`, `frontier_points`, scoring as replay (ADR-0004 D6) |
+| optimizable components | typed channels and `Prompt.seams` ([ADR-0001](0001-channel-processor.md)); config dimensions such as catalog rendering, retrieval `k`, gate thresholds, model choice |
+| rollouts and multi-objective fitness | `BenchSpec`, `Scorer`, `frontier_points`, scoring as replay ([ADR-0004](0004-react-loop-driver.md) D6) |
 | reflective natural-language feedback | t-string telemetry: which ops fired, cost, latency, which gate tripped, which repair looped, each span carrying `code.*` call-site attributes |
 | the reflective mutator and selector | the `improve` loop: `propose` reflects, `score` measures, `effective.pareto.frontier` selects |
 
@@ -73,8 +73,8 @@ The three consumers show the shape generalizes:
 
 `improve` reaches a seam only when the seam's tunable is data: something that checkpoints, diffs
 and mutates. A bare `Callable` (a `rules(policy)` predicate, `Gated.predicate`) is out of reach.
-ADR-0017 rules that tunable seams take data and closures are for fixed policy;
-`allow_table(PermitPolicy)` is its first data twin. ADR-0006 refines the selection rule.
+[ADR-0017](0017-tunable-seams-take-data.md) rules that tunable seams take data and closures are for fixed policy;
+`allow_table(PermitPolicy)` is its first data twin. [ADR-0006](0006-two-stage-marginal-pareto-selection.md) refines the selection rule.
 
 ## The later stages
 
@@ -82,13 +82,13 @@ ADR-0017 rules that tunable seams take data and closures are for fixed policy;
 replay(trace[:at]) then interpret(tail under delta)`. The replay of the prefix is free, and only
 the divergent tail is paid for. `fork_at` and `replay_prefix` exist; the typed candidate (a
 `ForkDelta`) and its use as an `improve` proposal do not. The same fork already serves
-value-of-information probes (`src/effective/voi.py`) and counterfactual audit
-(`src/effective/counterfactual.py`), so optimization would be its third use.
+value-of-information probes ([`src/effective/voi.py`](../../src/effective/voi.py)) and counterfactual audit
+([`src/effective/counterfactual.py`](../../src/effective/counterfactual.py)), so optimization would be its third use.
 
 **Stage 3.** When marginal moves are regular enough to enumerate, the agent becomes a subroutine:
 
 - **Generation (GEPA).** Reflective mutation proposes new candidates from the traces of
-  survivors. Categorical seams (ADR-0001) earn their place here, as an enumerable typed space.
+  survivors. Categorical seams ([ADR-0001](0001-channel-processor.md)) earn their place here, as an enumerable typed space.
 - **Selection under a rollout budget (sequential bandits).** Rollouts are the expensive resource,
   and the config-by-instance space is too large to evaluate exhaustively, so this is
   best-arm identification rather than regret minimization:
@@ -112,7 +112,7 @@ reach the consequence boundary, so an exploratory arm there passes the permissio
 - Optimization is available at stage 1 with no new subsystem.
 - The objective is a cost-efficiency frontier, harder to game than a scalar reward.
 - Per-seam credit assignment is sound because composition is applicative: no composed node reads
-  another's resolved value (`IndependenceError`, ADR-0001), so independent seams can be attributed
+  another's resolved value (`IndependenceError`, [ADR-0001](0001-channel-processor.md)), so independent seams can be attributed
   and mutated independently.
 
 **Risks and their mitigations**
@@ -169,7 +169,7 @@ measured profile is the continuous layer above it.
 ## Open questions
 
 - Is a contextual bandit's router a data-axis channel or a control-axis `decide` seam
-  (ADR-0004)?
+  ([ADR-0004](0004-react-loop-driver.md))?
 - Which multi-objective best-arm algorithm fits the rollout-cost profile of metered model runs?
 - How large a held-out frontier shift justifies promoting a config?
 - Do shared cached prefixes couple composed seams in practice, despite applicative independence?

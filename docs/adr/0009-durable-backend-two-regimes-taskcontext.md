@@ -1,14 +1,14 @@
 # ADR-0009: Durable backend: two regimes over one `TaskContext`; Absurd/Postgres (0↔N) primary, embedded SQLite (0↔1) for laptop and edge
 
 - **Date:** 2026-06-19
-- **Status:** Accepted. Built: the `TaskContext` Protocol (`src/effective/handlers/base.py`), the
-  generic `DurableHandler` that interprets ops onto it (`src/effective/handlers/absurd.py`), and
+- **Status:** Accepted. Built: the `TaskContext` Protocol ([`src/effective/handlers/base.py`](../../src/effective/handlers/base.py)), the
+  generic `DurableHandler` that interprets ops onto it ([`src/effective/handlers/absurd.py`](../../src/effective/handlers/absurd.py)), and
   the embedded engine `SqliteApp`, `SqliteTaskContext` and `SqliteLedger`
-  (`src/effective/sqlite.py`). One conformance suite (`tests/test_conformance.py` over
-  `tests/_conformance.py`) runs the same workflows and assertions on both engines. Unbuilt: a pull
+  ([`src/effective/sqlite.py`](../../src/effective/sqlite.py)). One conformance suite ([`tests/test_conformance.py`](../../tests/test_conformance.py) over
+  [`tests/_conformance.py`](../../tests/_conformance.py)) runs the same workflows and assertions on both engines. Unbuilt: a pull
   driver on a Cloudflare Durable Object, and a Turso or libSQL engine.
-- **Relates to:** ADR-0002 (the handler stack `TaskContext` types the seam beneath), ADR-0008
-  (structural branch keys make `gather` correct on a single writer), ADR-0026 (a cancelled step's
+- **Relates to:** [ADR-0002](0002-harness-layer-stack.md) (the handler stack `TaskContext` types the seam beneath), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)
+  (structural branch keys make `gather` correct on a single writer), [ADR-0026](0026-in-flight-cancellation.md) (a cancelled step's
   result is checkpointed like any other).
 
 ## Context
@@ -90,14 +90,14 @@ already covers 0↔N, so it is a documented seam and no work.
 
 ### 5. Testing: conformance across engines, unit tests within one
 
-- **Conformance.** One parameterized suite (`tests/test_conformance.py`) runs on both engines
+- **Conformance.** One parameterized suite ([`tests/test_conformance.py`](../../tests/test_conformance.py)) runs on both engines
   through the same handler and pins the §2 semantics: replay returns recorded values without
   re-running thunks; a crash at every op resumes to an identical outcome; a suspending
   `await_event` survives suspend and resume; retry is durable; the ledger refuses UPDATE and
-  DELETE. `tests/test_worker_death.py` covers worker death and resume on a fresh worker.
+  DELETE. [`tests/test_worker_death.py`](../../tests/test_worker_death.py) covers worker death and resume on a fresh worker.
 - **Unit.** The engine is plain Python over SQLite, so each piece is tested infra-free against
-  `:memory:` or a temporary file (`tests/test_sqlite_engine.py`, `tests/test_sqlite_claim_fence.py`,
-  `tests/test_sqlite_concurrency.py`): claim, lease expiry and reclaim, the fence on a stale
+  `:memory:` or a temporary file ([`tests/test_sqlite_engine.py`](../../tests/test_sqlite_engine.py), [`tests/test_sqlite_claim_fence.py`](../../tests/test_sqlite_claim_fence.py),
+  [`tests/test_sqlite_concurrency.py`](../../tests/test_sqlite_concurrency.py)): claim, lease expiry and reclaim, the fence on a stale
   claim, sleep, wake by name, spawn idempotency, and concurrent branches committing each
   checkpoint once.
 
@@ -105,9 +105,9 @@ already covers 0↔N, so it is a documented seam and no work.
 
 - The durable suite runs without Podman on the SQLite engine, inside `just test-fast`.
 - One typed seam and one small engine, with no new dependency.
-- The determinism boundary is untouched. `gather` keys by structural position (ADR-0008), so
+- The determinism boundary is untouched. `gather` keys by structural position ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)), so
   single-writer SQLite serializes commits that never conflict.
-- The Postgres ledger (`src/effective/ledger.py`, SQLModel over `JSONB`) and `SqliteLedger` are
+- The Postgres ledger ([`src/effective/ledger.py`](../../src/effective/ledger.py), SQLModel over `JSONB`) and `SqliteLedger` are
   two implementations of one append-only, idempotent contract.
 
 ## Open questions

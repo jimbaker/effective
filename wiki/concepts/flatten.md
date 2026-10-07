@@ -1,6 +1,6 @@
 # Flatten at the boundary, not before it
 
-`effective/channels.py`, `examples/first_workflow.py`, `effective/keys/processor.py`, the psycopg SQL
+`effective/channels.py`, [`examples/first_workflow.py`](../../examples/first_workflow.py), `effective/keys/processor.py`, the psycopg SQL
 boundary, `infra/tdom`.
 
 **A `Template` has no `__str__`.** PEP 750 designed that in: `str(template)` and `f"{template}"`
@@ -107,7 +107,7 @@ An assertion on **rendered bytes** has flattened the structure before asking its
 as an f-string has. Three pins broke or misled this arc that way: `&quot;` against tdom's `&#34;`,
 `<!doctype>` against `<!DOCTYPE>`, and `assert "<script>…" not in html`; the third passes a
 renderer that **drops its input entirely**, which mutation testing confirmed. Parse and assert on
-the result (`tests/_html.py`), and the assertion says what it means while the renderer stays free
+the result ([`tests/_html.py`](../../tests/_html.py)), and the assertion says what it means while the renderer stays free
 to spell an escape however it likes.
 
 ## Reach for what only a t-string can do

@@ -2048,8 +2048,8 @@ def test_the_ordinals_survive_a_REAL_template_not_just_a_hand_built_list():
     """The domain above is the two functions' own, a `list[str | Interpolation]`. This is the
     domain `compose_key` actually hands them, and it is not the same set.
 
-    **The product is a SUPERSET, and by more than the shape names suggest** (measured
-    2026-08-14). Two bounds, and the second is the sharp one:
+    **The product is a SUPERSET, and by more than the shape names suggest.** Two bounds, and the
+    second is the sharp one:
 
     - `Template` normalizes (never two adjacent statics, and empty ones dropped), so a `SS` shape
       is unreachable. The space does not exercise an empty static either way: every `S` here is

@@ -4,8 +4,8 @@ A viewer wants what a run DECIDED, and a decision is not on the tape. `Checkpoin
 state)`, so verdicts and prompts are absent by construction — and that is the substrate working
 rather than a gap, because both are a **function of the tape**: re-run the deterministic loop with
 the recorded results replayed and it rebuilds them itself. Replay is therefore the read, and on a
-COMPLETE run it is a genuine one (measured 2026-08-27: checkpoints 10 -> 10, ledger 2 -> 2, no key
-added).
+COMPLETE run it adds nothing: no checkpoint key, no ledger row
+(`test_conformance.py::test_a_viewer_replays_a_complete_run_without_touching_it`).
 
 **On an INCOMPLETE run it is not, and the exposure is what this module closes.** A replay driven
 past the last recorded op runs the ops that follow and commits their checkpoints, because
@@ -20,7 +20,7 @@ run completed with zero ledger rows.
 (`absurd.set_task_checkpoint_state`) raises on a run id absent from `r_{queue}`, a cancelled task
 and a run already failed, and silently skips a stale attempt — **claim ownership is among none of
 them**, so a viewer reusing the real `owner_run_id`, which any reader obtains with one `SELECT`,
-writes successfully (measured 2026-08-27, against a completed run).
+writes successfully against a completed run.
 
 **So the guard is here, in one wrapper over both engines.** One wrapper serves both because
 **both engines are read-first**: `SqliteTaskContext.step` returns a found checkpoint without

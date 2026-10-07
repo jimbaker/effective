@@ -760,8 +760,8 @@ def named(key: ParsedKey, fields: dict[str, tuple[str, ...]]) -> ParsedKey:
     **The rebuild preserves every field of the input.** Dropping `wraps_payload` would re-render
     `$awaitEvent:review:m1` as `$awaitEvent;review:m1`, bytes no producer wrote and a different
     valid key; dropping `occurrence` would collapse `step;tool:read#3` onto `step;tool:read`. With
-    `fields={}` it is the identity on every distinct name in `absurd.c_default`: 7,126 of 7,126
-    on 2026-08-29, a count that grows with every suite run, so recompute it rather than trust it.
+    `fields={}` it is therefore the identity, which
+    `test_grammar.py::test_attaching_field_names_does_not_change_the_KEY` pins on the hard shapes.
 
     **What it is still NOT is injective, and the first caller inherits that.** Naming a REQUIRED
     coordinate spells it the way an OPTIONAL one is spelled, and the grammar keeps those distinct,

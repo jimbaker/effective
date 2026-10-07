@@ -30,7 +30,6 @@ migrations/0.4.0-0.5.0.sql.sha256    edfaab897364a02dd752cb0c740525c9dcf471bbcbe
 # from upstream reproduced that hash exactly, and it matched the file already in the tree — so
 # the same fetch path is what produced the 0.5.0 hash above.
 #
-# 0.5.0 drops `create extension "uuid-ossp"`: `absurd.portable_uuidv7` now probes for a native
-# `pg_catalog.uuidv7()` with `to_regprocedure` and falls back to `pg_catalog.gen_random_uuid()`,
-# both built in. The bootstrap therefore no longer needs the superuser step that creating an
-# extension required.
+# 0.5.0 creates no extension: `absurd.portable_uuidv7` probes for a native `pg_catalog.uuidv7()`
+# with `to_regprocedure` and falls back to `pg_catalog.gen_random_uuid()`, both built in, so the
+# bootstrap needs no superuser step.

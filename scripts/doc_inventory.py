@@ -7,8 +7,8 @@ Emits two JSON artifacts and a markdown summary:
 
 | artifact       | holds                                                                     |
 |----------------|---------------------------------------------------------------------------|
-| refgraph.json  | per document: its `[[wikilinks]]` and `path:line` code anchors; the       |
-|                | wikilinks that resolve to no wiki page or `docs/` stem                    |
+| refgraph.json  | per document: the wiki pages it links and its `path:line` code anchors;   |
+|                | the links that resolve to no wiki page or `docs/` stem                    |
 | codemap.json   | per module: subsystem, LOC, def/class counts, intra-repo import edges     |
 
     uv run python scripts/doc_inventory.py [--out build/wiki] [--quiet]
@@ -27,8 +27,10 @@ from pathlib import Path
 # (always exits 0) and `link_check.py` is the GATE, so the two agree on what a path reference is.
 try:  # imported as a package member (tests, `from scripts.doc_inventory import …`)
     from scripts.link_check import PATHLINE_RE
+    from scripts.wiki_lint import outbound
 except ImportError:  # run as a script: scripts/ is on sys.path, the repo root is not
     from link_check import PATHLINE_RE
+    from wiki_lint import outbound
 
 REPO = Path(__file__).resolve().parent.parent
 DOCS = REPO / "docs"
@@ -38,7 +40,7 @@ WIKI = REPO / "wiki"
 # that happens to sit in double brackets, such as [[DomainOp[Any]]], out of the graph.
 WIKILINK_RE = re.compile(r"\[\[([a-z0-9][a-z0-9/-]+)\]\]")
 # meta-examples that document the [[…]] syntax itself, not real links
-WIKILINK_META = {"wikilink", "name", "double-bracket", "field", "links"}
+WIKILINK_META = {"wikilink", "name", "double-bracket", "field", "links", "page"}
 
 
 def read(p: Path) -> str:
@@ -59,7 +61,7 @@ def inventory_docs() -> dict:
     for p in documents():
         rel = p.relative_to(REPO).as_posix()
         text = read(p)
-        wikilinks[rel] = sorted(set(WIKILINK_RE.findall(text)))
+        wikilinks[rel] = sorted(set(WIKILINK_RE.findall(text)) | outbound(p))
         codeanchors[rel] = sorted({f"{a}:{b}" for a, b in PATHLINE_RE.findall(text)})
     return {"wikilinks": wikilinks, "code_anchors": codeanchors}
 

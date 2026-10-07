@@ -61,18 +61,18 @@ Three outcomes sit outside the quotient, and only the third is about the codec.
 
 ## What the sweep covers, and what it does not
 
-`scripts/witness_sweep.py` builds a product of leaves and positions and measures every cell against
+[`scripts/witness_sweep.py`](../../scripts/witness_sweep.py) builds a product of leaves and positions and measures every cell against
 both engines, so a shape nobody recalled is in the space by construction. Its declared classes are
 pinned as properties W1 to W3, and a shape an earlier round found by hand
 is pinned present, since a sweep licenses a claim only over what it covered
-([[concepts/enforcer-domain]]).
+([concepts/enforcer-domain](enforcer-domain.md)).
 
 Two things it does not reach. It measures one process, so a witness that followed this process's
 hash seed is a separate subject, not the sweep's. And it measures a leaf op's value, where a branch is
 also handed refusals, a race's own choice and its children's digests, which take the same codec by
 other call paths.
 
-**It is an instrument, so it was itself wrong first** ([[concepts/evidence]]). Its first version
+**It is an instrument, so it was itself wrong first** ([concepts/evidence](evidence.md)). Its first version
 witnessed the live domain value and reported ninety-three failures against a codec that was
 correct, because a handler hands a branch an encoded value on both attempts. A pinned test had the
 same defect: a measurement of a call path nothing takes. The rule it teaches is to derive what the

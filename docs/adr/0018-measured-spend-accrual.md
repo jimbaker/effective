@@ -2,16 +2,16 @@
 
 - **Date:** 2026-07-17
 - **Status:** Accepted. Built: the `{result, usage}` checkpoint envelope behind the spawn-param
-  contract (`CONTRACT_PARAM`, `Contract` in `src/effective/cost.py`), the handler-owned
+  contract (`CONTRACT_PARAM`, `Contract` in [`src/effective/cost.py`](../../src/effective/cost.py)), the handler-owned
   replay-derived meter with per-branch subtotals folded at the gather barrier, the sequential
-  trip and park (`MeasuredBudget`, `enforce_measured` in `src/effective/budget.py`, driven by
+  trip and park (`MeasuredBudget`, `enforce_measured` in [`src/effective/budget.py`](../../src/effective/budget.py), driven by
   `DurableHandler._enforce_measured`), the accrual carry across a `respawn`, conformance on both
   engines. Unbuilt: the cross-task pool (§6), the ledger half of the dual write, per-branch
   sub-budgets inside a `gather`, the per-generation ceiling's enforcement (§5), and carrying a
   `govern` gate's grants across a `respawn` (§8).
-- **Relates to:** ADR-0002 (harness layers: `metered` is a `@domain_layer`), ADR-0008 (applicative
-  `gather` and structural checkpoint keying), ADR-0009 (one `TaskContext`, no SQLite-specific
-  handler), ADR-0016 (the serialization-injectivity family), ADR-0019 (the measured trip as a
+- **Relates to:** [ADR-0002](0002-harness-layer-stack.md) (harness layers: `metered` is a `@domain_layer`), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (applicative
+  `gather` and structural checkpoint keying), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (one `TaskContext`, no SQLite-specific
+  handler), [ADR-0016](0016-formalization-and-operational-semantics.md) (the serialization-injectivity family), [ADR-0019](0019-govern-serve-composition-combinators.md) (the measured trip as a
   `govern` policy, `as_policy`).
 
 ## Context
@@ -71,8 +71,8 @@ so a v1-capable worker resuming a task spawned before the envelope existed reads
 on v0, and keeps writing bare rows; no task ever holds mixed rows. A start-of-task checkpoint
 marker would not work: it is absent for a fresh v1 task and for a resumed v0 task alike until the
 first step writes it. Pinned by `test_measured_v0_task_stays_v0_under_a_v1_capable_worker`
-(`tests/test_conformance.py`) and `test_v1_handler_on_a_v0_checkpoint_fails_loud_not_silent`
-(`tests/test_budget_accrual.py`).
+([`tests/test_conformance.py`](../../tests/test_conformance.py)) and `test_v1_handler_on_a_v0_checkpoint_fails_loud_not_silent`
+([`tests/test_budget_accrual.py`](../../tests/test_budget_accrual.py)).
 
 ### 3. A handler-owned, replay-derived meter
 
@@ -88,8 +88,8 @@ owned by `DurableHandler`.
 - `MeteredInterpreter.meter` is live telemetry and not an enforcement bookkeeper. Kept as
   telemetry, it is constructed with `budget=None`, since a `CostBudget` makes its pre-forward
   `exceeded()` refusal a second enforcement point racing the handler's trip. In the tree the
-  budget-bearing constructions are agent benches (`src/agent/eval.py`,
-  `src/agent/contrastbench.py`, `src/agent/skillsbench.py`, `src/agent/debug.py`), which run
+  budget-bearing constructions are agent benches ([`src/agent/eval.py`](../../src/agent/eval.py),
+  [`src/agent/contrastbench.py`](../../src/agent/contrastbench.py), [`src/agent/skillsbench.py`](../../src/agent/skillsbench.py), [`src/agent/debug.py`](../../src/agent/debug.py)), which run
   in-process and are the case this permits.
 
 ### 4. Concurrency: a per-branch fold at barriers, no lock
@@ -97,7 +97,7 @@ owned by `DurableHandler`.
 | design | verdict | evidence |
 |---|---|---|
 | per-branch subtotal, folded at the gather barrier in branch-index order | confluent on every schedule, lock-free by construction | Lean `Effective.Budget.operational_run_eq_executedB` (a conservation law) and its corollary `operational_confluent`; Quint `budget_confluence.qnt` `confluent` |
-| one shared meter gated mid-branch | the trip fires at a schedule-dependent op, so replay diverges | Lean `shared_gate_order_dependent`; the `sharedMeter = true` tooth in `scripts/formal_checks.sh` |
+| one shared meter gated mid-branch | the trip fires at a schedule-dependent op, so replay diverges | Lean `shared_gate_order_dependent`; the `sharedMeter = true` tooth in [`scripts/formal_checks.sh`](../../scripts/formal_checks.sh) |
 | a shared meter behind a lock | still non-confluent: a lock cures lost updates, not the trip's schedule dependence | Lean `shared_lock_insufficient`; the Quint model is atomic and still violates confluence |
 
 Each branch handler accrues into its own subtotal, single-threaded within the branch, and the
@@ -140,7 +140,7 @@ every generation, and `per_generation` is an allowance that re-arms. The handler
 accrual `(spent, granted, trips)` to the successor in a reserved spawn param (`ACCRUAL_PARAM`), so
 `overall` holds across generations. `enforce_generation`, the per-generation transition on
 `generation-grant:{run_id},{generation},{trip}`, is written and driven by no handler; pinned as a
-strict xfail, `tests/test_respawn_durable.py::test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED`.
+strict xfail, [`tests/test_respawn_durable.py::test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED`](../../tests/test_respawn_durable.py).
 
 ### 6. The cross-task pool: a shared store, serialized by the database
 
@@ -153,9 +153,9 @@ is decided when the pool is built.
 
 ### 7. One change, both engines
 
-There is one durable handler over the `TaskContext` protocol (ADR-0009), so the envelope and the
-fold land once, in `DurableHandler` and its serde, and `tests/_conformance.py` carries the gates
-to both engines. The pins in `tests/test_conformance.py` cover park, grant and resume
+There is one durable handler over the `TaskContext` protocol ([ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)), so the envelope and the
+fold land once, in `DurableHandler` and its serde, and [`tests/_conformance.py`](../../tests/_conformance.py) carries the gates
+to both engines. The pins in [`tests/test_conformance.py`](../../tests/test_conformance.py) cover park, grant and resume
 (`test_measured_trip_parks_grants_and_resumes`), worker death
 (`test_measured_trip_survives_worker_death`), the overshoot bound, `trip` re-derived across
 replays with several grants, and a concurrent runaway inside a `gather`
@@ -163,13 +163,13 @@ replays with several grants, and a concurrent runaway inside a `gather`
 
 ### 8. A `govern` gate's grants and a `respawn`
 
-A `govern` budget gate (ADR-0019) keeps its answers in a per-attempt run scope, re-derived from
+A `govern` budget gate ([ADR-0019](0019-govern-serve-composition-combinators.md)) keeps its answers in a per-attempt run scope, re-derived from
 the event store on replay, and a `respawn` successor starts that scope empty. The handler's own
 accrual carries (§5), and the gate's answers do not, so a gate-driven successor parks again under
 a ceiling its predecessor's grant raised. The decision is to carry the gate's **answer history**
 across the respawn beside the spend, with `govern` owning a read of its run-scoped answers and a
 seed for the successor's; `BudgetPolicy`'s fold is unchanged and sees every generation's answers,
-and a `stop` carries. Rejected: a cell the policy writes back to (a policy that writes is no longer
+and a `stop` carries. Rejected: a cell the policy writes back to (a policy that writes stops being
 a function of its `GateState`), and a recompute at respawn (the handler would have to know which
 layers drive a budget). Unbuilt.
 
@@ -178,9 +178,9 @@ layers drive a budget). Unbuilt.
 The measured machinery indexes ops at several sites in two coordinate systems: all ops (every
 yielded op, what "fork at the review decision" means) and Step-only (what the free-replay prefix
 counts). The public `at` is all-ops, `OpIndex`; the Step-only `StepIndex` is internal; and one
-named conversion, `to_step_index` in `src/effective/fork.py`, crosses at the one boundary. Both are
+named conversion, `to_step_index` in [`src/effective/fork.py`](../../src/effective/fork.py), crosses at the one boundary. Both are
 `NewType`s, so `ty` rejects one where the other is wanted. The conversion's agreement with the
-bridge's own Step filter is pinned in `tests/test_at_index.py`. The theorems here are stated over
+bridge's own Step filter is pinned in [`tests/test_at_index.py`](../../tests/test_at_index.py). The theorems here are stated over
 concern-local sub-streams (the trip index, the cost list), so the conversion is a precondition
 below them; a Lean boundary law waits until the crossing has more than one site.
 

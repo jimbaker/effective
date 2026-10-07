@@ -1,6 +1,6 @@
 # Your first workflow
 
-One file, run three ways, with no model and no service. `examples/first_workflow.py` is a house
+One file, run three ways, with no model and no service. [`examples/first_workflow.py`](../examples/first_workflow.py) is a house
 agent: it asks a model for a setpoint, sets the thermostat, and records what it did. It runs as a
 durable task on the embedded SQLite engine, in a temporary file: once as it should, once through
 a thermostat outage that the retry resumes, and once with a guardrail refusing a bad response.
@@ -98,7 +98,7 @@ Nothing between two yields may do I/O or read the clock or `random`.
 misses `open`, `print`, and some clock calls such as `time.perf_counter()`, so keep those out by
 hand. It checks every function in the file, `main` included, so a driver that reads the clock
 belongs in its own module. `just lint` runs the same check over the workflow files registered in
-`WORKFLOW_ROLE_SRCS` (in `src/effective/lint.py`), and this example is one of them.
+`WORKFLOW_ROLE_SRCS` (in [`src/effective/lint.py`](../src/effective/lint.py)), and this example is one of them.
 
 ## Running it durably
 
@@ -180,9 +180,9 @@ registers the workflow as a task on `SqliteApp`, spawns it, and runs it until it
 | `resume` | the thermostat is offline on the first attempt, so the attempt fails and the engine retries the task: two attempts. The retry runs the workflow from the top, the file serves `setpoint` its recorded result, and only the thermostat call runs again: the model was asked once. Nothing is captured from a frame; suspension is replay |
 | `guardrail` | the model responds with 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. A task's result is stored as JSON, so the `Repair` comes back as its fields |
 
-The workflow never names its handler. `examples/testing_a_workflow.py` runs the same
+The workflow never names its handler. [`examples/testing_a_workflow.py`](../examples/testing_a_workflow.py) runs the same
 `set_temperature` under the two test handlers, with canned results and then a replay that refuses
-a changed program; `wiki/concepts/testing.md` says what each is for.
+a changed program; [`wiki/concepts/testing.md`](../wiki/concepts/testing.md) says what each is for.
 
 ## What you imported
 
@@ -199,7 +199,7 @@ a changed program; `wiki/concepts/testing.md` says what each is for.
 | `DurableHandler` | `effective.handlers.absurd` | the handler that runs each op as a checkpointed step, on either engine |
 | `SqliteApp`, `SqliteLedger`, `TaskSnapshot` | `effective.sqlite` | the embedded engine: one file, no service; its ledger; a task's ending |
 | `keys`, `read_sqlite_task` | `effective.checkpoints` | a task's checkpoints, read back in commit order |
-| `OpLayer` | `effective.layers` | the type of a layer, the hooks of `examples/hooks_as_layers.py` |
+| `OpLayer` | `effective.layers` | the type of a layer, the hooks of [`examples/hooks_as_layers.py`](../examples/hooks_as_layers.py) |
 
 ## Where next
 
@@ -207,5 +207,5 @@ a changed program; `wiki/concepts/testing.md` says what each is for.
 |---|---|
 | the model in ten minutes: generator, handler, tape, layers, combinators | [intro.md](intro.md) |
 | the op set, the author surface, and why resume is replay | [effective-101.md](effective-101.md) §2, §3 and §5.3 |
-| park for a human with `await_event`, resumed by replay | [effective-101.md](effective-101.md) §5.3, and `await_event` in `src/effective/api.py` |
-| testing a workflow | `wiki/concepts/testing.md` |
+| park for a human with `await_event`, resumed by replay | [effective-101.md](effective-101.md) §5.3, and `await_event` in [`src/effective/api.py`](../src/effective/api.py) |
+| testing a workflow | [`wiki/concepts/testing.md`](../wiki/concepts/testing.md) |

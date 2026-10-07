@@ -63,6 +63,9 @@ dev = [
     "httpx>=0.28",
     "types-pyyaml>=6.0",
     "pyyaml>=6.0.3",
+    # The link gates (`scripts/link_check.py`, `scripts/wiki_lint.py`) read links as markdown
+    # renders them.
+    "markdown-it-py>=4.2",
     # The extras, so their tests run rather than import-skip.
     "effective[tui]",
     "effective[bridge]",

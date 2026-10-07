@@ -164,9 +164,9 @@ def test_apply_structural_rewrites_and_reports_its_reach():
 def test_a_missing_ast_grep_refuses_the_rewrite(monkeypatch):
     """The rung that already has the right polarity, asserted rather than assumed.
 
-    `apply_structural` returns `"ast-grep unavailable"` and the tool raises — correct, and
-    uncovered by the whole suite until now, so it was right rather than demonstrably right. The
-    branch is unreachable on any box that has ast-grep, which is every box that runs this."""
+    `apply_structural` returns `"ast-grep unavailable"` and the tool raises. No other test reaches
+    this branch: it is unreachable on any box that has ast-grep, which is every box that runs the
+    suite."""
     monkeypatch.setattr("effective.coding.edits.structural.ast_grep_bin", lambda: None)
     content, total, error = apply_structural(
         "foo(1)\n", [StructuralRule(pattern="foo($A)", rewrite="bar($A)")], "m.py"

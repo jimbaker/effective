@@ -1,13 +1,13 @@
 # ADR-0010: The card is a typed `CardSpec` IR rendered to many targets; the t-string face emits the same IR
 
 - **Date:** 2026-06-21
-- **Status:** Accepted. Built in `src/effective/cards/`: the IR (`src/effective/cards/spec.py`),
+- **Status:** Accepted. Built in `src/effective/cards/`: the IR ([`src/effective/cards/spec.py`](../../src/effective/cards/spec.py)),
   `render_html`, `render_markdown`, `manifest`, the PEP 750 face `card(t"...")`
-  (`src/effective/cards/tstring.py`), and a third target, `render_shiny` (ADR-0011).
+  ([`src/effective/cards/tstring.py`](../../src/effective/cards/tstring.py)), and a third target, `render_shiny` ([ADR-0011](0011-shiny-native-card-render-target.md)).
   `effective.runview` reuses `Action` as the write-back vocabulary for answering a park.
   A projector that builds a `CardSpec` from a domain read-model belongs to the host application.
-- **Relates to:** ADR-0001 (the `render` → `Prompt[S]` processor whose shape `card()` mirrors),
-  ADR-0007 (the inspectable-manifest principle, here applied to the view), ADR-0011 (the Shiny
+- **Relates to:** [ADR-0001](0001-channel-processor.md) (the `render` → `Prompt[S]` processor whose shape `card()` mirrors),
+  [ADR-0007](0007-channel-discovery-typed-manifest.md) (the inspectable-manifest principle, here applied to the view), [ADR-0011](0011-shiny-native-card-render-target.md) (the Shiny
   render target).
 
 ## Context
@@ -53,6 +53,6 @@ stay pure and infra-free; the projector lives with the domain, never in `effecti
   it.
 - **Foreclosed:** a card as a live framework fragment. The IR is what portability to MCP and
   agent-safety review need anyway.
-- **Cost:** one package and its tests (`tests/test_cards.py`, `tests/test_cards_tstring.py`,
-  `tests/test_cards_render_shiny.py`). The IR and the string renderers depend only on the standard
+- **Cost:** one package and its tests ([`tests/test_cards.py`](../../tests/test_cards.py), [`tests/test_cards_tstring.py`](../../tests/test_cards_tstring.py),
+  [`tests/test_cards_render_shiny.py`](../../tests/test_cards_render_shiny.py)). The IR and the string renderers depend only on the standard
   library and tdom.

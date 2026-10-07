@@ -4,13 +4,13 @@
 - **Status:** Accepted. `race`, `quorum` and the deadline (§10) are built on the recorder, replay
   and both engines (`effective.api.race`, `effective.api.quorum`, `effective.choice`); a race
   branch may not yet park (§5).
-- **Relates to:** ADR-0008 (gather as structure, whose barrier a race keeps), ADR-0018 (the meter a
-  loser's spend reaches), ADR-0020 (key composition, which the race's frame and records join),
-  ADR-0024 (the walk).
-- **Model:** `formal/quint/race.qnt`.
+- **Relates to:** [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (gather as structure, whose barrier a race keeps), [ADR-0018](0018-measured-spend-accrual.md) (the meter a
+  loser's spend reaches), [ADR-0020](0020-key-composition-one-grammar.md) (key composition, which the race's frame and records join),
+  [ADR-0024](0024-the-walk-one-mint-many-interpreters.md) (the walk).
+- **Model:** [`formal/quint/race.qnt`](../../formal/quint/race.qnt).
 
 Each ruling carries what would refute it and, where the model covers it, the invariant of
-`formal/quint/race.qnt` that checks it; a ruling the model does not reach says so.
+[`formal/quint/race.qnt`](../../formal/quint/race.qnt) that checks it; a ruling the model does not reach says so.
 
 ## 1. The decision
 
@@ -120,7 +120,7 @@ stop is never an unwound stack, which is the no-continuations invariant.
 
 A race branch may not park yet: an await or a sleep is refused by its kind. When parking is built,
 a parked loser sees the choice when it is next driven and stops without waking. A race never
-stops its loser mid-op. ADR-0026's in-flight cancel records a distinct `Cancelled` result for an op a face
+stops its loser mid-op. [ADR-0026](0026-in-flight-cancellation.md)'s in-flight cancel records a distinct `Cancelled` result for an op a face
 stops; a loser's started op does not use it, and that extension is deferred.
 
 **Falsified if:** a loser runs an effect after it observes a stored choice naming it a loser, an
@@ -220,7 +220,7 @@ substrate takes an instant everywhere it takes a bound. `within` would also read
 
 **Falsified if:** a race restarted after a crash times out later than the instant it was given.
 **Checked by** `deadlineNotExtended`, `winnersBeforeDeadline` and `timeoutOnlyAtDeadline` in the
-model, and in the tree by `tests/test_race_deadline.py` and `tests/test_race_durable.py`, which
+model, and in the tree by [`tests/test_race_deadline.py`](../../tests/test_race_deadline.py) and [`tests/test_race_durable.py`](../../tests/test_race_durable.py), which
 hold the one clock a race reads rather than waiting for a real one.
 
 ## 11. Layers and gates

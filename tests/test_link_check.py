@@ -229,9 +229,67 @@ def test_a_generated_declaration_needs_a_producer_that_exists(corpus, monkeypatc
 
 
 def test_a_wiki_citation_is_graded(corpus):
-    """A repo-rooted `wiki/...` citation is a link here; `wiki_lint` grades only `[[links]]`."""
+    """A repo-rooted `wiki/...` citation is a link here."""
     corpus("CLAUDE.md", "Read `wiki/concepts/nothing.md`.")
     assert paths(lc.scan()) == {"wiki/concepts/nothing.md"}
+
+
+def test_a_relative_link_resolves_from_the_document_that_holds_it(corpus):
+    corpus("src/a.py", "x = 1\n")
+    corpus("docs/guide.md", "")
+    corpus(
+        "wiki/concepts/page.md",
+        "[a](../../src/a.py) [b](../../src/b.py#L2) [guide](../../docs/guide.md) "
+        "`[c](c.md)` [web](https://example.com/c.md) [here](#top)",
+    )
+    assert paths(lc.scan()) == {"src/b.py"}
+
+
+def test_a_markdown_link_resolves_from_its_document_even_when_it_reads_repo_rooted(corpus):
+    corpus("docs/guide.md", "")
+    corpus("wiki/concepts/page.md", "[guide](docs/guide.md) [up](../../docs/guide.md)")
+    assert paths(lc.scan()) == {"wiki/concepts/docs/guide.md"}
+
+
+def test_a_directory_or_suffixless_target_is_graded(corpus):
+    corpus("docs/guide.md", "")
+    corpus(
+        "wiki/page.md",
+        '[dir](../docs/) [gone](../nope/) [bare](nope) [titled](../docs/guide.md "Guide")',
+    )
+    assert paths(lc.scan()) == {"nope", "wiki/nope"}
+
+
+@pytest.mark.parametrize(
+    ("link", "dead"),
+    [
+        ("[dead](missing.md 'title')", "wiki/missing.md"),
+        ("[dead](missing.md (title))", "wiki/missing.md"),
+        ("[dead](<missing file.md>)", "wiki/missing file.md"),
+        ("[![image](../README.md)](missing.md)", "wiki/missing.md"),
+        ("[dead][ref]\n\n[ref]: missing.md", "wiki/missing.md"),
+        ("| a | b |\n|---|---|\n| `code | [dead](missing.md)` |", "wiki/missing.md"),
+    ],
+)
+def test_every_link_a_renderer_draws_is_graded(corpus, link, dead):
+    corpus("README.md", "")
+    corpus("wiki/page.md", link)
+    assert paths(lc.scan()) == {dead}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "~~~\n[example](missing.md)\n~~~",
+        "    [example](missing.md)",
+        "[root](../)",
+        "[r](../README%2Emd)",
+    ],
+)
+def test_code_the_root_and_an_encoded_name_raise_nothing(corpus, text):
+    corpus("README.md", "")
+    corpus("wiki/page.md", "para\n\n" + text)
+    assert paths(lc.scan()) == set()
 
 
 # --- the live corpus: this IS the gate --------------------------------------

@@ -19,8 +19,8 @@ NO trace entry at all. Asserting the observation alone would pass on an implemen
 recorded a phantom op; asserting the trace is what pins the shape.
 
 Role: adversarial. Every name here is an attack on the composer, and a pass means only that it
-failed. Mutation check: delete the `except UnusableToolName` arm in `react.run_agent` and this
-module must redden (measured 2026-08-08: 5 failed).
+failed. Mutation check: delete the `except UnusableToolName` arm in `react._acted` and this
+module must redden (5 tests fail).
 """
 
 import pytest

@@ -5,8 +5,8 @@
   (`src/effective/keys/`), the marker types, the static shape registry with its source map
   (`effective.lint --key-registry`, `KeyMap.explain`, `KeyMap.project`), the authority scopes, and
   the identity lints in `just lint`. Not built: a Lean statement of the serialization law, which
-  `formal/lean/Effective/Keys.lean` carries as the named assumption (A-serialize).
-- **Extends:** ADR-0001, whose t-string discipline on the data axis this applies to the identity
+  [`formal/lean/Effective/Keys.lean`](../../formal/lean/Effective/Keys.lean) carries as the named assumption (A-serialize).
+- **Extends:** [ADR-0001](0001-channel-processor.md), whose t-string discipline on the data axis this applies to the identity
   axis.
 
 ## Context
@@ -27,7 +27,7 @@ namespaces carry two bug classes.
 
 **Immediate flattening.** Collapsing a `Template` to a string at once, asking only "static or
 hole?", destroys the delimiter/data distinction, and escaping then patches over the loss. It is the
-Bobby Tables antipattern, the same in SQL, prompts and keys (`wiki/concepts/flatten.md`). PEP 750
+Bobby Tables antipattern, the same in SQL, prompts and keys ([`wiki/concepts/flatten.md`](../../wiki/concepts/flatten.md)). PEP 750
 builds the protection in: a `Template` has no `__str__`, so every flatten is an explicit act.
 
 **Key collision.** Three counterexamples set the design's constraints:
@@ -45,7 +45,7 @@ identifier, so a template knows the name of every field it fills.
 
 ### 1. One producer, one grammar
 
-`compose_key(template) -> Key` (`src/effective/keys/processor.py`) is the sole producer of a
+`compose_key(template) -> Key` ([`src/effective/keys/processor.py`](../../src/effective/keys/processor.py)) is the sole producer of a
 durable identity. The namespaces differ in policy and share one grammar, so there is one composer.
 The grammar is parsed, and the composer fills a parsed skeleton (`grammar.parse_skeleton`) with
 typed values:
@@ -118,15 +118,15 @@ variants when `registry.separated` proves their languages disjoint from structur
 
 A hole never discriminates, a splice absorbs every remaining term and stops the walk, and an
 optional coordinate (one with `default=`) widens a term's arity to a range. An unproven pair is
-refused. `skill:{name},activate` and `skill:{name},refresh,{n}` (`src/effective/skills.py`) and the
-four `code:` variants (`src/effective/code.py`) are unions in the tree.
+refused. `skill:{name},activate` and `skill:{name},refresh,{n}` ([`src/effective/skills.py`](../../src/effective/skills.py)) and the
+four `code:` variants ([`src/effective/code.py`](../../src/effective/code.py)) are unions in the tree.
 
 Decodability and readability are one requirement. An escaped key can still be decoded by machine,
 but `review%3Am1` defeats the glance, and the glance is what an operator has.
 
 ### 5. A `Key` is opaque
 
-`Key` (`src/effective/keys/grammar.py`) holds parsed terms and is not a `str`. It has no `__str__`,
+`Key` ([`src/effective/keys/grammar.py`](../../src/effective/keys/grammar.py)) holds parsed terms and is not a `str`. It has no `__str__`,
 so an accidental flatten renders the repr and fails visibly at its consumer. Text comes out through
 named exits: `stored()` for the durable form, `display()` for the human one. Two positions treat a
 `Key` as text without asking: the composer's splice and the database adapters registered against
@@ -157,7 +157,7 @@ the composer holds the safety property.
 
 ### 7. Authority namespaces declare their reach
 
-`AuthorityTag` (`src/effective/keys/marker.py`) is a `Tag` whose names are the authorization: an
+`AuthorityTag` ([`src/effective/keys/marker.py`](../../src/effective/keys/marker.py)) is a `Tag` whose names are the authorization: an
 approval, a grant, a gate's park, a counterfactual's identity. Its `scope` argument is required, so
 "somebody forgot" cannot pass for a considered choice. `compose_key` carries the declared scope onto
 the finished `Key.scope`, and the walk reads it:
@@ -202,7 +202,7 @@ not advance the ordinal, because the workflow yielded once.
 
 The rule splits by origin. A suspension the workflow authored is identified positionally by the
 walk; one a layer injects carries a deterministic name from whatever injected it (the permission
-`AwaitEvent` in ADR-0002's "Which ops reach the op-layer stack").
+`AwaitEvent` in [ADR-0002](0002-harness-layer-stack.md)'s "Which ops reach the op-layer stack").
 
 Frames are leading terms. `scope_prefix` renders a `scoped(...)` atom, `gather_prefix(g, i)` and
 `race_prefix(r, i)` render the substrate's own branch frames through `compose_key`, and
@@ -244,14 +244,14 @@ The roles a projection drops by are declared at the mint, since the bytes cannot
 pinned tape. The witness that would overturn it is two straight-line gathers in one frame.
 
 A folded key is a function of the recorded name and of `build/key-registry.json`, so an index
-built over folded keys is rebuilt when a mint site's declaration changes (ADR-0022 §9c).
+built over folded keys is rebuilt when a mint site's declaration changes ([ADR-0022](0022-dashboard-projections-the-read-side.md) §9c).
 
 ## Consequences
 
 **Good.** Escaping is gone, replaced by a type obligation checked statically. Keys are readable and
 decodable by the same parser that composed them. The two bug classes have gates. The source map
 turns a key found in production into a line of code. The identity axis has the safe-composition
-discipline the data axis has had since ADR-0001.
+discipline the data axis has had since [ADR-0001](0001-channel-processor.md).
 
 **Costs.** Every substrate name producer takes a marker type. The registry is lint machinery plus a
 derived artifact, and `KeyMap.load` needs it present: an installed wheel ships no `build/` tree,
@@ -267,7 +267,7 @@ why scope is declared (§7). `--authority-scopes` reads same-module constants on
 declared in one module and composed in another is not resolved; every authority tag in the tree is
 declared and composed in one module. `Step.name` is still a `str`, so an author's step name is
 checked at `step_key` and never registered. Serialization injectivity is held by construction and
-by sampling (`tests/test_op_key_injectivity.py`), and Lean proves it only for the structured
+by sampling ([`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py)), and Lean proves it only for the structured
 encoding.
 
 ## Alternatives considered

@@ -1,6 +1,6 @@
 # What a forced schedule can decide
 
-`tests/_schedules.py` turns the op-layer seam into an instrument: a `Turnstile` blocks before its
+[`tests/_schedules.py`](../../tests/_schedules.py) turns the op-layer seam into an instrument: a `Turnstile` blocks before its
 `yield op` and releases ops in a named order, so a test asserts over two named interleavings rather
 than over whichever one the run took. It orders **admissions**. That is its domain, and the
 question a row has to answer first is whether the thing it wants to decide is an admission.
@@ -36,7 +36,7 @@ until the choice lands and it holds its turn, and the order deadlocks.
 
 ## What does force a race
 
-The two-event hold, which `tests/test_race_durable.py` established and `tests/test_race_shapes.py`
+The two-event hold, which [`tests/test_race_durable.py`](../../tests/test_race_durable.py) established and [`tests/test_race_shapes.py`](../../tests/test_race_shapes.py)
 reuses. The winner's first call waits until the loser is inside its own first call; the loser's
 call waits for the choice. Then the loser's next op is admitted, or not, after the flag, and which
 it is has no timer in it.
@@ -50,7 +50,7 @@ other branch held inside its first call until the choice: the answer is the same
 the ledger holds the winner's row alone. That is the claim the branch-and-bound refutation left
 behind, *the effects a cancelling shape leaves depend on the choice and its answer does not*, and
 a schedule cannot reach it because a schedule cannot decide which branch wins.
-`tests/test_race_shapes.py` carries both directions; a loser that is not stopped writes both rows
+[`tests/test_race_shapes.py`](../../tests/test_race_shapes.py) carries both directions; a loser that is not stopped writes both rows
 and reddens all four cells.
 
 ## What a held clock forces, which is the cancellation a schedule could not reach
@@ -73,12 +73,12 @@ be held still: that the deadline WAKES a race whose branches are all running. It
 deadline a breath ahead of a running clock and blocks both branches until the choice lands, so the
 timeout wake is the only way the race can move and nothing is ordered by the interval.
 
-`tests/test_race_deadline.py` is the worked set, and every mutant planned against the race's
+[`tests/test_race_deadline.py`](../../tests/test_race_deadline.py) is the worked set, and every mutant planned against the race's
 deadline path dies against it.
 
 ## The row a held clock made possible
 
-`tests/test_watched_descent.py` is the first `Shape` row that cancels: a linear drill whose every
+[`tests/test_watched_descent.py`](../../tests/test_watched_descent.py) is the first `Shape` row that cancels: a linear drill whose every
 level races its branches against one instant, spelled by `unfold` and by `fix`, on both engines,
 crashed at every checkpoint. The clock is held for the whole row and each level stamps it at its
 own depth, which is where the cut lands.
@@ -104,8 +104,8 @@ moved to the bound in between would legitimately cut it there instead.
 `decide` with `expired`, the stored choice and the loser's stop. Everything downstream of when a
 branch ENDED is outside it, and four mutants mark the line: `in_time` answering True,
 `concurrently`'s wake bound dropped, `in_order`'s end stamp lost, and `read` dropping the
-late-success evidence each leave this file green. `tests/test_race_deadline.py` pins the tie and
-`tests/test_hedge.py` turns on `in_time` directly, since its timer's own step leaves the clock past
+late-success evidence each leave this file green. [`tests/test_race_deadline.py`](../../tests/test_race_deadline.py) pins the tie and
+[`tests/test_hedge.py`](../../tests/test_hedge.py) turns on `in_time` directly, since its timer's own step leaves the clock past
 the bound and only `in_time` ranks that success late.
 
 **A schedule cell holds each run to the row's answer.** `interleave` applies `agree`'s checks to
@@ -122,7 +122,7 @@ tried in both orders, because a store's listing is not commit order under a cloc
 and only two branches of one gather or race may go uncrashed, since one attempt commits both past
 a crash in either. An engine refusing checkpoint writes on a third attempt leaves `sweep` green
 and `sweep_pairs` red. The pairs grow as the square of a run's checkpoints, so a row opts in: the
-descent, the tree search and the pruned search do. `tests/test_sweep_pairs.py` pins the helper.
+descent, the tree search and the pruned search do. [`tests/test_sweep_pairs.py`](../../tests/test_sweep_pairs.py) pins the helper.
 
 ## The allowance, and why it is not a workaround
 
@@ -144,7 +144,7 @@ turnstile alone cannot arrange that, since it releases the next turn from its la
 before the winner's body returns; the choice hold can, and the two coexist when the call that
 waits for the choice is OUTSIDE the order. An
 ordered call that waited would keep its turn and deadlock the schedule; an unordered one holds no
-turn at all. `tests/test_race_shapes.py` carries the row under both orders of the branches' first
+turn at all. [`tests/test_race_shapes.py`](../../tests/test_race_shapes.py) carries the row under both orders of the branches' first
 steps, and checks the allowance both ways: taken it passes, withheld it names the op nothing
 allows. A turnstile that forgave nothing reddens those four cells and no other test in the tree.
 
@@ -159,11 +159,11 @@ window by making the store write itself the release. The `settle` it hands `publ
 a loser thread waits on, then waits until that thread has either ticked or started waiting on the
 seal, which a `Condition` whose `wait` announces itself makes observable. No sleep orders anything,
 and without the seal the loser runs past the saved cut every time
-(`tests/test_race_publish_seal.py`).
+([`tests/test_race_publish_seal.py`](../../tests/test_race_publish_seal.py)).
 
 ## The corollary
 
-[[concepts/enforcer-domain]] asks what a gate SCANS. This is its twin one level over: **ask what an
+[concepts/enforcer-domain](enforcer-domain.md) asks what a gate SCANS. This is its twin one level over: **ask what an
 instrument can FORCE.** A schedule that runs green over a race is not evidence the race followed
 it, and the failure is silent in the useful direction, since the order the index already agrees
 with passes every time. The move that finds it is the same one: reverse what the instrument
@@ -171,7 +171,7 @@ describes and see whether the verdict follows.
 
 The general form is a forced input, and its observation-side twin is two hypotheses with one
 reading: there two hypotheses look alike THROUGH the instrument, here the instrument sets something
-the outcome does not depend on ([[concepts/evidence]]).
+the outcome does not depend on ([concepts/evidence](evidence.md)).
 
-Some race and quorum shapes are still unwritten; [[concepts/recursion-shapes]]
+Some race and quorum shapes are still unwritten; [concepts/recursion-shapes](recursion-shapes.md)
 classifies them, and its "How a shape is tested" holds for every shape but a cancelling one.

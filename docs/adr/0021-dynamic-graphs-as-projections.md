@@ -2,10 +2,10 @@
 
 - **Date:** 2026-07-25
 - **Status:** Accepted, and built. `spawn_fork`, `join_fork` and `marginal_sweep` live in
-  `src/effective/fork.py`, with the sweep pinned on both engines (`tests/test_fork_sweep.py`,
-  `tests/test_fork_sweep_absurd.py`). The graph object is `effective.graphview` (§5).
-- **Relates to:** ADR-0008 (a fleet run has no op kind of its own: it decomposes into spawns and
-  joins), ADR-0020 (the key grammar that names every node), ADR-0022 (the read side that draws the
+  [`src/effective/fork.py`](../../src/effective/fork.py), with the sweep pinned on both engines ([`tests/test_fork_sweep.py`](../../tests/test_fork_sweep.py),
+  [`tests/test_fork_sweep_absurd.py`](../../tests/test_fork_sweep_absurd.py)). The graph object is `effective.graphview` (§5).
+- **Relates to:** [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (a fleet run has no op kind of its own: it decomposes into spawns and
+  joins), [ADR-0020](0020-key-composition-one-grammar.md) (the key grammar that names every node), [ADR-0022](0022-dashboard-projections-the-read-side.md) (the read side that draws the
   graph).
 
 ## 1. The decision
@@ -26,8 +26,8 @@ ledger, never edit them), applied to shape.
 
 A cycle in a trace would be a back-edge into a node that already exists, which means two
 occurrences sharing one name. **Acyclicity is the injectivity invariant seen as a graph property**,
-and `compose_key` discharges it by construction (ADR-0020). The serialization-injectivity
-assumption in `formal/lean/Effective/Keys.lean`, read as a graph statement, is "the trace is a DAG".
+and `compose_key` discharges it by construction ([ADR-0020](0020-key-composition-one-grammar.md)). The serialization-injectivity
+assumption in [`formal/lean/Effective/Keys.lean`](../../formal/lean/Effective/Keys.lean), read as a graph statement, is "the trace is a DAG".
 
 Every node is named by its **path**, never by time or completion order: the gather ordinal `{g}`,
 the branch index `{i}`, the occurrence suffix `#k`, the op key. So a loop in the program unrolls
@@ -79,7 +79,7 @@ map for the graph. And **two runs of one workflow share an alphabet**, which is 
 
 Every dynamic graph in the substrate is a composition of the three. Each axis is otherwise
 unbounded, so each ceiling is structural: the depth ceiling refuses before any child is enqueued
-(`tests/test_spawn_depth_ceiling.py`), which is what makes it a ceiling rather than a warning.
+([`tests/test_spawn_depth_ceiling.py`](../../tests/test_spawn_depth_ceiling.py)), which is what makes it a ceiling rather than a warning.
 
 ```mermaid
 graph TD
@@ -106,7 +106,7 @@ Each of these is enforced or pinned.
 | the qualified emitter | a branch's await is rescoped to `gather:{g},{i};{name}`, so an emitter outside the workflow composes the same name with `api.qualified_event_name`. Emitting the bare name resolves nothing; the conformance suite pins it on both engines |
 | serialized wakes | with several branches parked, the task waits on the lowest parked index, so answering branch 2 first makes no progress until branch 0 is answered. This is what makes the park deterministic |
 | wrapped exceptions | every branch runs to its end, and their exceptions arrive as one `ExceptionGroup` in branch order. A group of refusals is thrown into the workflow, and so is a refusal out of a `scoped` body; `except* Refused` catches every form, and `except* ChildRefused` around a gather of joins catches a child's. A group with any other leaf fails the task |
-| commit order | branches commit as their tool work finishes, so the substrate promises the multiset and each branch's internal order, never a total order over a gather region (ADR-0008 §3). Anything that cuts by commit order cuts outside the region |
+| commit order | branches commit as their tool work finishes, so the substrate promises the multiset and each branch's internal order, never a total order over a gather region ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) §3). Anything that cuts by commit order cuts outside the region |
 
 **Length (rounds).**
 
@@ -124,7 +124,7 @@ Each of these is enforced or pinned.
 | an answer from another run | a child answers on the done event the handler names from the spawn's task and placement (`spawn-done:{task},{occurrence};{placement}`), so a parent is answered only by the child it spawned |
 | orphaned children | a detached spawn (no `join_fork`) is a feature, and nothing reaps it: a child parked on `Ask()` forever is a task nobody waits for, visible only in the ledger. Collecting hypothetical lineages is open |
 | a child that answers and then dies | the parent completes and looks green while the child retries in the background; assert that children reach a terminal state, as well as that they answered |
-| a child that fails | a parent hears how its child ended, in the kind it ended in (`docs/effective-101.md` §4.11): a value, a refusal, or `Failed`. Uncaught, `ChildFailed` fails the parent once and climbs; a parent that catches it supervises. A worker that dies on a child's last attempt answers nobody, a strict xfail on both engines (`tests/test_attempts.py`) |
+| a child that fails | a parent hears how its child ended, in the kind it ended in ([`docs/effective-101.md`](../effective-101.md) §4.11): a value, a refusal, or `Failed`. Uncaught, `ChildFailed` fails the parent once and climbs; a parent that catches it supervises. A worker that dies on a child's last attempt answers nobody, a strict xfail on both engines ([`tests/test_attempts.py`](../../tests/test_attempts.py)) |
 
 ## 4. Two edge kinds, and the decision rule
 
@@ -220,7 +220,7 @@ frontier gathers over the pages a search returned, a width decided between barri
 
 ### 5c. The counterfactual sweep
 
-The refund-request workflow of `tests/_approval_domain.py` parks on `review:{digest}`. A sweep
+The refund-request workflow of [`tests/_approval_domain.py`](../../tests/_approval_domain.py) parks on `review:{digest}`. A sweep
 forks it at that point:
 
 ```mermaid
@@ -247,7 +247,7 @@ graph TD
 
 The seeded prefix costs exactly `forks × prefix_len` checkpoint rows, linear in both with no
 cross-term, at about 540 bytes per row for a 512-byte payload on SQLite
-(`tests/test_fork_sweep_cost.py`). When a sweep costs too much, the lever is `through`: fork later
+([`tests/test_fork_sweep_cost.py`](../../tests/test_fork_sweep_cost.py)). When a sweep costs too much, the lever is `through`: fork later
 and seed less. The fan-out width is what the sweep is for. `through` moves the whole boundary:
 every op before the fork point must be seeded, or `SeedingCtx` refuses.
 
@@ -270,7 +270,7 @@ graph LR
 
 **A gate is a node:** the cascade's park is an `AwaitEvent` with a composed, run-scoped name, so
 "who approved what, and when" is answerable from the graph. And **the projection hangs off the
-end**: a view is a fold over the ledger, never a second place the state lives (ADR-0022).
+end**: a view is a fold over the ledger, never a second place the state lives ([ADR-0022](0022-dashboard-projections-the-read-side.md)).
 
 ### 5e. Reading a graph
 
@@ -363,9 +363,9 @@ main thread; it cannot take over from it.
 ## 7. Consequences
 
 - No op kind and no engine capability were added for fan-out: the fleet run decomposes into spawns
-  and joins (ADR-0008). The scheme is closed under composition: fork inside gather is refused at
+  and joins ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)). The scheme is closed under composition: fork inside gather is refused at
   the fork point only, and gather inside a forked tail is pinned. Both engines carry it.
 - A cross-task fan-out pays a task per child: right for anything with its own lifetime, wrong for a
   hundred tiny counterfactuals, where an in-task `gather` is cheaper.
 - A gather region is atomic for cutting (§4a), and `fork_seed` cuts by commit order, which is a race
-  inside a region by design (ADR-0008 §3).
+  inside a region by design ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) §3).

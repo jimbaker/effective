@@ -269,9 +269,9 @@ class Stop:
     argued. The alternative was `machine-parked-exhausted` / `machine-parked-rejected`, whose whole
     claim was that a new `ParkReason` could not be added without deciding what it is called —
     `assert_never` forcing the arm. It cannot: `ty` does not narrow a nested enum pattern inside a
-    class pattern, and infers `Park[S] & ~Finish` rather than `Never` (measured 2026-08-19). So
-    that shape buys no compile-time totality over the reason, and costs a consumer filtering on
-    `machine-parked` its answer.
+    class pattern, and infers `Park[S] & ~Finish` rather than `Never`. So that shape buys no
+    compile-time totality over the reason, and costs a consumer filtering on `machine-parked` its
+    answer.
 
     Here the totality that exists is kept — `assert_never` still closes the OUTCOME, which is the
     union `ty` does narrow — and the reason rides as data, so a third `ParkReason` reaches the

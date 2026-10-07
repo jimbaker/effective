@@ -118,8 +118,8 @@ class SteeringCtx:
         """Steers the run never reached: the complement of `applied`, and the completeness check
         a caller asserts.
 
-        A leftover means the steer's coordinate missed: a key from a tape the run no longer
-        produces (the harness moved), or an occurrence the run did not reach this time. Empty is
+        A leftover means the steer's coordinate missed: a key the run does not produce (the
+        harness moved), or an occurrence the run did not reach this time. Empty is
         NECESSARY, NOT SUFFICIENT: it cannot see a step that ran live where a steer was intended
         but never authored, the quantifier gap `SeedingCtx` closes by refusing an unseeded prefix
         step.

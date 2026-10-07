@@ -5,7 +5,7 @@ instantly to an FPS player and sent a reader of this design to look up a definit
 costs a lookup is not carrying the axis. "Loadout" survives as an illustration word in its
 mission-kit sense: a set chosen for a mission.
 
-**Status:** design, with two pieces built. §6a's `Tool[A, R]` ships at `src/effective/react.py`
+**Status:** design, with two pieces built. §6a's `Tool[A, R]` ships at [`src/effective/react.py`](../src/effective/react.py)
 with a fourth field, `observe`. §3a's `op_key` refusal arm ships at `handlers/base.py`, so read §3a
 and §9 where they list it as a build item as describing work that is done.
 
@@ -120,7 +120,7 @@ fall-through into a loud, documented refusal without changing behaviour.
 
 ## 4. The operational semantics
 
-An extension of the small-step semantics in `docs/effective-design.md`, which it does not revise.
+An extension of the small-step semantics in [`docs/effective-design.md`](effective-design.md), which it does not revise.
 
 ### 4a. Configuration: CLEAR
 
@@ -281,7 +281,7 @@ through the ctx wrappers: their hand-maintained `isinstance` tuple warns that *f
 it when a wrapper is added is the recurring bug (`handlers/absurd.py:336-342`), an obligation a
 second consumer inherits. **And the property is unsound as stated under a concurrent `gather`**:
 branches interleave, so one branch's first live thunk can precede another's replayed tail. Rule the
-frame scope and enrol it in `tests/_conformance.py` over both engines before building it.
+frame scope and enrol it in [`tests/_conformance.py`](../tests/_conformance.py) over both engines before building it.
 
 ### 6a. `Tool`: the first build step, and it pays for itself
 

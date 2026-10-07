@@ -3,7 +3,7 @@
 Effective rests on one idea: an agent loop is a state machine, and a Python generator already
 holds a state machine's state. This page builds the model in five steps: the workflow, the
 handler, the tape, layers and combinators. Steps 1, 2 and 4 have code you can run.
-`docs/effective-101.md` takes the same concepts in depth.
+[`docs/effective-101.md`](effective-101.md) takes the same concepts in depth.
 
 ## 1. A workflow is a generator that asks
 
@@ -25,7 +25,7 @@ frame: `goal`, `observation`, `action`, and the line it is paused on.
 
 ## 2. A handler is the only code that calls `send`
 
-Something has to answer the requests. In `examples/react_toy.py` that is a loop over a script:
+Something has to answer the requests. In [`examples/react_toy.py`](../examples/react_toy.py) that is a loop over a script:
 
 <!-- source: examples/react_toy.py -->
 ```python
@@ -45,8 +45,8 @@ without changing the workflow.
 Effective's `DurableHandler` is this trampoline, grown up. A workflow yields typed ops through
 wrappers such as `ask_llm` and `call_tool`; the handler answers each from the tape first, then from
 the world, and makes each model call, tool call and ledger append a checkpointed step of a task.
-`docs/first-workflow.md` runs one on the embedded SQLite engine. For tests, two in-memory handlers
-answer from canned responses and replay a recording: `wiki/concepts/testing.md`.
+[`docs/first-workflow.md`](first-workflow.md) runs one on the embedded SQLite engine. For tests, two in-memory handlers
+answer from canned responses and replay a recording: [`wiki/concepts/testing.md`](../wiki/concepts/testing.md).
 
 ## 3. Durability is a tape
 
@@ -59,7 +59,7 @@ Replay finds each answer by the op's name, so two rules follow:
 | rule | why |
 |---|---|
 | no I/O, clock or randomness between `yield`s | a value read outside an op is not on the tape, so replay sees a different one |
-| keep an op's name stable while runs are in flight | a durable handler serves a recorded answer to whichever op carries its name and runs an op it has no answer for; a change in order is caught in a test (`wiki/concepts/testing.md`) |
+| keep an op's name stable while runs are in flight | a durable handler serves a recorded answer to whichever op carries its name and runs an op it has no answer for; a change in order is caught in a test ([`wiki/concepts/testing.md`](../wiki/concepts/testing.md)) |
 
 Check the first rule with `uv run python -m effective.lint <your workflow files>`; `just lint` runs
 it over this repository's workflow modules. The two engines that hold the tape, Absurd on Postgres
@@ -122,7 +122,7 @@ recorded result, so a side effect that must happen once belongs in an op.
 A workflow that calls another workflow writes `yield from`, and the callee's ops flow through the
 same handler, layers and tape. A workflow can also spawn one as a child task, which runs on its
 own; its parent hears how it ended through `join_answer`: the value, or a raised `ChildRefused` or
-`ChildFailed` (`src/effective/spawning.py`). That is how a subagent runs durably. The combinators
+`ChildFailed` ([`src/effective/spawning.py`](../src/effective/spawning.py)). That is how a subagent runs durably. The combinators
 are called with `yield from`: `gather`, `race` and `quorum` are ops the handler runs, and
 `recurse`, `route` and `descend` are workflows written with `yield from`, and `recurse` fans out
 with `gather`:
@@ -142,6 +142,6 @@ recorded, replayed, interruptible and durable like the rest.
 
 | read | for |
 |---|---|
-| `docs/first-workflow.md` | a real workflow with a t-string prompt and a guardrail, run durably and resumed after an outage |
-| `docs/effective-101.md` | the op set, the combinator algebra, the temporal shapes |
+| [`docs/first-workflow.md`](first-workflow.md) | a real workflow with a t-string prompt and a guardrail, run durably and resumed after an outage |
+| [`docs/effective-101.md`](effective-101.md) | the op set, the combinator algebra, the temporal shapes |
 | `wiki/index.md` | one concept a page, and the index of architecture decisions |

@@ -15,9 +15,9 @@ disk, a port answering, an image built — can be checked before anything runs, 
 probes do. **API AVAILABILITY cannot**: a provider that is up when preflight asks and rate-limits
 ninety seconds later is indistinguishable, in advance, from one that is up. It is discovered by
 the attempt failing, so it belongs to the call site rather than to preflight, and the call site's
-obligation is the same one — be loud, and continue. Measured 2026-08-27: two `tape-check` runs
-minutes apart aborted at 0 steps against a valid credential, and two later runs banked cleanly.
-The gate went red for a provider hiccup.
+obligation is the same one: be loud, and continue. A `tape-check` run can abort at 0 steps
+against a valid credential while the next banks cleanly, so the gate goes red on a provider
+hiccup.
 
 **The capability -> recipe mapping below is DECLARED, and this docstring owes the reader why**,
 because `preflight.py` derives its own domain and says a hand-written list is the failure mode this
@@ -90,11 +90,11 @@ def spend() -> Precondition:
     **The conflict arm is the reason this is not three lines.** `load_api_env` returns EARLY when
     the environment already carries a key, so an environment key WINS — and `justfile`'s
     `set dotenv-load` searches PARENT directories, so a `.env` outside the repo silently supplies
-    one to every recipe. Measured 2026-08-27: a `.env` in a parent directory put a 56-character key
-    into every `just` recipe while `./api.env` held the working 164-character one, and
-    `just tape-check` therefore aborted its live run at 0 steps. The gate then reported *"the fresh
-    tape does not replay: model called during replay"*, which is the empty tape talking and reads
-    like a broken loop. Two runs bypassing `just` succeeded, which is what made it look transient.
+    one to every recipe. A `.env` in a parent directory therefore puts its key into every `just`
+    recipe ahead of `./api.env`. A stale one makes `just tape-check` abort its live run at 0 steps,
+    and the gate reports *"the fresh tape does not replay: model called during replay"*, which is
+    the empty tape talking and reads like a broken loop. A run bypassing `just` succeeds, which is
+    what makes it look transient.
 
     A presence check cannot see this, and a validity check would need a paid round trip. Comparing
     the two configured credentials costs nothing and names the exact hazard, so it is worth more

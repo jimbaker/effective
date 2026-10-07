@@ -26,7 +26,7 @@ arc, four of them in instruments built the same day; every one found by an outsi
 moving the thing, none by running it. An instrument that is green and wrong is invisible to running
 it: you find it by MOVING what it describes.
 
-See [[concepts/enforcer-domain]] for the shape this takes in a gate.
+See [concepts/enforcer-domain](enforcer-domain.md) for the shape this takes in a gate.
 
 ## A green test can be weaker than it looks
 

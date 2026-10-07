@@ -2,15 +2,15 @@
 
 - **Date:** 2026-06-21
 - **Status:** Accepted. Built: `render_shiny` and `action_id`
-  (`src/effective/cards/render_shiny.py`), the `Slot` cell (`src/effective/cards/spec.py`), and
-  the altitude guard (`tests/test_cards_altitude.py`). The app-shell half (the action
+  ([`src/effective/cards/render_shiny.py`](../../src/effective/cards/render_shiny.py)), the `Slot` cell ([`src/effective/cards/spec.py`](../../src/effective/cards/spec.py)), and
+  the altitude guard ([`tests/test_cards_altitude.py`](../../tests/test_cards_altitude.py)). The app-shell half (the action
   dispatcher, the reactive projection, the chart widgets) and any `reactive_board` helper belong
   to a host application.
-- **Relates to:** ADR-0010 (the `CardSpec` IR and its render targets).
+- **Relates to:** [ADR-0010](0010-card-ir-view-axis.md) (the `CardSpec` IR and its render targets).
 
 ## Context
 
-ADR-0010 renders a `CardSpec` to an HTML string. Inside a Shiny app that string is wrapped in
+[ADR-0010](0010-card-ir-view-axis.md) renders a `CardSpec` to an HTML string. Inside a Shiny app that string is wrapped in
 `ui.HTML(...)`, and three things follow:
 
 | symptom | cause |
@@ -94,9 +94,9 @@ lowering of it.
   the bootstrap nor an observer, and the card vocabulary needs one cell for it, `Slot`. That is the
   success metric: delegating to Shiny makes the bridge smaller, and glue that makes it larger is
   the signal of a wrong turn.
-- **The altitude holds by test.** `tests/test_cards_altitude.py` asserts that nothing in
+- **The altitude holds by test.** [`tests/test_cards_altitude.py`](../../tests/test_cards_altitude.py) asserts that nothing in
   `src/effective/cards/` imports `shiny`, that only `render_shiny` imports `htmltools`, and that
-  `src/effective/cards/spec.py` imports neither. If `Action` ever has to know an input id, the levels have leaked.
+  [`src/effective/cards/spec.py`](../../src/effective/cards/spec.py) imports neither. If `Action` ever has to know an input id, the levels have leaked.
 - **`htmltools` is a runtime dependency of the substrate** (`pyproject.toml`). It is Shiny's
   standalone tag library and carries no server.
 - **Every render target lives in `src/effective/cards/`.** How a card becomes reactive UI is a

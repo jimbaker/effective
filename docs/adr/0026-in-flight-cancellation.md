@@ -1,12 +1,12 @@
 # ADR-0026: In-flight cancellation
 
 - **Date:** 2026-09-26
-- **Status:** Accepted. Built on the recorder, replay and both engines (`src/effective/cancel.py`),
+- **Status:** Accepted. Built on the recorder, replay and both engines ([`src/effective/cancel.py`](../../src/effective/cancel.py)),
   with the shell interpreter and the Responses callers as the interpreters that stop.
-- **Supersedes:** ADR-0004 D4's "no mid-op cancel". The rest of D4 stands: an interrupt poll is a
+- **Supersedes:** [ADR-0004](0004-react-loop-driver.md) D4's "no mid-op cancel". The rest of D4 stands: an interrupt poll is a
   recorded op, and its answer is a checkpoint a replay re-derives.
-- **Relates to:** ADR-0004 (the loop's `interrupt` seam), ADR-0009 (the step contract a cancel
-  completes under), ADR-0025 (a race loser's stop, which this mechanism does not reach).
+- **Relates to:** [ADR-0004](0004-react-loop-driver.md) (the loop's `interrupt` seam), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the step contract a cancel
+  completes under), [ADR-0025](0025-race-and-quorum.md) (a race loser's stop, which this mechanism does not reach).
 
 ## 1. The decision
 
@@ -21,9 +21,9 @@ unchanged.
 
 **Falsified if:** a replay reruns an op whose recorded result is a cancel; or a cancel requires an
 op kind of its own.
-**Checked by** `test_a_cancelled_conversation_survives_a_crash_at_every_op` (`tests/test_smol.py`)
+**Checked by** `test_a_cancelled_conversation_survives_a_crash_at_every_op` ([`tests/test_smol.py`](../../tests/test_smol.py))
 and `test_an_action_cancelled_while_it_ran_is_its_observation_and_replays_as_recorded`
-(`tests/test_cancel.py`). Not modeled.
+([`tests/test_cancel.py`](../../tests/test_cancel.py)). Not modeled.
 
 ## 2. Who stops, and how
 
@@ -49,9 +49,9 @@ would have without the stop. A stop only claims the ops it ended.
 
 **Falsified if:** an op that completed before its stop took effect answers `Cancelled`; a stop runs
 after the block that registered it has exited; or a blocked call outlives its stop.
-**Checked by** `tests/test_shell.py` (a command that exits, or dies of its own signal, after a
-cancel), `tests/test_openai_cancel.py` (a reply completed, or ended `incomplete`, before the stop)
-and `tests/test_cancel.py` (a stop whose block exited never runs; a reset never reruns a stop; a
+**Checked by** [`tests/test_shell.py`](../../tests/test_shell.py) (a command that exits, or dies of its own signal, after a
+cancel), [`tests/test_openai_cancel.py`](../../tests/test_openai_cancel.py) (a reply completed, or ended `incomplete`, before the stop)
+and [`tests/test_cancel.py`](../../tests/test_cancel.py) (a stop whose block exited never runs; a reset never reruns a stop; a
 block's exit waits for a stop already running). Not modeled.
 
 ## 3. What the workflow sees
@@ -60,7 +60,7 @@ The workflow never receives the `Cancelled` value. The step surface raises `OpCa
 place, whichever handler recorded it, so a workflow cannot mistake a cancel for a completion.
 
 A scoped body delivers a refusal to its parent and ends the run on any other exception, so
-`OpCancelled` is caught in the scope that yielded the step. The ReAct loop (`src/effective/react.py`)
+`OpCancelled` is caught in the scope that yielded the step. The ReAct loop ([`src/effective/react.py`](../../src/effective/react.py))
 catches it around the decide, the compaction and the act:
 
 | cancelled while it ran | the turn |
@@ -74,10 +74,10 @@ not run.
 **Falsified if:** a workflow receives `Cancelled` as a step's value; or a cancel inside a scoped body
 fails the task.
 **Checked by** `test_a_cancel_raises_through_the_generator_surface` and
-`test_a_cancel_raises_on_the_coroutine_surface_too` (`tests/test_cancel.py`), and
+`test_a_cancel_raises_on_the_coroutine_surface_too` ([`tests/test_cancel.py`](../../tests/test_cancel.py)), and
 `test_a_final_decide_cancelled_while_it_ran_ends_the_turn_and_keeps_what_ran` and
 `test_a_command_cancelled_while_it_ran_is_the_observation_and_ends_the_turn`
-(`tests/test_smol.py`). Not modeled.
+([`tests/test_smol.py`](../../tests/test_smol.py)). Not modeled.
 
 ## 4. The record
 
@@ -88,13 +88,13 @@ pressed. Only a step's stored result decodes the shape; an event payload, a gran
 result is validated by its own schema and never read as a cancel.
 
 The Esc lives in the process. An op cancelled and then crashed before its checkpoint commits
-re-runs on resume with a fresh token, as any uncommitted step does (ADR-0009).
+re-runs on resume with a fresh token, as any uncommitted step does ([ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)).
 
 **Falsified if:** anything other than a step's stored result decodes as a cancel; or a step's
 result in the reserved shape is served to the workflow on any handler.
 **Checked by** `test_an_event_payload_shaped_like_a_cancel_is_refused_by_its_schema`
-(`tests/test_smol.py`), and `test_a_result_in_the_reserved_shape_is_refused_by_the_recorder` and
-`test_an_engine_refuses_to_checkpoint_a_result_in_the_reserved_shape` (`tests/test_cancel.py`). A
+([`tests/test_smol.py`](../../tests/test_smol.py)), and `test_a_result_in_the_reserved_shape_is_refused_by_the_recorder` and
+`test_an_engine_refuses_to_checkpoint_a_result_in_the_reserved_shape` ([`tests/test_cancel.py`](../../tests/test_cancel.py)). A
 grant and a spawn result have no pin. Not modeled.
 
 ## 5. What this does not rule
@@ -103,4 +103,4 @@ grant and a spawn result have no pin. Not modeled.
 |---|---|
 | the spend of a model call cancelled mid-stream | the meter does not see it: a cancelled Responses call reports latency and no tokens |
 | whether a provider stops generating, and billing, when the stream is severed | unmeasured |
-| stopping a race loser mid-op | cooperative (ADR-0025): a loser finishes the op it started and stops at its next admission |
+| stopping a race loser mid-op | cooperative ([ADR-0025](0025-race-and-quorum.md)): a loser finishes the op it started and stops at its next admission |

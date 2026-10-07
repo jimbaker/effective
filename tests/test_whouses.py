@@ -197,10 +197,11 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `cache.op_digest` reads each op's content and schema, `_encoded` a message's role and
     # content, and `Cache.chooses` a tool's name.
     # `react._guarded` reads a refusal's reason and an ask's question.
+    # `graphview._statement` reads a sequence statement's hole.
     # `markdown._render` reads a hole's value to compose a nested template.
     # `Fetched.transient` reads an unreadable answer's code, `research._readable` a page's text.
     # `telemetry._guarded` reads a hole's value, expression, conversion and spec to rebuild it.
-    assert reached == 241, f"the corpus this fix was measured on held 241; found {reached}"
+    assert reached == 242, f"the corpus this fix was measured on held 242; found {reached}"
 
     seen = {
         (str(p), line + 1)

@@ -1,4 +1,4 @@
-"""Expired-lease reclaim on the deployed engine — the recovery path with no test until now.
+"""Expired-lease reclaim on the deployed engine: the recovery path, tested.
 
 A worker that dies mid-task leaves its row `running` with a `claim_expires_at` in the past.
 Nothing re-queues it explicitly: Absurd's `claim_task` sweeps expired leases as part of the next

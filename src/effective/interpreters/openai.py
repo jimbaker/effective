@@ -100,7 +100,8 @@ class Price:
 # and the smoke run is hard-capped by a CostBudget regardless.
 GPT5_NANO = Price(input_per_1m=0.05, cached_per_1m=0.005, output_per_1m=0.40)
 
-# gpt-5.6-luna list pricing (USD / 1M tokens), 2026-08-24.
+# gpt-5.6-luna list pricing (USD / 1M tokens), read 2026-08-24 from
+# developers.openai.com/api/docs/pricing.
 #
 # **SHORT-CONTEXT tier only, and the meter therefore UNDER-reports a long-context call.** Luna is
 # priced in two tiers — $0.20/$0.02/$1.20 short, $0.40/$0.04/$1.80 long — and `Price` has three
@@ -492,7 +493,7 @@ class OpenAITurnCaller(_BaseTurnCaller):
 class ResponsesTurnCaller(_BaseTurnCaller):
     """OpenAI `/v1/responses`, with the action channel NATIVE rather than emulated.
 
-    **Why this endpoint exists here, measured 2026-08-24.** In `/v1/chat/completions` the two
+    **Why this endpoint exists.** In `/v1/chat/completions` the two
     models are mirror images: `gpt-5-nano` accepts function tools with `reasoning_effort` but
     rejects `none`; `gpt-5.6-luna` rejects function tools with ANY reasoning effort, including the
     default, and accepts them only at `none`. So on chat completions luna can have its reasoning
@@ -725,10 +726,10 @@ def _streamed(client: Any, kwargs: dict[str, Any], cancel: CancelToken) -> tuple
 _NAMESPACE = "functions."
 """The prefix a model sometimes puts on a function it calls, and the catalog never does.
 
-Measured on the first live `examples.coder` run (2026-09-15, `gpt-5.6-luna`): the reply named
-`functions.edit` for a tool declared as `edit`, the loop found no such tool, and the call reached
-a deployment that serves four names and refused. Stripped here, at the seam that knows this is one
-provider's spelling of the name it was given, rather than in every table a loop dispatches on."""
+`gpt-5.6-luna` can name `functions.edit` for a tool declared as `edit`. The loop then finds no
+such tool, and the call reaches a deployment that serves four names and refuses. Stripped here,
+at the seam that knows this is one provider's spelling of the name it was given, rather than in
+every table a loop dispatches on."""
 
 
 def _wire_from_response(response: Any) -> _WireTurn:

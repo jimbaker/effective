@@ -6,16 +6,16 @@
   layout seam (`effective.graphlayout`, elkjs sandboxed), the span join
   (`telemetry.measurements`, `telemetry.sidecar_measurements`), and a local page that shows the
   parked fleet, draws one run and answers its park (`effective.dashboard`, hosted by
-  `examples/dashboard_demo.py`). Not built: a live feed, the fleet and counterfactual views, the
+  [`examples/dashboard_demo.py`](../../examples/dashboard_demo.py)). Not built: a live feed, the fleet and counterfactual views, the
   authority classifier (§12b), and a fold index (§9c).
-- **Relates to:** ADR-0021 (the graph is a projection; this is its read side), ADR-0010 (the
-  `CardSpec` IR), ADR-0011 (`render_shiny`), ADR-0008 (watching a run is telemetry, with no op),
-  ADR-0020 (key composition, whose coordinate roles the fold reads).
+- **Relates to:** [ADR-0021](0021-dynamic-graphs-as-projections.md) (the graph is a projection; this is its read side), [ADR-0010](0010-card-ir-view-axis.md) (the
+  `CardSpec` IR), [ADR-0011](0011-shiny-native-card-render-target.md) (`render_shiny`), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (watching a run is telemetry, with no op),
+  [ADR-0020](0020-key-composition-one-grammar.md) (key composition, whose coordinate roles the fold reads).
 
 ## 1. Context
 
 The chain **ledger → projection → `CardSpec` → render → a board with a decision `Action`** is the
-substrate's read side: a projection is a fold over the record, a card is data (ADR-0010, ADR-0011),
+substrate's read side: a projection is a fold over the record, a card is data ([ADR-0010](0010-card-ir-view-axis.md), [ADR-0011](0011-shiny-native-card-render-target.md)),
 and an action on a board is a new ledger event. A domain projection shows the domain's nodes;
 none shows the **graph** of a run: which run is where, what it is waiting on, what a fork would
 have done. Every ingredient exists: checkpoints
@@ -41,7 +41,7 @@ Three properties it inherits by construction, and they are the reason to reuse r
 beside:
 
 1. **Derived, never authoritative.** A dashboard cannot be a second declaration of the graph
-   (ADR-0021). It is rebuilt from the record; a stale view is a bug in the fold, never a divergence
+   ([ADR-0021](0021-dynamic-graphs-as-projections.md)). It is rebuilt from the record; a stale view is a bug in the fold, never a divergence
    in the truth.
 2. **Inspect-only, except through an event.** A view that lets an operator answer a parked await
    does it by emitting the event; the substrate resumes the run.
@@ -65,7 +65,7 @@ counterfactual view are not built.
 ## 3a. The cycle projection: a view is a projection that drops an axis
 
 A run's graph is dynamic: every step is a new node. A node's name carries a program position and
-the coordinates that say which execution of it this was (ADR-0021 §2a): scope frames, a gather
+the coordinates that say which execution of it this was ([ADR-0021](0021-dynamic-graphs-as-projections.md) §2a): scope frames, a gather
 branch, an occurrence, as in `d:1;gather:0,1;ask#2`. A view is a choice of which coordinates to
 keep.
 
@@ -76,7 +76,7 @@ graph LR
   T --> L["drop position<br/>TIMELINE<br/>when things happened"]
 ```
 
-The cycle view is ADR-0021 §2's unrolling read right to left: `ask`, `ask#2`, `ask#3` become one
+The cycle view is [ADR-0021](0021-dynamic-graphs-as-projections.md) §2's unrolling read right to left: `ask`, `ask#2`, `ask#3` become one
 `ask ×3`; four `gather:0,i;fetch` become one `fetch ×4`; a chain `ask → act → ask#2 → act#2` folds
 back into the loop `ask ⇄ act` the program contains. It is π on the key's coordinate tuple followed
 by a group-by.
@@ -116,7 +116,7 @@ fields, the `kind` (from the key grammar via `kind_of`: step, ledger, artifact, 
 `state`, the `cost` and `duration_ns` (from spans, `None` when unmeasured), the branch `path`, the
 enclosing scope `frames`, the tape `order`, and in a folded view `count` and `members`. Edges are
 commit order within a run, which across concurrent gather branches is one schedule rather than
-causation (ADR-0008).
+causation ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)).
 
 Two states have a producer: `COMMITTED`, the default for a recorded key, and `PARKED`, for the
 pending node (§10a). `refused` and `not-reached` are documented and have none; `STATE_PRIORITY`
@@ -139,7 +139,7 @@ correlating; they are the same address.
 `from_keys(..., telemetry=…)` takes that mapping rather than issuing a query, which keeps the
 projection a pure fold. `fold_cycles` sums cost and duration, so the cycle view answers "this loop
 cost so much over 100 iterations" per node, attributed to a line of source.
-`tests/test_machine_telemetry_joins_the_tape.py` proves the join on both engines.
+[`tests/test_machine_telemetry_joins_the_tape.py`](../../tests/test_machine_telemetry_joins_the_tape.py) proves the join on both engines.
 
 The storage question is about volume, not capability. The ledger is small and canonical and
 belongs in the engine; spans are high-volume and disposable, and can live in a sidecar or a
@@ -182,7 +182,7 @@ A `CardSpec` is a list of cards; a graph is nodes and edges.
 |---|---|
 | **Mermaid text** (`to_mermaid`) | cheap, reviewable in a diff, and legible to an agent reading the projection as text; renders on Markdown hosts that support it. No `Diagram` cell exists in `cards/spec.py`, and `render_html` ships no Mermaid bootstrap |
 | **an SVG from the layout seam** (`graphlayout.to_svg`) | what the dashboard draws: Python decides what the graph means, a layout engine decides where to draw it (§11.6) |
-| **the `Slot` escape hatch** (ADR-0011) | a host fills the region with its own widget; most capable, least portable, outside the IR |
+| **the `Slot` escape hatch** ([ADR-0011](0011-shiny-native-card-render-target.md)) | a host fills the region with its own widget; most capable, least portable, outside the IR |
 | **a Vega node-link chart** | fits `VegaChart` with no IR change; poor for deep nesting, and not readable as text |
 
 Mermaid stays the quotable form, for a report or a terminal, and `to_text` is the tree form the
@@ -192,7 +192,7 @@ terminal view (`src/tui/`) draws. The drawn form is the SVG.
 
 A live view reads a run's progress as it happens: inspect-only, never recorded, nothing to read on
 replay. That is telemetry, the bookkeeper kept outside the engine, so a live feed is a reader of
-spans and no op carries it (ADR-0008).
+spans and no op carries it ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)).
 
 An interactive surface needs a live feed; polling is not sufficient. The reason is latency: both
 engines durably write a park, so a poller can see one, but a human looking at the surface should
@@ -217,7 +217,7 @@ All examples are pure substrate.
 
 ## 9. The two experiments
 
-Both are `tests/test_graphview.py`, so the numbers cannot rot into anecdotes. The decisions in §8
+Both are [`tests/test_graphview.py`](../../tests/test_graphview.py), so the numbers cannot rot into anecdotes. The decisions in §8
 were taken from these measurements.
 
 ### 9a. Legibility at scale: folding is the collapse rule
@@ -362,7 +362,7 @@ RunGraph --prepare--> LayoutGraph --to_elk--> ELK JSON --elkjs--> Geometry --to_
 Python decides what the graph means: `prepare.classify` resolves which edge is a loop a fold
 recovered, which two nodes are adjacent only by commit order inside a gather, and which node the
 run is parked on, and `validate.forward_is_acyclic` checks that it did. The engine decides where
-to draw it. elkjs is pinned in `infra/elkjs/PIN.txt`, runs in a container with `--network=none`
+to draw it. elkjs is pinned in [`infra/elkjs/PIN.txt`](../../infra/elkjs/PIN.txt), runs in a container with `--network=none`
 (`just elk-image`, `just elk-setup`), and is one interpreter of the `LayoutGraph` description;
 graphviz or a native layout is a swap rather than a rewrite. A node's `id` is its semantic key, an
 op key or a folded class of them, and is the only identity that crosses to a browser and back.
@@ -429,7 +429,7 @@ What yields an op is substrate and lives in `effective`; what answers one is an 
 `effective.interpreters`; consumers import the substrate and never the reverse. The read side is
 substrate: `graphview`, `parked`, `graphlayout`, `dashboard` and `runview` read records and import
 no workflow. A host that supplies workflows is a consumer, which is why `effective.dashboard` ships
-no entry point and `examples/dashboard_demo.py` is the host: the task registry is domain code.
+no entry point and [`examples/dashboard_demo.py`](../../examples/dashboard_demo.py) is the host: the task registry is domain code.
 `run_agent` yields ops, so it is substrate (`effective.react`), and `agent` is the bench and
 evaluation half.
 
@@ -451,18 +451,18 @@ base gets it from a fresh subject per run, the child from `RenamedAwaitCtx`, whi
 per base run and stable across forks. `api.await_event`'s docstring states the rule, and
 `run_fork_as_task` hands the workflow `forked_from`, the base's run id, so a workflow that scopes on
 its argument stays forkable. A fresh base run must still park rather than inherit a stale answer,
-because on Absurd an answer is permanent; `tests/test_fork_sweep_absurd.py` pins that.
+because on Absurd an answer is permanent; [`tests/test_fork_sweep_absurd.py`](../../tests/test_fork_sweep_absurd.py) pins that.
 
 No lint or conformance case gates await scoping, and SQLite, which does not make an answer
 permanent, cannot catch a violation.
 
-`agent_loop_wf` and `fan_wf` in `tests/test_graphview.py` contain no await, so they have no fork
+`agent_loop_wf` and `fan_wf` in [`tests/test_graphview.py`](../../tests/test_graphview.py) contain no await, so they have no fork
 point, and `run_fork` refuses them whatever they name their rows.
 
 ## 13. Selection: what a view draws
 
 The key is the spine of replay, the dashboard and the formal semantics: replay binds to keys, the
-dashboard projects them, and `formal/lean/Effective/Keys.lean` proves the injectivity
+dashboard projects them, and [`formal/lean/Effective/Keys.lean`](../../formal/lean/Effective/Keys.lean) proves the injectivity
 `compose_key` provides. A key that is not injective breaks all three, and asking a view where a run
 is surfaces collisions (`graphview.ledger_collisions` is the dashboard's alarm).
 
@@ -487,9 +487,9 @@ nodes, never fewer facts, is π's contract, and `hidden` is selection's.
 ## 14. Which folds survive a schedule
 
 The ledger observable is a labelled partial order, and a run records one of its linear extensions
-(`docs/effective-design.md` §3.5). A reader claiming a schedule-independent answer owes
+([`docs/effective-design.md`](../effective-design.md) §3.5). A reader claiming a schedule-independent answer owes
 $s \sim t \Rightarrow F(s) = F(t)$, and the default projection idiom does not pay it. Pinned in
-`tests/test_reader_quotient.py`, with the schedule forced:
+[`tests/test_reader_quotient.py`](../../tests/test_reader_quotient.py), with the schedule forced:
 
 | the fold | survives a schedule |
 |---|---|

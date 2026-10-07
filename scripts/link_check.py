@@ -26,11 +26,15 @@ import re
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
 
 REPO = Path(__file__).resolve().parent.parent
 BASELINE = REPO / "scripts" / "link-check-baseline.txt"
@@ -46,7 +50,7 @@ WIKI = REPO / "wiki" / "index.md"  # the catalog; its `## Decisions` table is th
 # deliberately NOT scanned: a sentence naming a directory in passing is not a link,
 # and the false-positive cost exceeds the benefit.
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
-MDLINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+MDLINK_RE = re.compile(r"\[[^\]]*\]\(<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\)")
 # a code anchor: path:line, the grammar doc_inventory.py shares
 PATHLINE_RE = re.compile(r"([\w./-]+\.(?:py|sql|lean|qnt|toml|sh|ts|js|yml|yaml)):(\d+)")
 
@@ -57,6 +61,8 @@ ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
 SEE_SECTION_RE = re.compile(r"see §(\d+(?:\.\d+)*)", re.IGNORECASE)
 HEADING_NUM_RE = re.compile(r"^#{2,6} (\d+(?:\.\d+)*)[.\u00a0 ]", re.MULTILINE)
 FENCE_BLOCK_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+_MARKDOWN = MarkdownIt("commonmark").enable("table")
+"""CommonMark with GitHub's tables, where a cell can split a code span and expose a link."""
 
 # the `## Decisions` table's rows: | 0021 | Title | Status | … |
 ADR_ROW_RE = re.compile(r"^\|\s*(\d{4})\s*\|", re.MULTILINE)
@@ -166,15 +172,50 @@ def _tracked(repo: Path) -> frozenset[str]:
     return frozenset(path for path in out.stdout.split("\0") if path)
 
 
-def links(text: str) -> Iterator[str]:
-    """Every repo-rooted-looking link target in a document, locator stripped."""
-    for match_re in (BACKTICK_RE, MDLINK_RE):
+def links(text: str, *, markdown: bool = True) -> Iterator[str]:
+    """Every repo-rooted-looking link target in a document, locator stripped. With `markdown`
+    off, only backticked tokens: `relative_links` reads a markdown link from where it stands."""
+    for match_re in (BACKTICK_RE, MDLINK_RE) if markdown else (BACKTICK_RE,):
         for m in match_re.finditer(text):
             token = m.group(1).split("#", 1)[0]
             if not token.startswith(TOP_LEVEL) or _exempt(token):
                 continue
             if SUFFIXED.search(path := LOCATOR_RE.sub("", token)):
                 yield path
+
+
+def destinations(text: str) -> Iterator[str]:
+    """The local path every link and image in `text` points at, as a markdown renderer reads it:
+    titles, angle brackets, reference links and nested images included, code excluded. A URL,
+    an anchor alone, and a site-rooted path are not local, and the path is percent-decoded."""
+    for href in _hrefs(_MARKDOWN.parse(text)):
+        parts = urlsplit(href)
+        if not (parts.scheme or parts.netloc or parts.path.startswith("/")) and parts.path:
+            yield unquote(parts.path)
+
+
+def _hrefs(tokens: Sequence[Token]) -> Iterator[str]:
+    for token in tokens:
+        match token.type:
+            case "link_open":
+                yield str(token.attrGet("href") or "")
+            case "image":
+                yield str(token.attrGet("src") or "")
+        yield from _hrefs(token.children or ())
+
+
+def relative_links(text: str, source: Path) -> Iterator[str]:
+    """Every markdown link's local destination, resolved from `source` to a repo path, as GitHub
+    resolves it."""
+    for target in destinations(text):
+        resolved = Path(os.path.normpath(source.parent / target))
+        if resolved.is_relative_to(REPO):
+            yield resolved.relative_to(REPO).as_posix()
+
+
+def resolves_relative(path: str) -> bool:
+    """A file `resolves` names, a tracked directory, or the repository root."""
+    return path == "." or resolves(path) or any(p.startswith(path + "/") for p in _tracked(REPO))
 
 
 def adr_index() -> set[str]:
@@ -288,7 +329,8 @@ def scan() -> list[Violation]:
         rel = src.relative_to(REPO).as_posix()
         text = src.read_text(encoding="utf-8", errors="replace")
         refs = [
-            *((p, Kind.GONE) for p in links(text) if not resolves(p)),
+            *((p, Kind.GONE) for p in links(text, markdown=False) if not resolves(p)),
+            *((p, Kind.GONE) for p in relative_links(text, src) if not resolves_relative(p)),
             *((r, Kind.ADR_UNKNOWN) for r in unknown_adrs(text, adrs)),
             *((r, Kind.SECTION) for r in dangling_sections(text)),
         ]

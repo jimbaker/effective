@@ -6,10 +6,10 @@ duplicating that here would be waste. What this has and nothing else in the suit
 **canonical-record axis** — one program point that appends a ledger row once per line item, with
 the item count discovered at runtime.
 
-**Why that shape had to be built rather than found.** Measured 2026-08-11: seven `append_ledger`
-sites in `src/`, none inside a loop, and `agent/` never appends at all. So no shipped workflow
-puts a varying authored `event_id` at one program point, and the projection question — a hundred
-ledger rows drawn as a hundred boxes — had only a graph fixture behind it. A cart is the smallest
+**Why that shape had to be built rather than found.** `grep -rn 'yield from append_ledger(' src/`
+finds no ledger append inside a loop, and `agent/` never appends at all. So no shipped workflow
+puts a varying authored `event_id` at one program point, and the projection question, a hundred
+ledger rows drawn as a hundred boxes, had only a graph fixture behind it. A cart is the smallest
 honest workload that produces it: the world changes once per line, a human can intervene per line,
 and how many lines there are is data.
 

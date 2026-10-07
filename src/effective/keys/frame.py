@@ -41,9 +41,9 @@ for, so no author claims it first."""
 GATHER_ARM = "gather"
 """The arm that FRAMES — `STEP_ARM`'s sibling, and named for the same reason.
 
-A gather's key is punctuation-shaped (`gather:{g},{i};`), so every reader that wants one has
-historically spelled the tag and its separators inline. Spelling it once means a grammar change
-moves one constant instead of a regex somebody has to find."""
+A gather's key is punctuation-shaped (`gather:{g},{i};`), and a reader that spells the tag and
+its separators inline is one more place a grammar change has to reach. Spelling it once means a
+grammar change moves one constant instead of a regex somebody has to find."""
 
 RACE_ARM = "race"
 """The arm that frames a race's branch, `race:{r},{i};`, with its own ordinal beside a gather's.
@@ -210,7 +210,7 @@ def split_frames(key: str) -> tuple[tuple[str, ...], str]:
         TERM_SEPARATOR.join((*frames, identity)) == key    # no wrapping term
 
     A wrapping FOREIGN term rides with the identity while the frames behind it do not, so the two
-    halves no longer reconstruct that key by joining — the wrapper joins its payload with `:`, and
+    halves do not reconstruct that key by joining: the wrapper joins its payload with `:`, and
     the frames it stood in front of now precede it. `past_frames` drops exactly the frames named
     here that match its `drop`, in place. Both are pinned in `tests/test_grammar.py` over the
     generated corpus, which mints the wrapped case.

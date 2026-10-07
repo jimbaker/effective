@@ -72,7 +72,7 @@ def session_spans(path: Path, *, session_id: str | None = None) -> Iterator[Span
     JSONL record per CONTENT BLOCK, so a single API response that produced
     `[thinking, tool_use, tool_use]` is three records — each carrying a COPY of that one
     response's `usage`. Counting per record therefore multiplies every token by the response's
-    block count. Measured on a real 1650-line transcript (2026-08-23): 508 usage-bearing records
+    block count. Measured on a real 1650-line transcript: 508 usage-bearing records
     for 232 distinct responses, inflating output tokens 743,621 -> 310,257 (2.40x) and cache
     reads 166,073,446 -> 75,414,017 (2.20x).
 

@@ -589,8 +589,8 @@ class KeyMap:
         key outside the language comes back whole and no frame is reached. This splits TEXT, which
         is the totality `fold_cycles` is held to: a caller scrubs run ids to `{run}` before
         comparing two runs (`effective.lineage.canonical`), and a scrubbed key must still fold.
-        Over the banked corpus **465 of 828 names do not parse** (2026-09-12; the corpus re-banks
-        routinely, so recount).
+        **Most names in a banked corpus do not parse** (`uv run python scripts/parse_rate.py`
+        counts them).
 
             gather:0,0;{run}:m   ->  gather:*,*;{run}:m
 

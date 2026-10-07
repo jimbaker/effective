@@ -822,10 +822,10 @@ class SeedingCtx:
 
         **Name-keyed with no occurrence coordinate, unlike `step` above, because that is what the
         ENGINE does.** `step` counts occurrences because a repeated step name gets a `name#k`
-        checkpoint per occurrence. An event name is a FACT: measured 2026-08-03 on the SQLite
-        engine, a workflow awaiting one name twice with a single `emit_event` completes, both
-        awaits returning the same payload. So two awaits of one name are one question answered
-        once, and there is no k-th occurrence to key on.
+        checkpoint per occurrence. An event name is a FACT: on the SQLite engine, a workflow
+        awaiting one name twice with a single `emit_event` completes, both awaits returning the
+        same payload. So two awaits of one name are one question answered once, and there is no
+        k-th occurrence to key on.
 
         The reachable edge this costs: a `fork_point` naming a
         repeated await crosses on the FIRST occurrence, so ops between the two are judged tail.

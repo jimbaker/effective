@@ -14,7 +14,7 @@ PG_URL := "${DATABASE_URL:-postgresql://effective:effective@localhost:${PGTEST_P
 GATE_SEED := env_var_or_default("GATE_SEED", "0")
 
 # Source files holding channel templates, subject to the channel lint.
-CHANNEL_SRCS := "src/effective/cache.py src/effective/react.py src/effective/interpreters/cli.py src/effective/interpreters/openai.py src/effective/interpreters/precise_edit.py src/agent/skillsbench.py src/examples/coder/tools.py src/examples/coder/machine.py src/examples/deep_research/research.py examples/first_workflow.py"
+CHANNEL_SRCS := "src/effective/cache.py src/effective/react.py src/effective/interpreters/cli.py src/effective/interpreters/openai.py src/effective/interpreters/precise_edit.py src/agent/skillsbench.py src/examples/coder/tools.py src/examples/coder/machine.py src/examples/deep_research/research.py src/examples/startup/asking.py src/examples/startup/incident.py src/examples/startup/voice.py examples/first_workflow.py"
 
 # List recipes
 default:

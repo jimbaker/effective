@@ -2,7 +2,7 @@
 
 An evolving run is described by three append-only records, and they are joined by **one computable
 address** rather than by correlation. Projection is the operation that connects them;
-[[concepts/graph]] is the algebra it uses once the rows are in hand.
+[concepts/graph](graph.md) is the algebra it uses once the rows are in hand.
 
 | tape | holds | discipline | store |
 |---|---|---|---|
@@ -60,8 +60,8 @@ answers costs the work, which is what a content cache keeps.
 
 This is why the three tapes are one subject rather than three.
 
-The reader obligation is `docs/effective-design.md` §3.5, and which folds pay it is a test rather
-than an argument (`tests/test_reader_quotient.py`). What belongs here is that it is not special to the ledger:
+The reader obligation is [`docs/effective-design.md`](../../docs/effective-design.md) §3.5, and which folds pay it is a test rather
+than an argument ([`tests/test_reader_quotient.py`](../../tests/test_reader_quotient.py)). What belongs here is that it is not special to the ledger:
 it falls on **every tape a projection folds**, and the three differ in how much order they have to
 give:
 
@@ -82,6 +82,6 @@ causally ordered, and a last-write-wins fold over revisions is sound by exactly 
 
 ## See also
 
-[[concepts/graph]] for the projection algebra, [[concepts/machine]] for why a replay re-serves the
-checkpoint tape rather than resuming a frame, [[concepts/evidence]] for why a built join still owes
-an anti-vacuity count. `docs/effective-design.md` §3.3 and §3.5 carry the partial-order semantics.
+[concepts/graph](graph.md) for the projection algebra, [concepts/machine](machine.md) for why a replay re-serves the
+checkpoint tape rather than resuming a frame, [concepts/evidence](evidence.md) for why a built join still owes
+an anti-vacuity count. [`docs/effective-design.md`](../../docs/effective-design.md) §3.3 and §3.5 carry the partial-order semantics.

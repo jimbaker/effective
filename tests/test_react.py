@@ -250,7 +250,7 @@ def test_the_transcript_carries_the_ACTION_not_only_the_thought():
     `Tool result:`: it cannot tell WHICH tool produced it, or that it has already run one. The
     observed failure is the obvious one: it calls the same tool again, forever.
 
-    **Measured on a live provider, 2026-08-24**, gpt-5-nano over the code-agent fixture, six runs
+    **Measured on a live provider**, gpt-5-nano over the code-agent fixture, six runs
     per arm: thought-only passed **1/6**, thought+action passed **6/6** (Fisher exact two-sided
     p = 0.015). The control's transcript showed `list_dir` called six times against a correct and
     present observation.

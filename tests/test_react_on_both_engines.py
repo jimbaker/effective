@@ -234,7 +234,7 @@ MIXED = {
 
 MIXED_OPS = {FaultPosition.BEFORE_OP: 28, FaultPosition.AFTER_THUNK: 15}
 """Where a crash can land in the mixed run, counted across its incarnations: before any op, or
-after a step's thunk. Measured 2026-09-15."""
+after a step's thunk."""
 
 
 @pytest.mark.parametrize("position", [FaultPosition.BEFORE_OP, FaultPosition.AFTER_THUNK])

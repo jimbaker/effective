@@ -185,13 +185,13 @@ def enable_wal(conn: sqlite3.Connection) -> str:
 
     **`SqliteApp` calls this only when it is CREATING a store**, never when opening one that
     already exists, and the difference is worth the extra condition. WAL is a header write, so
-    imposing it on an existing file mutates somebody else's data to answer their own question —
-    the same hazard the read-only observers exist to avoid. The concrete case: the banked bench
-    corpus is 325 `task.db` stores, measured 2026-08-09 as **all** `journal_mode=delete`, and
-    only 194 are pre-uuid7. Those stores are opened READ-WRITE on a path that only reads —
-    `contrastbench.replay_combinator` constructs a `SqliteApp` over each one, driven by
-    `test_banked_corpus.py::test_current_era_stores_still_replay` — so a "convert unless legacy"
-    rule would have silently rewritten the other **131** paid files on first open.
+    imposing it on an existing file mutates somebody else's data to answer their own question,
+    the hazard the read-only observers exist to avoid. The concrete case, measured 2026-08-09
+    over `agent.bank.all_stores()`: the banked bench corpus held 325 `task.db` stores, **all**
+    `journal_mode=delete`, 194 of them pre-uuid7. Those stores are opened READ-WRITE on a path
+    that only reads (`contrastbench.replay_combinator` constructs a `SqliteApp` over each one,
+    driven by `test_banked_corpus.py::test_current_era_stores_still_replay`), so a "convert
+    unless legacy" rule would have silently rewritten the other **131** paid files on first open.
 
     An existing store therefore keeps its mode, and converting one is a deliberate act: call
     this directly. That is the right default for a substrate whose stores outlive its versions.
@@ -211,11 +211,11 @@ def enable_wal(conn: sqlite3.Connection) -> str:
     Why WAL for a store we do own: the engine's read-only observers (`effective.parked`,
     `effective.checkpoints`) open a *second* connection to the same file, and under the
     rollback-journal default a writer locks them out — a 5s `busy_timeout` stall, then
-    `SQLITE_BUSY`. Verified 2026-08-09 that the usual objection to WAL does not bite here: a
-    `file:…?mode=ro` open succeeds against a WAL database with no writer holding it, and also
-    after an *unclean* exit that left `-wal`/`-shm` behind, which SQLite recovers. The one case
-    that does fail is the read-only directory above — and note that is NOT excused by "a
-    writable open would fail there too", since these observers never attempt one.
+    `SQLITE_BUSY`. The usual objection to WAL does not bite here: a `file:…?mode=ro`
+    open succeeds against a WAL database with no writer holding it, and also after an *unclean*
+    exit that left `-wal`/`-shm` behind, which SQLite recovers. The one case that does fail is the
+    read-only directory above, and it is NOT excused by "a writable open would fail there too",
+    since these observers never attempt one.
 
     `synchronous` stays at the `FULL` default rather than dropping to the `NORMAL` that WAL
     guidance usually suggests. `NORMAL` under WAL can lose the last commits on power loss, and

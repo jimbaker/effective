@@ -12,7 +12,7 @@ different fields, so they were converging on one word. They are split by **what 
 
 **A supervisor reacts to a termination; a watchdog reacts to the absence of one.** That is the
 whole difference, and it is why they cannot share a word: the spawn tree already hears endings
-([[concepts/recursion-shapes]]'s error kinds), and nothing yet cuts a body that is still going.
+([concepts/recursion-shapes](recursion-shapes.md)'s error kinds), and nothing yet cuts a body that is still going.
 
 **A monitor decides, and does not act.** LTL₃'s three-valued verdict is its shape, and the arrivals
 protocol reached the same union from the other side: `Satisfied | TimedOut | Incomplete`, each
@@ -46,7 +46,7 @@ That asymmetry says which watchers the deadline alone unlocks.
 ## How a watchdog is spelled
 
 A recursion whose every level races its work against one instant, and whose judge reads the run's
-own durable progress once a level is cut. `tests/test_watched_descent.py` is the worked row.
+own durable progress once a level is cut. [`tests/test_watched_descent.py`](../../tests/test_watched_descent.py) is the worked row.
 
 | the part | what carries it |
 |---|---|
@@ -62,7 +62,7 @@ the two-bookkeepers rule arriving as a test result.
 
 ## How a hedge is spelled
 
-A bounded race inside an UNBOUNDED race's branch. `tests/test_hedge.py` is the worked row.
+A bounded race inside an UNBOUNDED race's branch. [`tests/test_hedge.py`](../../tests/test_hedge.py) is the worked row.
 
 | what a hedge needs | what carries it |
 |---|---|
@@ -85,5 +85,5 @@ it is the same weaker promise a race's deadline makes on a sequential ctx.
 
 A race's timeout is an outcome of the same choice as its winners, decided by one authority. A wrapper spelled `within(...)` would say the opposite, that the bound composes
 over any effect; `quorum(k, branches, deadline=at)` says it belongs to the race. The substrate
-takes an instant wherever it takes a bound, which is what [[concepts/bounded-wait]] settles for a
+takes an instant wherever it takes a bound, which is what [concepts/bounded-wait](bounded-wait.md) settles for a
 wait that names one and the race's deadline keyword for a race. Both are built.

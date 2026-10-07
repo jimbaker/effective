@@ -1,7 +1,7 @@
 # ADR-0001: The channel processor: a typed function on `Template`, with composition
 
 - **Date:** 2026-06-01
-- **Status:** Accepted. Built in `src/effective/channels.py`: the `Output` marker, `render`,
+- **Status:** Accepted. Built in [`src/effective/channels.py`](../../src/effective/channels.py): the `Output` marker, `render`,
   `Prompt[S]`, role/cache/data directives, the volatile-last check, nested-`Template` composition,
   the channel/signature validator and `Skill` nodes. Not built: priority-based budget pruning,
   categorical strategy seams, an auto-rendered output contract.
@@ -37,7 +37,7 @@ Deferred, with a reserved surface each:
 
 | deferred | trigger | reserved surface |
 |---|---|---|
-| categorical strategy seams for an automated optimizer | an optimizer that enumerates seam values (ADR-0005 stage 3) | `Prompt.seams`, the `{expression: rendered text}` map |
+| categorical strategy seams for an automated optimizer | an optimizer that enumerates seam values ([ADR-0005](0005-optimizer-agent-in-the-loop.md) stage 3) | `Prompt.seams`, the `{expression: rendered text}` map |
 | priority and budget-aware pruning | the first prompt that overruns its budget | none yet: channels carry no `priority` field |
 | an auto-rendered output contract | categorical strategy seams | the author writes the JSON-key lines; the processor fills only `<<name>>` |
 
@@ -58,7 +58,7 @@ Celsius = Annotated[float, Interval(ge=10, le=30), Output]
 ```
 
 `Gated` objects stay for the dynamic predicate, one whose bound is per call:
-`examples/first_workflow.py` gates a setpoint against a caller-supplied `ceiling`.
+[`examples/first_workflow.py`](../../examples/first_workflow.py) gates a setpoint against a caller-supplied `ceiling`.
 
 ### The processor
 
@@ -80,12 +80,12 @@ raises. The result is `Prompt(messages, channels, seams, output)`: messages coal
 
 **Where `render` runs.** The workflow calls it between yields and hands `prompt.messages` to
 `ask_llm`, which carries them in an `AskLLM`; `first_workflow.py` and `run_agent`
-(`src/effective/react.py`) both do this. `render` performs no I/O, but it calls `__format__` on
+([`src/effective/react.py`](../../src/effective/react.py)) both do this. `render` performs no I/O, but it calls `__format__` on
 the values it is handed, so the determinism boundary holds only for values that render the same
 bytes on every run.
 
 **Provider mapping.** The interpreter, never `effective.channels`, maps `Message.cache` to a
-provider's cache control: `messages_to_openai` (`src/effective/interpreters/openai.py`) drops it,
+provider's cache control: `messages_to_openai` ([`src/effective/interpreters/openai.py`](../../src/effective/interpreters/openai.py)) drops it,
 because that provider caches by prefix.
 
 ### `Prompt[S]`, the typed result
@@ -102,7 +102,7 @@ restores it.
 A sub-prompt is a function returning a `Template`; interpolating it composes. A duplicate channel
 name across the composed tree is `ChannelCollisionError` at render. A `Skill` is preferred over an
 anonymous splice: it is named, so a reader sees what composed, and its body is disclosed as the
-volatile tail after a cached catalog. `SkillRegistry` (`src/effective/skills.py`) loads
+volatile tail after a cached catalog. `SkillRegistry` ([`src/effective/skills.py`](../../src/effective/skills.py)) loads
 standard-layout skill packs and satisfies the structural `SkillResolver`; a pinned `Skill` renders
 its recorded content and consults no registry, which is the form a durable run uses. A skill that
 discloses itself is `SkillCycleError`.
@@ -125,7 +125,7 @@ across nested templates and a static rule sees one literal.
 - Composition is native: nested sub-prompts and named skills ride one recursive walk.
 - The signature survives composition (`Prompt[S]`), so agent-legibility, the primary lens, holds.
 - `seams` falls out of `interp.expression` with no extra authoring: a message-catalog surface
-  and the optimizer's mutation surface (ADR-0005).
+  and the optimizer's mutation surface ([ADR-0005](0005-optimizer-agent-in-the-loop.md)).
 - Cache bracketing is correct by construction and checked.
 - Typed channels replace per-site lambdas and hand-written repair reasons.
 

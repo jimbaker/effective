@@ -812,8 +812,8 @@ class RecordingHandler:
     def _canned(self, name: str) -> tuple[bool, Any]:
         """Look up a canned response for `name`, QUALIFIED first, then bare.
 
-        Once a scope is structural, an op's bare name no longer distinguishes the frame it ran
-        in — three identical lanes under `scoped(t"talk:{i}")` all yield `ask_llm("enrich")`,
+        Once a scope is structural, an op's bare name does not distinguish the frame it ran in:
+        three identical lanes under `scoped(t"talk:{i}")` all yield `ask_llm("enrich")`,
         and a bare-name-only table would hand all three the same answer with no way to say
         otherwise. Trying `{prefix}{name}` first makes each frame addressable
         (`talk:1;enrich`), and falling back to the bare name keeps every existing table working

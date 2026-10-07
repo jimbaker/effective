@@ -256,7 +256,7 @@ def unclassified_arms() -> list[int]:
         case ast.match_case(pattern=ast.MatchAs(pattern=None), guard=None):
             pass
         case _:
-            raise AssertionError("the dispatch no longer ends in the plain-value arm")
+            raise AssertionError("the dispatch does not end in the plain-value arm")
     return [
         arm.pattern.lineno
         for arm in arms

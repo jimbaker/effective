@@ -6,8 +6,7 @@ percentage cannot, and two of them have bitten this repo:
 
 - **"Is this property covered on BOTH engines?"** A line can be at 100% and still be reached only
   by the SQLite half of a parametrized suite. Run this over the seeding path and the answer is a
-  list of test ids you can read the `[postgres]` off (2026-07-26: 39 tests reached
-  `SeedingCtx.step`, exactly one on Absurd).
+  list of test ids you can read the `[postgres]` off.
 - **"Did this test go vacuous?"** A test whose assertions stopped running still passes. Its
   context disappearing from the region it was written to cover is the tell.
 

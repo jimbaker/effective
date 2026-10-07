@@ -11,10 +11,9 @@ least of all: three runs of one probe gave 731/552, 740/936 and 781/904. A scrip
 argument is that these counts drift must not quote four of their digits.) Reach for that
 first; this is the slow, blunt confirmation afterwards.
 
-**Why it is blunt, measured 2026-08-09 while building it.** The flake looked *deterministic
-per shuffle seed* — seeds 31 and 47 each failed 10/10 in fresh subprocesses, twice running.
-They then gave 5/5, then 0/6, with no code change. The per-seed determinism was an artifact
-of machine state, and the rate drifts with it. So:
+**Why it is blunt.** The flake looks *deterministic per shuffle seed* and is not: a seed that
+failed 10/10 in fresh subprocesses gave 5/5, then 0/6, with no code change. The rate drifts
+with machine state. So:
 
 - Failures here are real; **absences are not** informative at these sample sizes.
 - Do not pin a seed as a regression test. Adding any test reshuffles the lane.

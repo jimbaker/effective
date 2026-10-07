@@ -1,11 +1,11 @@
 # ADR-0002: The harness as a layer stack: two seams, one combinator idiom
 
 - **Date:** 2026-06-13
-- **Status:** Accepted. Built in `src/effective/layers.py` (`drive_through`, `op_layer`,
+- **Status:** Accepted. Built in [`src/effective/layers.py`](../../src/effective/layers.py) (`drive_through`, `op_layer`,
   `domain_layer`, `OpLayer`, `DomainLayer`, `compose_ops`, `compose_domain`, `check_seam`,
   `retry`, `retry_domain`), the layer-authority rules in `effective.lint --layers`, `metered` and
   `traced` as domain layers, and op-layer stacks on `RecordingHandler` and `DurableHandler`.
-  Permission and the merged gate are built on the op seam (`cascade`, ADR-0019's `govern`). Not
+  Permission and the merged gate are built on the op seam (`cascade`, [ADR-0019](0019-govern-serve-composition-combinators.md)'s `govern`). Not
   built: memory hydration or recall, and strategy-as-handler.
 
 ## Context
@@ -20,13 +20,13 @@ Effective already reifies effects on three axes, and each has a named seam:
 
 | axis | what it carries | where |
 |---|---|---|
-| control | the ops a workflow yields (`WorkflowOp`), driven by a handler's drive loop | `src/effective/ops.py` |
-| interpreter | cross-cutting layers over the op stream: cost, cache, telemetry, retry, permission | `src/effective/layers.py` |
-| data | the typed I/O of one model call: prompt construction, output parsing, guardrails | `src/effective/channels.py` (ADR-0001) |
+| control | the ops a workflow yields (`WorkflowOp`), driven by a handler's drive loop | [`src/effective/ops.py`](../../src/effective/ops.py) |
+| interpreter | cross-cutting layers over the op stream: cost, cache, telemetry, retry, permission | [`src/effective/layers.py`](../../src/effective/layers.py) |
+| data | the typed I/O of one model call: prompt construction, output parsing, guardrails | [`src/effective/channels.py`](../../src/effective/channels.py) ([ADR-0001](0001-channel-processor.md)) |
 
 So the twelve factors are three kinds. A harness is `(op set) x (layer stack) x (channel set)`,
 sequenced by a loop, and the loop is the composition operator rather than a member of the stack
-(ADR-0004).
+([ADR-0004](0004-react-loop-driver.md)).
 
 ### The forcing function
 
@@ -39,7 +39,7 @@ The determinism boundary decides which seam a factor belongs to:
 
 Retry alters control flow; telemetry observes; a guardrail shapes one call's schema. Compaction
 rewrites the transcript, and the transcript is workflow state between yields, where no layer
-reaches, so `run_agent` records compaction as its own `react:compact` step (ADR-0004).
+reaches, so `run_agent` records compaction as its own `react:compact` step ([ADR-0004](0004-react-loop-driver.md)).
 
 ### Two seams, deliberately not unified
 
@@ -79,7 +79,7 @@ run time.
 | L7 first domain layer | the cost concern as `metered`, a `@domain_layer` |
 | L8 first op layer | `retry`, the multi-yield proof |
 
-A domain layer, from `src/effective/layers.py`:
+A domain layer, from [`src/effective/layers.py`](../../src/effective/layers.py):
 
 ```python
 @domain_layer
@@ -102,18 +102,18 @@ handler = compose_ops([cascade(tiers)], RecordingHandler(responses))
 ```
 
 Adding a factor changes one of the two lists and never `run_agent` or the workflow. When a better
-model no longer needs a layer, removing it is a one-line deletion.
+model does not need a layer, removing it is a one-line deletion.
 
 ### Which seam: three questions in order
 
 | question | yes means |
 |---|---|
 | must it see the `WorkflowOp` alphabet (step names, `AwaitEvent`)? | op seam |
-| may it park, suspending for a grant or an approval? | op seam (`govern`, ADR-0019) |
+| may it park, suspending for a grant or an approval? | op seam (`govern`, [ADR-0019](0019-govern-serve-composition-combinators.md)) |
 | may it block for long (a sleep that should release the worker)? | op seam, as a `SleepUntil` |
 
 Otherwise it transforms, re-invokes or observes one call, and it is a domain-seam service
-(`serve`, ADR-0019). Raising `Refused` is not parking; a domain layer may raise.
+(`serve`, [ADR-0019](0019-govern-serve-composition-combinators.md)). Raising `Refused` is not parking; a domain layer may raise.
 
 ### Lint and assembly guards
 
@@ -163,7 +163,7 @@ re-fire on a rate limit cannot be spelled.
 
 | risk | mitigation |
 |---|---|
-| the trampoline carries the `.send`/`.throw` complexity `@contextmanager` hides | written once and unit-tested in isolation (`tests/test_layers.py`: rewrite, multi-yield, throw-into-yield, early return, empty stack); authors see a linear generator |
+| the trampoline carries the `.send`/`.throw` complexity `@contextmanager` hides | written once and unit-tested in isolation ([`tests/test_layers.py`](../../tests/test_layers.py): rewrite, multi-yield, throw-into-yield, early return, empty stack); authors see a linear generator |
 | op-seam retry and occurrence-keyed checkpoints | `retry_domain` below the seam for domain I/O |
 | two decorators are more surface than one | the surface buys the lint handle, the type meaning and authority confinement |
 | layer order is semantic: retry outside a budget differs from a budget outside retry | order is explicit in the list, outermost first, and tested (`test_layer_order_is_outer_to_inner`) |
@@ -183,7 +183,7 @@ re-fire on a rate limit cannot be spelled.
 - **Cross-cutting concerns as bespoke classes.** Works for one concern; does not compose, and
   gives the op-seam factors no place to live.
 - **Strategy as a layer (ReAct against plan-and-execute).** The loop is the composition operator;
-  strategy stays a program (ADR-0004).
+  strategy stays a program ([ADR-0004](0004-react-loop-driver.md)).
 
 ## Open questions
 

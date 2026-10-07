@@ -7,7 +7,7 @@ rather than correcting it to an older idiom.
 
 | PEP | what it gives | where it shows |
 |---|---|---|
-| **750: t-strings** | the data axis: a `Template` whose interpolations are typed I/O channels | `effective.channels`, `examples/first_workflow.py`, `compose_key`, the psycopg boundary. See [[concepts/flatten]] |
+| **750: t-strings** | the data axis: a `Template` whose interpolations are typed I/O channels | `effective.channels`, [`examples/first_workflow.py`](../../examples/first_workflow.py), `compose_key`, the psycopg boundary. See [concepts/flatten](flatten.md) |
 | **758: `except`/`except*` without parentheses** | `except ValueError, TypeError:` catches **both**: valid 3.14, *not* legacy Python-2 `except E, name:` | `agent/bracket.py` |
 | **649/749: deferred annotation evaluation** | annotations are not evaluated at definition time, so forward refs and heavier typing read naturally | everywhere; no `from __future__ import annotations` |
 

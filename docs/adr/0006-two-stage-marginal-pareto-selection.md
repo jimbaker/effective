@@ -2,19 +2,19 @@
 
 - **Date:** 2026-06-18
 - **Status:** Proposed. The mechanism it composes over is built: the fork driver
-  (`src/effective/fork.py`: `fork_at`, `live_drive`, `run_fork`, and `marginal_sweep`, which
+  ([`src/effective/fork.py`](../../src/effective/fork.py): `fork_at`, `live_drive`, `run_fork`, and `marginal_sweep`, which
   forks one base N ways as durable child tasks), the counterfactual lineage's genesis and seal
-  (`Forked`, `ForkSealed` in `src/effective/counterfactual.py`), and Pareto dominance over
-  objective vectors (`dominates` and `frontier` in `src/effective/pareto.py`, driven by `improve`
-  in `src/effective/improve.py`). The selection machinery this ADR names is unbuilt: no stage-1
+  (`Forked`, `ForkSealed` in [`src/effective/counterfactual.py`](../../src/effective/counterfactual.py)), and Pareto dominance over
+  objective vectors (`dominates` and `frontier` in [`src/effective/pareto.py`](../../src/effective/pareto.py), driven by `improve`
+  in [`src/effective/improve.py`](../../src/effective/improve.py)). The selection machinery this ADR names is unbuilt: no stage-1
   screen, no divergence detector, no replicated stage-2 confirm with a confidence region, no
   promotion rule.
-- **Relates to:** ADR-0005 (the optimizer whose Stage 2 this ADR specifies), ADR-0008 (`fork` is
+- **Relates to:** [ADR-0005](0005-optimizer-agent-in-the-loop.md) (the optimizer whose Stage 2 this ADR specifies), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (`fork` is
   reserved for counterfactuals).
 
 ## Context
 
-ADR-0005 makes optimization a staged capability whose Stage 2 mechanizes marginal moves as scored
+[ADR-0005](0005-optimizer-agent-in-the-loop.md) makes optimization a staged capability whose Stage 2 mechanizes marginal moves as scored
 forks. It leaves open which forks to score and how to decide a winner. For a fixed pipeline with
 one knob the omission is harmless. For a branchy, coupled chain it is the whole problem. An
 agentic retrieval loop (route, search, a recover gate, grep, read, answer) is the canonical
@@ -43,7 +43,7 @@ the fork pins, and whose promotion verdict is Pareto dominance on a `(Δcost, Δ
 |---|---|---|---|
 | 1, local screen | replay the prefix; pin the tail's decisions and I/O; perturb one op | exact `Δcost` and `Δlatency`; a proxy `Δquality` from the adjacent `Gated` outcome | provisional partial dominance: discard the provably dominated, promote the rest |
 | 2, end-to-end confirm | replay the prefix; apply the delta; interpret the tail live, replicated N times | the true vector with a confidence region | probabilistic dominance: promote iff `P(non-dominated) > τ` |
-| rollup, population frontier | stage-2 survivors across a population of traces | a policy edit, pareto-positive across the population | enacted as ADR-0005's coding agent edits a typed seam and confirms the frontier moved on held-out traces |
+| rollup, population frontier | stage-2 survivors across a population of traces | a policy edit, pareto-positive across the population | enacted as [ADR-0005](0005-optimizer-agent-in-the-loop.md)'s coding agent edits a typed seam and confirms the frontier moved on held-out traces |
 
 The marginal surface supplies the rollup a directed mutation (which seam, which direction) in
 place of a blind one.
@@ -90,7 +90,7 @@ flowchart TB
 
 ## Consequences
 
-- ADR-0005's Stage 3 (full automation) has a target: a bandit allocates replication budget across
+- [ADR-0005](0005-optimizer-agent-in-the-loop.md)'s Stage 3 (full automation) has a target: a bandit allocates replication budget across
   stage-2 survivors, and the screen keeps the arm set small enough for sequential allocation to be
   sound.
 - The guardrail doubles as the screen's reward. Stage 1's proxy `Δquality` is the `Gated`

@@ -8,7 +8,7 @@ compose shows up as a disagreement. Recursion is the forcing function; the defec
 rarely recursion bugs. Repeated brackets are where spawn names, ledger rows and approvals alias,
 and tree search reaches that shape by design.
 
-**What the nesting reaches, and what it misses** (measured on the coder, 2026-09-16):
+**What the nesting reaches, and what it misses**, on the coder:
 
 | a nested run under a scope with a shared run id reaches | it misses                                       |
 |---------------------------------------------------------|-------------------------------------------------|
@@ -32,10 +32,10 @@ needs it; the rest stay rows here.
 |---|---|---|
 | sequence | linear descent, pipeline / transducer, the visits of a state machine, the turns of a ReAct loop, mutual recursion in one task | `descend` exists; `unfold` spells it in-task; `run_machine` and `run_agent` are `descend` judges, a visit or a turn per level under `d:{n}`; `mutual` runs roles that hand off to each other in tail position, a hop per level under `d:{n};state:{role}` |
 | branch and join | divide and conquer, fork/join, map/reduce, AND/OR search | `recurse` exists (map/reduce); divide and conquer through `unfold`, in-task or across tasks |
-| repeated bracket | tree search (MCTS), minimax, beam search | `tree_search`, rounds of `unfold`; `search.mcts` over it, and `search.beam` as a `descend` judge. Rounds refill through a `round-grant` park, and a budget refusal ends a search with what it has whole: `tree_search` its earlier rounds, `beam` its last scored frontier. A refusal while the roots are scored has no frontier to answer with, so `beam` raises it, where `tree_search` in the same position returns its initial state |
+| repeated bracket | tree search (MCTS), minimax, beam search | `tree_search`, rounds of `unfold`; `search.mcts` over it, and `search.beam` as a `search.frontier` search, itself a `descend` judge. Rounds refill through a `round-grant` park, and a budget refusal ends a search with what it has whole: `tree_search` its earlier rounds, `beam` its last scored frontier. A refusal while the roots are scored has no frontier to answer with, so `beam` raises it, where `tree_search` in the same position returns its initial state |
 | cycle to convergence | fixpoint / iterative refinement, worklist / chaotic iteration | `fixpoint`, a `descend` judge answering `Converged` or `Unconverged` with the budget that stopped it; a worklist is `fixpoint` over what is pending and what is known, whose pass must make equality mean nothing is pending |
 | sharing | memoized recursion / dynamic programming | classified |
-| cancellation | race / hedge, quorum, branch and bound, best-first | `race` and `quorum` are built, with cooperative cancellation inside them and no cancel op. Branch and bound is built with no cancellation, its bound threaded through the recursion's own state (`tests/test_pruned_search.py`); as a race it is refuted, and best-first is deferred. Meets reversal in one cell, below |
+| cancellation | race / hedge, quorum, branch and bound, best-first | `race` and `quorum` are built, with cooperative cancellation inside them and no cancel op. Branch and bound is built with no cancellation, its bound threaded through the recursion's own state ([`tests/test_pruned_search.py`](../../tests/test_pruned_search.py)); as a race it is refuted. Best-first is built as a `search.frontier` policy that picks the top k, and as a race it is deferred. Meets reversal in one cell, below |
 | reversal | saga / compensation | classified, and **forced rather than chosen**: the ledger trigger forbids UPDATE and DELETE, so a committed row is undone only by a later row |
 | cross-task | mutual recursion across tasks, supervisor tree, blackboard / agenda | mutual recursion across tasks deferred |
 
@@ -50,11 +50,11 @@ Two things follow, and they point opposite ways.
 
 | against the crash case | for it |
 |---|---|
-| the cut is **voluntary**, so after quiescence a canceller READS what committed instead of reasoning over every cut the way `docs/effective-design.md` §10's crash-preservation row must | the signal **races the loser's progress**, which a crash does not: a crash stops everything, a cancel asks, and the loser may commit while the request is in flight |
+| the cut is **voluntary**, so after quiescence a canceller READS what committed instead of reasoning over every cut the way [`docs/effective-design.md`](../../docs/effective-design.md) §10's crash-preservation row must | the signal **races the loser's progress**, which a crash does not: a crash stops everything, a cancel asks, and the loser may commit while the request is in flight |
 
 So the footprint to compensate is not known when the cancel is issued, only once the loser has
 stopped. That is the discipline the meter already uses one level down: a branch's spend reaches the
-root when the barrier folds it, never before (`docs/effective-design.md` §9.4). **Compute a
+root when the barrier folds it, never before ([`docs/effective-design.md`](../../docs/effective-design.md) §9.4). **Compute a
 compensation at the barrier, not at the signal.**
 
 Nothing here is a design choice. Rollback is unrepresentable, so a compensating append is the only
@@ -98,7 +98,7 @@ whether a transition is a tail call.
 Rewriting a recursion buys no depth; cutting its continuation does. A tail transition is one whose
 outer level has nothing left to do, so the driver drops that level and loops, and the run-time state
 stays the size of one level's state. `Deeper(narrowed)` is that tail call returned as data.
-`tests/test_descend_depth.py` runs a descent past the recursion limit on the recorder, replay and
+[`tests/test_descend_depth.py`](../../tests/test_descend_depth.py) runs a descent past the recursion limit on the recorder, replay and
 both engines, beside a `yield from` recursion that raises at the same depth. The composition claim
 this bounds is that the product of composed state machines exists in the semantics and not in the
 source.
@@ -109,7 +109,7 @@ child's result afterwards, as a join does or a turn that runs a subagent in-task
 
 ## How a shape is tested
 
-A shape is a row of `tests/_shapes.py`'s `Shape`: its spellings, one of them written with `fix`,
+A shape is a row of [`tests/_shapes.py`](../../tests/_shapes.py)'s `Shape`: its spellings, one of them written with `fix`,
 the domain they run against, and the oracle every run must meet. `agree` runs each spelling and
 compares their answers, ledger rows and checkpoint names; `sweep` crashes one spelling at every
 checkpoint and holds each crashed run to the same oracle. The `backend` fixture runs both on each
@@ -117,8 +117,8 @@ engine.
 
 **A cancelling shape is the exception, and it is not a gap.** `race` and `quorum` have one
 spelling, a crash reschedules them so `sweep` has nothing to hold constant, and a forced schedule
-cannot decide a race's winner at all: [[concepts/forced-schedules]] has the measurements. They are
-pinned by a two-event hold instead, in `tests/test_race_shapes.py`.
+cannot decide a race's winner at all: [concepts/forced-schedules](forced-schedules.md) has the measurements. They are
+pinned by a two-event hold instead, in [`tests/test_race_shapes.py`](../../tests/test_race_shapes.py).
 
 A reference spelling reads for itself every decision it checks: how many levels a grant gives, and
 where a refusal is caught. A reference that copies the combinator's structure agrees with it on a
@@ -134,9 +134,8 @@ handlers, concurrency, the per-branch meter fold and per-branch crash-resume. A 
 stack was measured and not adopted: it buys depth only when a node's name stops being a nested
 scope, and for a shape that fans out the bound is node count. A chain of single children is
 `Deeper`: each `Branch` level holds a thread and a nested gather, so a one-child chain meets the
-process's recursion limit. At the default limit of 1000, 200 levels completed and 260 failed with
-`RecursionError` on SQLite, and 260 completed with the limit raised to 4000 (measured
-2026-09-14). `fix`, the typed closure
+process's recursion limit: at the default limit of 1000 it fails with `RecursionError` on SQLite
+within a few hundred levels, and raising the limit raises the depth. `fix`, the typed closure
 fixpoint, is the showcase and a test; the literal Z form has no type. A node that does not answer at
 its final level raises `DescendedPastBudget`, a composition refusal.
 

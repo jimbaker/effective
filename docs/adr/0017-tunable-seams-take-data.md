@@ -2,16 +2,16 @@
 
 - **Date:** 2026-07-07
 - **Status:** Accepted, as a convention held at review; no lint enforces it. Built: the first data
-  twin, `allow_table(PermitPolicy)` in `src/effective/permission.py`, tuned by `improve` in
-  `src/agent/permit_tuning.py` (`tests/test_permit_tuning.py`). The closure-shaped seams listed
+  twin, `allow_table(PermitPolicy)` in [`src/effective/permission.py`](../../src/effective/permission.py), tuned by `improve` in
+  [`src/agent/permit_tuning.py`](../../src/agent/permit_tuning.py) ([`tests/test_permit_tuning.py`](../../tests/test_permit_tuning.py)). The closure-shaped seams listed
   under "Conversion backlog" remain closures.
-- **Relates to:** ADR-0005 (the optimizer that needs data seams), ADR-0001 (`Gated.predicate` is
-  the channel-axis instance of the gap), ADR-0002 (the permission cascade, where `allow_table`
+- **Relates to:** [ADR-0005](0005-optimizer-agent-in-the-loop.md) (the optimizer that needs data seams), [ADR-0001](0001-channel-processor.md) (`Gated.predicate` is
+  the channel-axis instance of the gap), [ADR-0002](0002-harness-layer-stack.md) (the permission cascade, where `allow_table`
   lands).
 
 ## Context
 
-ADR-0005 makes `improve` the default optimizer, and an optimizer can only mutate data. `improve`
+[ADR-0005](0005-optimizer-agent-in-the-loop.md) makes `improve` the default optimizer, and an optimizer can only mutate data. `improve`
 candidates flow through recorded `propose` and `score` ops, so a candidate must be a value the
 optimizer can hold in its search pool, re-derive on replay from the recorded `propose` ops, and
 diff to describe a mutation. A closure is none of these: it neither serializes, diffs nor mutates.
@@ -28,7 +28,7 @@ passed to a factory:
 
 Each composes at run time and is invisible to the optimizer: `improve` cannot checkpoint a closure,
 diff two of them to describe a mutation, or render one as feedback for a proposer to reflect on.
-These seams are swappable by a person and not optimizable by the machine, which caps the ADR-0005
+These seams are swappable by a person and not optimizable by the machine, which caps the [ADR-0005](0005-optimizer-agent-in-the-loop.md)
 thesis (every reasonable seam is an optimization target) at the callable boundary.
 
 The repo had already found the fix once. `TypedField` in `channels.py` carries "the schema,
@@ -39,7 +39,7 @@ as a per-site lambda. This ADR generalizes that move.
 
 **A seam intended to be tunable takes a data form interpreted by a fixed function; a closure is
 reserved for fixed policy the optimizer must not touch.** The data form is at once the optimizer's
-mutation surface (ADR-0005) and the value that checkpoints for replay: the two requirements are the
+mutation surface ([ADR-0005](0005-optimizer-agent-in-the-loop.md)) and the value that checkpoints for replay: the two requirements are the
 same requirement.
 
 A tunable seam satisfies a reachability checklist derived from `improve`'s contract:
@@ -75,7 +75,7 @@ Each is a closure today and gets a data twin when a tuning need is real.
 
 ## Consequences
 
-More seams become `improve`-reachable, and the ADR-0005 thesis extends past the callable boundary.
+More seams become `improve`-reachable, and the [ADR-0005](0005-optimizer-agent-in-the-loop.md) thesis extends past the callable boundary.
 The labeled corpus accumulates as a byproduct: every verdict, repair and denial is a recorded op,
 so the tuning data for each data seam builds up in normal operation (every human approval decision
 is already a `PermitPolicy` label). Data twins can be inspected and compared as diffs, so a caller promotes a

@@ -67,7 +67,7 @@ ACTIONS = ("refund", "order", "login", "upload", "delete", "export")
 MAX_TURNS = 8
 REPL_TRUNCATE = 500  # their REPLVariable preview cap — the measured sis bug, kept faithfully
 SANDBOX_SECONDS = 5.0
-# Monty's max_duration_secs counts wall time ACROSS host calls (probed 2026-07-03),
+# Monty's max_duration_secs counts wall time ACROSS host calls,
 # so a semantic segment's budget must cover llm_query network time; the sub-call
 # cap is what actually bounds the trial.
 SEM_SANDBOX_SECONDS = 300.0

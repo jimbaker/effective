@@ -11,7 +11,7 @@ in both. A regression that made seeding quadratic (say, by re-seeding a child fr
 would break the row assertion immediately; a regression that fattened each seeded row would break
 the bytes-per-row bound.
 
-Measured here on SQLite with a 512-byte payload per prefix op (`just test-core`, 2026-07-25):
+Measured here on SQLite with a 512-byte payload per prefix op (`just test-core`):
 
 | prefix ops | forks | child ckpt rows | child state bytes | bytes/row |
 |---|---|---|---|---|

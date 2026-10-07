@@ -24,8 +24,8 @@ a ``Template`` hands it position, arity, and each hole's source ``expression``. 
 three on hazards a `%s`-and-a-tuple convention can only ask you to remember:
 
 - a hole **inside a quoted SQL string literal** (``t"… LIKE '{prefix}%'"``) is refused. Rendered
-  as text that would be a literal ``?`` *inside* the quotes and a parameter count that no longer
-  matches — the classic silent break. The processor knows the hole's position in the statics, so
+  as text that would be a literal ``?`` *inside* the quotes and a parameter count that does not
+  match: the classic silent break. The processor knows the hole's position in the statics, so
   it can say so and name the fix.
 - a hole inside a ``"quoted identifier"`` or a comment — same knowledge, same refusal.
 - a manual ``?`` in the static SQL is refused: mixing hand-written placeholders with

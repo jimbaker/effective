@@ -1314,8 +1314,8 @@ class FaultPosition(StrEnum):
     ``AFTER_THUNK`` models "the effect landed and the record did not": the thunk runs, the external
     effect happens, and the process dies before the checkpoint commits. On resume the store shows
     the same miss as if nothing had run, so the op executes AGAIN. That window is real on both
-    engines and is occupied on every op (measured 2026-08-22: median 16 us on SQLite, 574 us on
-    Absurd over localhost).
+    engines and is occupied on every op: tens of microseconds on SQLite, hundreds on Absurd over
+    localhost.
 
     **The two positions count different populations, and the arms own that difference.**
     ``BEFORE_OP`` trips on every ctx-op touch: steps, awaits, peeks, sleeps, reparks and settles,

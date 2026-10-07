@@ -5,7 +5,7 @@
   `Ledger`, plus `Budget`, `EnforceMeasured`, `Govern`, `Decide` for later decisions), the Quint
   models `formal/quint/` (`effective`, `gather`, `budget_confluence`, `govern_park`, `race`), the
   gates `just formal` and `just formal-verify` (the registered list is
-  `scripts/formal_checks.sh`). Open: the composed gather-by-scope key lemma (L1.9), and gather
+  [`scripts/formal_checks.sh`](../../scripts/formal_checks.sh)). Open: the composed gather-by-scope key lemma (L1.9), and gather
   determinism in Lean.
 - **Math:** MathJax `$…$` and `$$…$$`.
 
@@ -162,7 +162,7 @@ gathers $g\neq g'$. That side condition is the injectivity invariant I1. A prefi
 component ($p_i = \texttt{gather:}i$) violates it: a different gather's $\textsf{Step-Replay}$ fires
 on a stale checkpoint, which is the collision `keyBad` reproduces in `Keys.lean`. In the runtime,
 $g$ is the gather ordinal of the handler's thread of control (`FramePosition.next_gather` in
-`src/effective/keys/frame.py`), stable across crash-resume because the workflow yields gathers in
+[`src/effective/keys/frame.py`](../../src/effective/keys/frame.py)), stable across crash-resume because the workflow yields gathers in
 deterministic order.
 
 A branch whose head is an await or a sleep parks the whole task on its qualified event name and
@@ -171,8 +171,8 @@ resumes after the barrier, on a context with the `peek_event` capability (the SQ
 `NotImplementedError`, so that position is total by rejection.
 
 **Scope prefixes.** A second prefix family composes with $p_{g,i}$: the handler applies a
-`scoped` frame (ADR-0014 §8) through `scope_prefix`, which terminates each atom with the term
-separator `;` and refuses an atom carrying one, so nested scopes become ADR-0020's leading frame
+`scoped` frame ([ADR-0014](0014-rlm-combinators-run-code.md) §8) through `scope_prefix`, which terminates each atom with the term
+separator `;` and refuses an atom carrying one, so nested scopes become [ADR-0020](0020-key-composition-one-grammar.md)'s leading frame
 terms (`a:1;b:2;step:s`). The Lean model abstracts this as a scope $s$ drawn from the grammar
 $s ::= (\text{atom}\ \texttt{/})^{*}$, atoms nonempty over $\Sigma\setminus\{\texttt{/}\}$,
 with every canonical name `/`-free. The flattened name is $s\cdot n$, and well-formedness makes
@@ -183,7 +183,7 @@ The model and the code differ in two places, and the proof covers the code only 
 
 | model (`Scopes.lean`) | code |
 |---|---|
-| the separator is `/` | the separator is `;`, ADR-0020's term separator |
+| the separator is `/` | the separator is `;`, [ADR-0020](0020-key-composition-one-grammar.md)'s term separator |
 | a canonical name is separator-free | a structured name carries `;` and is spliced as its own terms; the op arm (`step;`, `ledger;`) that opens every op key marks where the frames end |
 
 ### The two serialization boundaries
@@ -217,8 +217,8 @@ discharged in the codebase two ways.
 
 | agency | how |
 |---|---|
-| construction | `compose_key` (`src/effective/keys/processor.py`) is the single op-key producer, and the key it composes is parsed by a grammar (`src/effective/keys/grammar.py`): a value reaching a hole must be a well-formed atom, and an atom may not contain a separator, so delimiter-bearing values are refused and arity is countable from the bytes. Every key opens with its own arm term (`step;…`, `ledger;…`), so the arms' regions are disjoint by construction. `op_key` of a `Gather` raises, so a gather has no aliasable content key and its leaves take only the positional `gather:{g},{i};` frame, which is $\mathsf{key}$'s frame order serialized |
-| sampling | `tests/test_op_key_injectivity.py` (injectivity across arms, the adjacent-interpolation refusal, `op_key(Gather)` raising, round-trip over every registered shape), `tests/test_gather.py::test_two_same_arity_gathers_get_distinct_positional_keys`, and `tests/test_conformance.py::test_durable_gather_keys_distinct_across_two_same_shaped_gathers` on both engines |
+| construction | `compose_key` ([`src/effective/keys/processor.py`](../../src/effective/keys/processor.py)) is the single op-key producer, and the key it composes is parsed by a grammar ([`src/effective/keys/grammar.py`](../../src/effective/keys/grammar.py)): a value reaching a hole must be a well-formed atom, and an atom may not contain a separator, so delimiter-bearing values are refused and arity is countable from the bytes. Every key opens with its own arm term (`step;…`, `ledger;…`), so the arms' regions are disjoint by construction. `op_key` of a `Gather` raises, so a gather has no aliasable content key and its leaves take only the positional `gather:{g},{i};` frame, which is $\mathsf{key}$'s frame order serialized |
+| sampling | [`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py) (injectivity across arms, the adjacent-interpolation refusal, `op_key(Gather)` raising, round-trip over every registered shape), [`tests/test_gather.py::test_two_same_arity_gathers_get_distinct_positional_keys`](../../tests/test_gather.py), and [`tests/test_conformance.py::test_durable_gather_keys_distinct_across_two_same_shaped_gathers`](../../tests/test_conformance.py) on both engines |
 
 The aliasing (A-serialize) forecloses is the string-layer sibling of `keyBad`, `Scopes.lean`'s
 `flattenBad` foil: a delimiter-free interpolation admits $(\texttt{a},\texttt{12})$ against
@@ -229,7 +229,7 @@ is deliberate: serialization injectivity is enumerable rather than inductive, a 
 and induction cannot see.
 
 **Value axis: a deterministic normal form.** The other boundary serializes a checkpoint or digest
-payload. $\mathsf{canon}$ (`canonical_form` in `src/effective/handlers/base.py`, behind
+payload. $\mathsf{canon}$ (`canonical_form` in [`src/effective/handlers/base.py`](../../src/effective/handlers/base.py), behind
 `content_digest` and `code.canonical`) maps a value to a JSON form by recursively sorting sets. Its
 obligation is weaker and different in kind:
 
@@ -239,8 +239,8 @@ $$
 \ \text{stable across process, }\texttt{PYTHONHASHSEED}\text{, and backend.}
 $$
 
-It has no Lean node and is discharged by sampling: `tests/test_canonical_determinism.py`, and
-`tests/test_run_code.py::test_run_code_rebind_survives_fresh_process_resume_with_a_set_arg`, which
+It has no Lean node and is discharged by sampling: [`tests/test_canonical_determinism.py`](../../tests/test_canonical_determinism.py), and
+[`tests/test_run_code.py::test_run_code_rebind_survives_fresh_process_resume_with_a_set_arg`](../../tests/test_run_code.py), which
 resumes in a fresh process under a differing `PYTHONHASHSEED`. The asymmetry pins the tiers: the
 key axis needs a deterministic normal form and injectivity; the value axis needs only the
 deterministic normal form.
@@ -259,7 +259,7 @@ L\big(\,\Downarrow_{R}(W)\,\big) = L\big(\,\Downarrow_{P}(W)\,\big)
 $$
 
 where $\Downarrow_H$ is the terminal observable under handler $H$. The runtime `ReplayMismatch`
-check is this theorem for one trace; the cross-backend conformance suite (`tests/_conformance.py`)
+check is this theorem for one trace; the cross-backend conformance suite ([`tests/_conformance.py`](../../tests/_conformance.py))
 checks it by example on two engines; a model checker discharges it over a reachable space.
 
 ### Crash and replay
@@ -274,7 +274,7 @@ $$
 $$
 
 with side effects (the $\tau\Downarrow v$ premises) firing exactly once, because every committed
-$n$ takes $\textsf{Step-Replay}$ on the re-run. `tests/test_replay_crash.py` checks this at every
+$n$ takes $\textsf{Step-Replay}$ on the re-run. [`tests/test_replay_crash.py`](../../tests/test_replay_crash.py) checks this at every
 $j$ by example.
 
 ## Invariant fit (I1 to I6)
@@ -283,10 +283,10 @@ $j$ by example.
 |---|---|---|
 | **I1 injectivity** | Lean `keyBad_not_injective` (the regression), `key_injective`, `branch_disjoint`, `gather_naming_injective` (L1.5, imported by Quint); `flatten_injective_on` (L1.8) | discharged: the string tier is (A-serialize), held by construction and the grid. L1.9, the composed gather-by-scope frame, is open in Lean; the runtime composite is covered by tests |
 | **I2 totality** | Quint `gather.qnt` `total` and `noDeadlock`; the `handlerFixed=false` tooth reproduces suspend-in-gather | await and sleep in a gather are transitions on a peek-capable context and a loud `NotImplementedError` on one without |
-| **I3 liveness** | Quint `gather.qnt` `liveness` (TLC, fairness implies termination, non-vacuity guarded by `nonVacuityWitness`) | partial: checks the suspend-in-gather instance. Expired-lease reclaim on Absurd is pinned by `tests/test_absurd_lease_reclaim.py` and has no formal node |
+| **I3 liveness** | Quint `gather.qnt` `liveness` (TLC, fairness implies termination, non-vacuity guarded by `nonVacuityWitness`) | partial: checks the suspend-in-gather instance. Expired-lease reclaim on Absurd is pinned by [`tests/test_absurd_lease_reclaim.py`](../../tests/test_absurd_lease_reclaim.py) and has no formal node |
 | **I4 termination of observers** | none | out of scope: no op carries an observer; watching a run is telemetry |
 | **I5 two bookkeepers** | Lean `ledger_monotone`, `ledger_idem`, `advance_nodup`, `L_not_function_of_C`, `C_not_function_of_L`; Quint `effective.qnt` `ledgerNodup` | partial by design: non-derivability is the modest direction; the architectural seal (the append-only trigger) is held by tests |
-| **I6 determinism** | Lean `step_deterministic` (for a fixed oracle ω), `replay_stable`; Quint assumes it (`assume T2_determinism`) | partial: covers step, await and ledger; gather determinism is deferred in `Step.lean`, and the index-ordered join is pinned by `tests/test_gather.py` |
+| **I6 determinism** | Lean `step_deterministic` (for a fixed oracle ω), `replay_stable`; Quint assumes it (`assume T2_determinism`) | partial: covers step, await and ledger; gather determinism is deferred in `Step.lean`, and the index-ordered join is pinned by [`tests/test_gather.py`](../../tests/test_gather.py) |
 
 ## Consequences
 
@@ -308,6 +308,6 @@ Accepted risk and open edges:
 The three-tier win holds only while extraction stays cheap: the Quint and Lean models must stay a
 transcription of the handler `match`. If they drift into a hand-maintained parallel artifact, stop.
 
-Related: ADR-0008 (applicative `gather` keying is the Gather rule), ADR-0009 (the two-regime
+Related: [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (applicative `gather` keying is the Gather rule), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the two-regime
 `TaskContext` is the claim that $\rightarrow_A$ and $\rightarrow_S$ refine one $\rightarrow$),
-ADR-0014 §8 (the scope frame is the convention layer `Scopes.lean` proves).
+[ADR-0014](0014-rlm-combinators-run-code.md) §8 (the scope frame is the convention layer `Scopes.lean` proves).

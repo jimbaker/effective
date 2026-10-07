@@ -5,19 +5,18 @@ Two regimes, and the choice is made by whether pytest-xdist is driving.
 **Parallel — a database per worker.** The durable lane cannot share one database. Absurd is
 pull-only: a test drains work by calling `work_batch()` a bounded number of times, and
 `work_batch` claims *whatever is ready*, not that test's task. Two workers on one queue steal each
-other's claims (42 failures, shaken 2026-07-23). A per-worker *queue* is not enough either — the
-`ledger` and the projections are shared, and the reset below would truncate them under a sibling
-mid-test. So the isolation boundary is the whole database: the controller copies a prepared
+other's claims. A per-worker *queue* is not enough either: the `ledger` and the projections are
+shared, and the reset below would truncate them under a sibling mid-test. So the isolation boundary
+is the whole database: the controller copies a prepared
 template once per worker, and each worker keeps saying `default` and `ledger` to its own copy.
 The ~14 test modules that hardcode `absurd.*_default` need no change at all.
 
 **Serial — one shared database, reset at session start.** A task left **non-terminal** by an
 earlier run is not inert. It stays claimable, and every later test spends claims on it. Past a few
 dozen, budgeted drains start missing their own task and the failure looks like a substrate bug:
-`state='pending'` on a test that passes in isolation. Measured 2026-07-25: 181 leftovers (mostly
-`voi-*` runs parked on grants that never arrive, plus a batch of fork children dying on the way
-out) starved three `test_govern_durable` cases and one `test_skills_durable` case, each green when
-run alone.
+`state='pending'` on a test that passes in isolation. Leftover `voi-*` runs parked on grants that
+never arrive, and fork children dying on the way out, would starve `test_govern_durable` and
+`test_skills_durable` cases that are green run alone.
 
 The reset runs at session **start** rather than at exit on purpose — so the run you just debugged
 is still on disk to inspect, while the run you are about to do starts from a queue nobody else is

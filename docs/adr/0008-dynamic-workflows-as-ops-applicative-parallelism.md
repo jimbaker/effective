@@ -3,14 +3,14 @@
 - **Date:** 2026-06-19
 - **Status:** Accepted for `gather`, which is built on every handler; the agent-fleet op is
   served by spawned child tasks and has no op kind of its own. Built: the `Gather` op
-  (`src/effective/ops.py`) and `gather` (`src/effective/api.py`); concurrent branches on a ctx
+  ([`src/effective/ops.py`](../../src/effective/ops.py)) and `gather` ([`src/effective/api.py`](../../src/effective/api.py)); concurrent branches on a ctx
   that advertises `concurrent_safe` (`SqliteTaskContext`, `ConcurrentAbsurdCtx`), with parallel
   tools and serialized writes; an await inside a branch, on a ctx with the `peek_event`
   capability, and a sleep inside a branch. Unbuilt: a bounded-concurrency cap, and per-branch
   connections (Option A, §3).
-- **Relates to:** ADR-0002 (the op and domain layer stack; branch keying reuses the deterministic
-  naming of the injected permission `AwaitEvent`), ADR-0009 (the `TaskContext` the durable gather
-  runs on), ADR-0021 (a spawned fan-out joins in a loop), ADR-0025 (`race` and `quorum`, the
+- **Relates to:** [ADR-0002](0002-harness-layer-stack.md) (the op and domain layer stack; branch keying reuses the deterministic
+  naming of the injected permission `AwaitEvent`), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the `TaskContext` the durable gather
+  runs on), [ADR-0021](0021-dynamic-graphs-as-projections.md) (a spawned fan-out joins in a loop), [ADR-0025](0025-race-and-quorum.md) (`race` and `quorum`, the
   first-k siblings of `gather`).
 
 ## Context
@@ -59,11 +59,11 @@ two expressions is the demonstration that they are one topology.
 
 **The fleet op has no op kind of its own.** It decomposes into ops that exist: a checkpointed
 spawn of a child task and an `AwaitEvent` on that child's done event (`spawn_child` and
-`join_child` in `src/effective/spawning.py`; `effective.compose.spawn_subagent_task` composes them,
-and `tests/test_spawned_subagent.py` proves a parent crash neither re-spawns nor restarts the
+`join_child` in [`src/effective/spawning.py`](../../src/effective/spawning.py); `effective.compose.spawn_subagent_task` composes them,
+and [`tests/test_spawned_subagent.py`](../../tests/test_spawned_subagent.py) proves a parent crash neither re-spawns nor restarts the
 child). The handler holds a spawn to the task's depth budget and refuses one past it. An N-way
 fleet is a loop of spawns followed by a loop of joins (`marginal_sweep` in
-`src/effective/fork.py`), never a `gather`: the children already run concurrently in their own
+[`src/effective/fork.py`](../../src/effective/fork.py)), never a `gather`: the children already run concurrently in their own
 tasks, and a branch's rescoped await would not match the child's unqualified emit. The join rides
 an ordinary event, so it runs on both engines.
 
@@ -89,7 +89,7 @@ assertion licenses both concurrent execution and order-independent replay keying
 control-axis twin of combining independent channel outputs on the data axis.
 
 **Keys are structural.** A branch's keys carry the frame `gather:{g},{i};` (`gather_frame` in
-`src/effective/api.py`): the gather's ordinal and the branch index, never completion order. The
+[`src/effective/api.py`](../../src/effective/api.py)): the gather's ordinal and the branch index, never completion order. The
 trace records the leaves under those keys and holds no entry for the gather itself. A crash
 mid-gather keeps every committed branch step and re-runs only the rest, because only successful
 steps are checkpointed.
@@ -98,7 +98,7 @@ steps are checkpointed.
 branch's sleep compares its wake time against the clock and parks the same way; after the barrier
 the run re-arms one real wait. A ctx without `peek_event` refuses an await inside a
 branch with `NotImplementedError`, and a wait that names a deadline is refused inside any branch
-(`refuse_a_bounded_wait_in_a_branch`, `src/effective/ops.py`).
+(`refuse_a_bounded_wait_in_a_branch`, [`src/effective/ops.py`](../../src/effective/ops.py)).
 
 **The monitor shape is telemetry.** A worker runs as an ordinary op; an observer reads its spans,
 which live outside the engine and are off by default. The observer reads the disposable
@@ -107,7 +107,7 @@ nothing to observe. An op carrying only the read would be a second mechanism for
 
 **Naming.** The join combinator mirrors orchestration vocabulary (`gather`, `parallel`), so a
 script and a generator read with the same words. `fork` stays reserved for counterfactual
-lineages (ADR-0006).
+lineages ([ADR-0006](0006-two-stage-marginal-pareto-selection.md)).
 
 **Scheduling is the handler's concern.** The generator declares the independent set; a cap on
 live branches belongs in the handler. No cap is built.
@@ -116,7 +116,7 @@ live branches belongs in the handler. No cap is built.
 
 A durable gather holds one `write_lock` around the connection I/O and runs each step's thunk (the
 tool or model call) outside it. The SQLite engine shares the lock between ctx and ledger
-(`src/effective/sqlite.py`); `ConcurrentAbsurdCtx` (`src/effective/handlers/absurd.py`) does the
+([`src/effective/sqlite.py`](../../src/effective/sqlite.py)); `ConcurrentAbsurdCtx` ([`src/effective/handlers/absurd.py`](../../src/effective/handlers/absurd.py)) does the
 same over the Absurd SDK's public `begin_step`/`complete_step` split, so branch tools overlap
 while commits serialize on the one task connection. `ConcurrentAbsurdCtx` is constructed only in
 tests; a worker passing the raw SDK ctx runs branches in index order.

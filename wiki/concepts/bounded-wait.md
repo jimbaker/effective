@@ -114,7 +114,7 @@ or for a managed Postgres.
 **A rule about the instant itself does not take the allowance**, because both instants can be the
 engine's. Emit under a held clock and the tie is exact: an event a microsecond before the deadline
 arrives, one AT the deadline and one after expire, which is the race's tie rule (a timeout and a winner decided by one authority, at one instant) read
-at the resolution the engine stores. `tests/test_absurd_deadline_park.py`.
+at the resolution the engine stores. [`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py).
 
 Punctuality is a floor of its own and a different one. The instant is now the one the workflow
 named; how soon a worker NOTICES it is the driver's business, and nothing here establishes a
@@ -130,7 +130,7 @@ wait, writes the SDK's arrival checkpoint and deletes the row, so no later claim
 claim on the same run can settle that wait and park another one the stale write would reach.
 `run_id` names a RUN, which outlives the claim that parked it. Both reproduce, and both are
 answered by the one transaction;
-`tests/test_absurd_deadline_park.py` pins it with an emit racing the park on its own connection.
+[`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py) pins it with an emit racing the park on its own connection.
 
 **An absolute park is also what makes a deadline testable.** `absurd.fake_now` is the hook the
 engine ships for holding its clock, and `tests/_durable.clock_at` holds both clocks a park
@@ -139,7 +139,7 @@ however far the fake clock was moved: measured at 3600.000000 s past the deadlin
 an hour on, with the run still `sleeping` after the clock was advanced TO the deadline. Registered
 absolutely it lands 0.000000 s off and that same advance expires it. So a rule about the instant
 itself costs no wall-clock time to pin, which is what the race's tie rule needs.
-`tests/test_absurd_deadline_park.py`.
+[`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py).
 
 Found by the table, not by a case: every per-history pin happened to use numbers outside the
 window, which is what an enumeration is for.

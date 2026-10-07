@@ -57,4 +57,4 @@ the rendered request beside the answer, and comparing it on replay, is the open 
 `effective.interpreters.jev.Jev` keeps answers under a hash of the request and checks a
 `TokenBudget` before each call, so a consumer sets its own ceiling. `effective.interpreters.cli`
 answers `AskLLM` through `claude -p` and `codex exec` for prototyping on a subscription. Upstream:
-[[concepts/flatten]], [[concepts/tapes]].
+[concepts/flatten](flatten.md), [concepts/tapes](tapes.md).

@@ -356,7 +356,7 @@ def unmeasured_steps(tape_keys: Iterable[str], measured_keys: Iterable[str]) -> 
 
     The right-orphan direction — a span addressing no tape node — is already asserted empty: it
     would mean telemetry observed an op the durable record does not know about. This is the other
-    direction, and it was previously waved through as "a node with no span is normal".
+    direction: a tape node with no span.
 
     It is normal for most kinds and a DEFECT for one. `traced` is a DOMAIN layer, so it sees
     `AskLLM` and `CallTool` and nothing else; a `ledger`, `artifact`, `sleep` or `await` node is

@@ -8,7 +8,7 @@ The two directories split by kind, and both are held to that contract.
 |---|---|---|
 | `docs/` | deliverables a reader works through: the first workflow, the concepts tour, the design note, the repertoire axis | long documents with numbered sections |
 | `docs/adr/` | the architecture decision records: one decision each, its context, the alternatives, and what is built | cited by number, indexed in `wiki/index.md` |
-| `wiki/` | the arguments behind the design, one concept a page, interlinked by `[[concepts/...]]` | short pages, rewritten in place when the truth changes |
+| `wiki/` | the arguments behind the design, one concept a page, interlinked by relative markdown links | short pages, rewritten in place when the truth changes |
 
 `wiki/index.md` catalogs both. A filename carries no date, because a document here describes the
 tree as it is; what changed and why goes in the commit message.
@@ -31,6 +31,8 @@ looking for WHY it is that way? ──► wiki/index.md            (the concept 
 
 ## The gates
 
-Two gates guard citations, and neither sees what the other does. `just docs-check` grades
-repo-rooted paths in `README.md`, `CLAUDE.md`, `docs/` and `wiki/`: a path that names no file
-fails. `just wiki-lint` grades `[[links]]` and orphan pages. Both run inside `just check`.
+Two gates guard citations. `just docs-check` grades the paths `README.md`, `CLAUDE.md`, `docs/`
+and `wiki/` cite, a backticked path from the repository root and a markdown link from the page that
+holds it: a path that names no file fails.
+`just wiki-lint` grades the links between wiki pages and finds orphan pages. Both run inside
+`just check`.

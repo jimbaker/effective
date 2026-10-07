@@ -264,6 +264,10 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "src/effective/spawning.py",
     "src/examples/coder/machine.py",
     "src/examples/deep_research/research.py",
+    "src/examples/startup/asking.py",
+    "src/examples/startup/incident.py",
+    "src/examples/startup/launch.py",
+    "src/examples/startup/voice.py",
     "tests/_funnel.py",
     "tests/_cart.py",
     "tests/_mcts.py",
@@ -1537,7 +1541,7 @@ def check_authority_tags(paths: Iterable[str | Path]) -> list[Violation]:
     - a namespace composed from an `AuthorityTag` but NOT reserved → an author-supplied await
       name could park on an approval / grant / park, so `event_name` must fence it;
     - a reserved authority prefix that NO `AuthorityTag` declares → the reserved set has grown a
-      stale entry, or a namespace was renamed and the fence now guards nothing.
+      stale entry, or the namespace it names is gone and the fence guards nothing.
 
     Author and domain namespaces (`tool:`, `review:`, `extracted:`, …) are deliberately NOT
     required to be reserved: they are the names authors are *supposed* to own. Every identity
@@ -2107,7 +2111,7 @@ NOT_PYTHON_CODEGEN_SCANNED: dict[str, str] = {
     "tests/test_artifact_addressing.py": "1 site to convert to source literals",
 }
 NOT_PYTHON_CODEGEN_SCANNED |= configured("not_python_codegen_scanned") or {}
-"""Files this rule does not scan, each with what sits behind it (2026-09-12).
+"""Files this rule does not scan, each with what sits behind it.
 
 The exclusion is per FILE, so a new assembly in one of these is not reported. That is the blind
 spot it buys. Each entry carries a task rather than a reason, because each is work to do.

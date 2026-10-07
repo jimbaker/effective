@@ -794,13 +794,13 @@ def keys_of(graph) -> list[str]:
 def test_experiment_legibility_at_three_scales(tmp_path, capsys, sqlite_app):
     """Does a real trace render readably as Mermaid, and does folding rescue the big one?
 
-    Measured 2026-07-25:
+    `uv run pytest tests/test_graphview.py::test_experiment_legibility_at_three_scales -s` prints:
 
-    | run | unrolled nodes | folded nodes | ratio |
+    | run | unrolled nodes | folded nodes | mermaid chars (unrolled -> folded) |
     |---|---|---|---|
-    | decision (small) | 4 | 4 | 1.0x |
-    | agent loop x100 | 300 | 3 | 100x |
-    | gather fan (4) | 9 | 6 (3 after a scrub) | 1.5x / 3x |
+    | small | 4 | 4 | 169 -> 169 |
+    | loop | 300 | 3 | 13734 -> 160 |
+    | fan | 9 | 6 | 422 -> 302 |
 
     The conclusion the experiment was run to reach: **folding is the collapse rule.** A 300-node
     unrolled trace is unreadable as a diagram and a 3-node cycle graph with x100 on the edges is
@@ -872,10 +872,11 @@ def test_experiment_legibility_at_three_scales(tmp_path, capsys, sqlite_app):
 def test_experiment_fold_cost_is_a_live_fold_not_a_read_model(capsys):
     """Is the projection cheap enough to compute on demand, or does it need an indexed table?
 
-    Measured 2026-07-25 over synthetic key sequences (the ADR quotes these): a 10,000-op run
-    projects and folds in single-digit milliseconds, which settles the question — **a live fold,
-    no read-model, no schema**. The read from the engine dominates, and that read is one indexed
-    SELECT the fork path already does.
+    Measured 2026-10-06 over synthetic key sequences with `uv run pytest
+    tests/test_graphview.py::test_experiment_fold_cost_is_a_live_fold_not_a_read_model -s`: a
+    10,000-op run projects in about 85 ms and folds in about 110 ms, linear in its ops, so **a
+    live fold, no read-model, no schema**. The read from the engine dominates, and that read is one
+    indexed SELECT the fork path already does.
 
     The assertion is a 2-SECOND ceiling, not a tight one — and that number is the second lesson.
     A 100 ms bound looked "generously loose" and flaked on the third consecutive suite run under
@@ -1241,7 +1242,7 @@ def test_a_LOOPING_program_folds_back_into_a_loop_across_the_ENGINE_WRAPPER():
     that awaited one name twice as TWO nodes, each reporting occurrence 1: no error, just a
     picture of a chain that never closes.
 
-    Measured 2026-08-09 on the identical key list, with the wrapper refused and accepted:
+    On the identical key list, with the wrapper refused and accepted:
 
         refused    3 folded nodes   `$awaitEvent:ask:q` count=1, `$awaitEvent:ask:q#2` count=1
         accepted   2 folded nodes   `$awaitEvent:ask:q` count=2
@@ -1397,9 +1398,9 @@ def test_the_parked_node_is_never_a_collision():
 
 
 def test_a_real_but_tiny_cost_does_not_render_as_zero():
-    """A live gpt-5-nano turn costs ~$0.000042 (measured 2026-08-24), which `.4f` renders
-    `$0.0000`: the same "this node was free" claim the `None`/`0.0` distinction exists to avoid,
-    arriving from the other side."""
+    """A live gpt-5-nano turn can cost under $0.00005, which `.4f` renders `$0.0000`: the same
+    "this node was free" claim the `None`/`0.0` distinction exists to avoid, arriving from the
+    other side."""
     assert format_cost(0.000042) == "$0.000042"
     assert format_cost(0.0300) == "$0.0300"  # the ordinary case is unchanged
     assert format_cost(0.0) == "$0.0000"  # measured-and-free stays the plain form
@@ -1537,7 +1538,7 @@ def test_a_folded_node_never_contradicts_its_own_key_about_its_coordinates():
 
     The distinction matters because a quotient may drop exactly those coordinates. `fold_cycles`
     DECLARES that it drops the branch, and `RunGraph.dropped` records it; the honest `path` for a
-    node whose key no longer carries a branch is therefore the empty one, and reading it off the
+    node whose key does not carry a branch is therefore the empty one, and reading it off the
     name is what guarantees that. Carrying the representative's value would have reported a branch
     coordinate on a key that has none.
     """
@@ -1562,7 +1563,7 @@ def test_a_race_edge_reads_as_forward_once_the_branch_is_folded_away():
     `graphlayout.prepare.classify` derives `race` from `Node.path`, and its docstring says drawing
     such an edge as a plain arrow *"would assert causation the record does not contain."* On a
     FOLDED graph it does exactly that. That is not `regroup` dropping a field: the fold declares it
-    removes the branch coordinate, the folded key no longer carries one, and `RunGraph.dropped`
+    removes the branch coordinate, the folded key does not carry one, and `RunGraph.dropped`
     says so; a node reporting a branch there would be the false claim instead. A consumer that
     needs the race reads the unrolled graph, which still reports it.
     """
@@ -1670,9 +1671,8 @@ def test_project_does_not_FORGE_the_foreign_join_the_engine_wrote():
     A foreign term that wraps our key joins its payload with `:` (the bytes the SDK writes), so
     rebuilding a key by joining tags with `;` turns `$awaitEvent:review:m1` into
     `$awaitEvent;review:m1`. That parses, as a DIFFERENT valid key, which is why no other
-    assertion sees it; it covered 1,718 of the 7,126 distinct live `absurd.c_default` names on
-    2026-08-29, a store that grows with every suite run. A join from a projected node back to the
-    store misses, and the label shown to a human is a name no producer ever wrote.
+    assertion sees it. A join from a projected node back to the store misses, and the label shown
+    to a human is a name no producer ever wrote.
     """
     engine_wrote = [
         "$awaitEvent:review:m1",

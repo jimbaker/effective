@@ -2,19 +2,19 @@
 
 - **Date:** 2026-06-18
 - **Status:** Proposed. The mechanism it composes on is built: `render` → `Prompt[S]`, `Gated`,
-  `FormGate`, `Repair` and `check_channels` in `src/effective/channels.py`, and the lint rules in
-  `src/effective/lint.py`. Nothing this ADR adds is built: no `discover` loader, no `@channel`
+  `FormGate`, `Repair` and `check_channels` in [`src/effective/channels.py`](../../src/effective/channels.py), and the lint rules in
+  [`src/effective/lint.py`](../../src/effective/lint.py). Nothing this ADR adds is built: no `discover` loader, no `@channel`
   declaration, no stub generator, no directory-to-registry lint. `ask_llm` takes `name: str`
-  (`src/effective/api.py`).
-- **Relates to:** ADR-0001 (the channel processor this discovers over), ADR-0002 (the
-  `effective.lint` rule surface, extended here), ADR-0010 (the same inspectable-manifest
+  ([`src/effective/api.py`](../../src/effective/api.py)).
+- **Relates to:** [ADR-0001](0001-channel-processor.md) (the channel processor this discovers over), [ADR-0002](0002-harness-layer-stack.md) (the
+  `effective.lint` rule surface, extended here), [ADR-0010](0010-card-ir-view-axis.md) (the same inspectable-manifest
   principle, applied to the view).
 
 ## Context
 
 A channel is authored as a function that builds a `render(t"...", output=S)` template, and an
 assembly site wires the set by hand to the interpreter that answers `AskLLM`. The workflow names
-each channel by a bare op-name string: `examples/first_workflow.py` yields
+each channel by a bare op-name string: [`examples/first_workflow.py`](../../examples/first_workflow.py) yields
 `ask_llm("setpoint", setpoint.messages, dict)`, and no checker binds `"setpoint"` to the template
 that declares `Setpoint`. Adding a channel means editing the central wiring site.
 

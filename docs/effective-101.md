@@ -3,9 +3,9 @@
 **Read this first.** The wiki tells you *where* things are; this tells you *what they
 are*. Its sections are the concepts the rest of the estate hangs off, so a claim
 here that disagrees with source is a bug (see the currency contract in
-`docs/README.md`).
+[`docs/README.md`](README.md)).
 
-**Want to run something first?** `docs/first-workflow.md` records and replays a workflow in one
+**Want to run something first?** [`docs/first-workflow.md`](first-workflow.md) records and replays a workflow in one
 command; this page is the concepts behind it.
 
 Written for two readers at once. A human skims the tables and diagrams; an agent
@@ -27,8 +27,8 @@ Two axes are reified, deliberately:
 
 | axis | what it reifies | where | the payoff |
 |---|---|---|---|
-| **control** | *what the workflow does*: ops as inert frozen data | `src/effective/ops.py`, `src/effective/api.py`, and `src/effective/domain.py` for the step payloads `AskLLM` and `CallTool` | swap the interpreter: tests replay without an LLM; production runs durably |
-| **data** | *the I/O boundary*: a prompt is a `t"..."` whose interpolations are typed channels | `src/effective/channels.py` | inputs render in, `Field`/`Gated` outputs declare the parse schema and run guardrails |
+| **control** | *what the workflow does*: ops as inert frozen data | [`src/effective/ops.py`](../src/effective/ops.py), [`src/effective/api.py`](../src/effective/api.py), and [`src/effective/domain.py`](../src/effective/domain.py) for the step payloads `AskLLM` and `CallTool` | swap the interpreter: tests replay without an LLM; production runs durably |
+| **data** | *the I/O boundary*: a prompt is a `t"..."` whose interpolations are typed channels | [`src/effective/channels.py`](../src/effective/channels.py) | inputs render in, `Field`/`Gated` outputs declare the parse schema and run guardrails |
 
 The design goal is **reasonable, not just readable**: a reader, human or agent,
 should be able to *reason about* what a workflow will do without running it,
@@ -44,7 +44,7 @@ a web framework picking the color for you is a hazard rather than a convenience.
 
 ## 2. The op set: the whole abstract syntax
 
-Nine members. `type WorkflowOp` in `src/effective/ops.py` is the complete alphabet;
+Nine members. `type WorkflowOp` in [`src/effective/ops.py`](../src/effective/ops.py) is the complete alphabet;
 everything a workflow can ask for is one of these.
 
 | op | one-line contract |
@@ -67,12 +67,12 @@ earns its own design decision, not a quiet addition.
 
 ## 3. The author surface: what you actually call
 
-`src/effective/api.py` is the **smart-constructor layer**: the module that mints the
+[`src/effective/api.py`](../src/effective/api.py) is the **smart-constructor layer**: the module that mints the
 author-surface ops with a bare `yield`, which every workflow-role module then
 `yield from`s. It is deliberately *not* in `WORKFLOW_ROLE_SRCS`, because it is what those
 modules call into. (Layers are a different role with different rights: an op-layer
 forwards `yield op`, and may also *inject* substrate ops of its own, such as the permission
-cascade's `AwaitEvent`, `src/effective/permission.py`.) The callables:
+cascade's `AwaitEvent`, [`src/effective/permission.py`](../src/effective/permission.py).) The callables:
 
 | you call | you get | note |
 |---|---|---|
@@ -93,7 +93,7 @@ cascade's `AwaitEvent`, `src/effective/permission.py`.) The callables:
 
 **Determinism boundary.** Between two yields there is no I/O, no clock, no random.
 All of it goes through a yielded op. `just lint` enforces this over the registered
-workflow-role files (`WORKFLOW_ROLE_SRCS` in `src/effective/lint.py`); keep it passing.
+workflow-role files (`WORKFLOW_ROLE_SRCS` in [`src/effective/lint.py`](../src/effective/lint.py)); keep it passing.
 
 ---
 
@@ -136,7 +136,7 @@ the fold frames went undeclared and unexercised for a while. Index by hole.
 | **terminals** | 2: `fork`, `respawn` | no hole. `fork` **leaves** the task; `respawn` **ends** it. Column only |
 | **respawn-as-outer** | 1: `generation_outer()` | contributes no frames; row only |
 
-All three live in `tests/_composition.py`: `BUILDERS`, `TERMINALS`, and `generation_outer()`
+All three live in [`tests/_composition.py`](../tests/_composition.py): `BUILDERS`, `TERMINALS`, and `generation_outer()`
 (a builder function rather than a mapping, because it has exactly one member).
 
 Teach *why the wrong registry is dangerous*: a `Done`-shaped `respawn` placed in the
@@ -196,7 +196,7 @@ Do **not** repeat the retired claim that a pair cannot reach
 
 There is **no `SILENT`, by construction**. A pair that composes, is wrong, and says
 nothing is a *defect*, not a classification, so its absence from the enum is the
-law. (`Disposition` in `tests/_composition.py` says this in its own docstring.)
+law. (`Disposition` in [`tests/_composition.py`](../tests/_composition.py) says this in its own docstring.)
 
 ### 4.8 The diagonal
 
@@ -263,7 +263,7 @@ it, and no body runs there.
 **The type decides which row an error takes.** A bare `ValueError` is a crash. A refusal a retry
 re-derives, which the child should complete on, joins `REFUSALS`; a programming error subclasses
 `CompositionRefused`. Its members are what `ast-grep -p 'class $C(CompositionRefused): $$$' src`
-finds, and the `refuse_*` functions in `src/effective/ops.py` raise the base itself.
+finds, and the `refuse_*` functions in [`src/effective/ops.py`](../src/effective/ops.py) raise the base itself.
 
 ### 4.12 What can stand between composing a name and awaiting it
 
@@ -288,7 +288,7 @@ branch coordinate would rescope an ABSOLUTE name away from the task that emits i
 `Respawn` is refused because a generation boundary ends the whole task, and a branch
 that respawned would end its siblings' task too.
 
-**`Addressing`** (`src/effective/ops.py`) names the distinction, and it transfers from
+**`Addressing`** ([`src/effective/ops.py`](../src/effective/ops.py)) names the distinction, and it transfers from
 filesystem paths without adaptation:
 
 ```
@@ -309,7 +309,7 @@ This is where the DX doctrine gets concrete instead of asserted.
 |---|---|---|
 | `fork ∘ respawn` | **LOUD** | **promotion**: every fence that makes a counterfactual a counterfactual is per-*task*, and a respawn ends the task |
 | `respawn ∘ respawn` | **LOUD** | the **product carry**: one task, one lifecycle; nesting is mis-factored, not missing |
-| `respawn ∘ fork` | **OK**, *ruled, not yet exercised* | the order that composes. The three LOUD cells each have an executed refusal; this one is backed by the ruling in `src/effective/ops.py` and by the refusal message that names it, not by a test that runs a fork inside a generation |
+| `respawn ∘ fork` | **OK**, *ruled, not yet exercised* | the order that composes. The three LOUD cells each have an executed refusal; this one is backed by the ruling in [`src/effective/ops.py`](../src/effective/ops.py) and by the refusal message that names it, not by a test that runs a fork inside a generation |
 | `fork ∘ fork` | **LOUD** | the parked grandchild (§4.8) |
 
 The pattern to imitate: **a refusal that only says "no" has failed at its job.**
@@ -425,10 +425,10 @@ PEP 750 `t"..."` is used at four boundaries, and they share one rule.
 
 | grammar | module | what the interpolations are |
 |---|---|---|
-| **SQL** | `src/effective/sql.py` | query parameters: Bobby Tables proper |
-| **prompts** | `src/effective/channels.py` | typed I/O channels; `Gated` runs a constraint and returns `Repair` |
+| **SQL** | [`src/effective/sql.py`](../src/effective/sql.py) | query parameters: Bobby Tables proper |
+| **prompts** | [`src/effective/channels.py`](../src/effective/channels.py) | typed I/O channels; `Gated` runs a constraint and returns `Repair` |
 | **keys** | `compose_key` in `effective.keys` | identity segments, injective by construction |
-| **markup** | `src/effective/graphlayout/svg.py` | escaped text nodes, on tdom |
+| **markup** | [`src/effective/graphlayout/svg.py`](../src/effective/graphlayout/svg.py) | escaped text nodes, on tdom |
 
 **The shared rule: the static spans are delimiters, the interpolations are data, and
 a processor that can still tell which is which does not need escaping as a patch.**
@@ -448,10 +448,10 @@ A run graph is a **projection** of recorded op keys, never a declared structure.
 
 | piece | module | contract |
 |---|---|---|
-| the graph | `src/effective/graphview.py` | folded from op keys; acyclic *because keys are injective* |
+| the graph | [`src/effective/graphview.py`](../src/effective/graphview.py) | folded from op keys; acyclic *because keys are injective* |
 | cycle projection | `graphview.fold_cycles` | drop occurrence + branch + scope → the program's own shape |
-| parks | `src/effective/parked.py` | a generic park reader, on both engines |
-| checkpoints | `src/effective/checkpoints.py` | disposable execution state |
+| parks | [`src/effective/parked.py`](../src/effective/parked.py) | a generic park reader, on both engines |
+| checkpoints | [`src/effective/checkpoints.py`](../src/effective/checkpoints.py) | disposable execution state |
 | layout | `src/effective/graphlayout/` | **Python decides meaning, ELK decides placement** |
 
 **Projections are derived.** Admin and UI over a projection are *inspect-only*; an
@@ -475,8 +475,8 @@ authoritative change is a new ledger event, never an edit.
 
 | you want | read |
 |---|---|
-| where something lives | `wiki/concepts/architecture.md` |
+| where something lives | [`wiki/concepts/architecture.md`](../wiki/concepts/architecture.md) |
 | the arguments behind a design rule | `wiki/index.md`, which catalogs the concept pages |
-| the semantics, whole | `docs/effective-design.md` |
-| the composition table as executable truth | `tests/_composition.py`, `tests/test_composition.py` |
-| the read side, as an argument | `wiki/concepts/graph.md`, `wiki/concepts/tapes.md` |
+| the semantics, whole | [`docs/effective-design.md`](effective-design.md) |
+| the composition table as executable truth | [`tests/_composition.py`](../tests/_composition.py), [`tests/test_composition.py`](../tests/test_composition.py) |
+| the read side, as an argument | [`wiki/concepts/graph.md`](../wiki/concepts/graph.md), [`wiki/concepts/tapes.md`](../wiki/concepts/tapes.md) |

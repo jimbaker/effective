@@ -8,7 +8,7 @@ A check that only ever sees the real table proves the table, not the check.
 **What gates what, stated because it is easy to get backwards.**
 
 - `assert_never` in each `route_*` is what makes a dropped or added enum arm a **`ty` error**.
-  Measured 2026-08-15: `ty` narrows a `StrEnum` match to `Never` and names the missing arm.
+  `ty` narrows a `StrEnum` match to `Never` and names the missing arm.
 - `--totality src` does not see the enum matches (its census emits zero rows for a `match` over
   a `StrEnum`), so a green lint is not evidence of totality here, which is why these tests exist.
   It *does* see an `isinstance` guard.

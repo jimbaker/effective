@@ -68,12 +68,18 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cache
 from itertools import pairwise
+from string.templatelib import Interpolation, Template
+from typing import assert_never
 
 from effective.keys import Key
 from effective.keys.frame import (
     ARM_TAGS,
     FRAME_ARMS,
     GATHER_ARM,
+    RACE_ARM,
+    branch_frames,
+    is_branch_frame,
+    past_frames,
     split_frames,
 )
 from effective.keys.grammar import (
@@ -114,11 +120,15 @@ LEDGER_TAG = "ledger;"
 """`op_key(AppendLedgerRow)`'s tag. Named because `KINDS` and `ledger_collisions` both need it and
 a second spelling is exactly how the fork scope token broke — one constant, both readers."""
 
+AWAIT_TAG = "event;"
+"""`op_key(AwaitEvent)`'s tag. A branch's await carries its coordinate INSIDE this arm
+(`event;gather:0,0;ev:r1`), the spelling `parked.pending_key` documents."""
+
 KINDS: tuple[tuple[str, str], ...] = (
     (LEDGER_TAG, "ledger"),
     ("artifact:", "artifact"),
     ("sleep:", "sleep"),
-    ("event;", "await"),
+    (AWAIT_TAG, "await"),
     ("$awaitEvent:", "await"),
 )
 """Leading tags that name a node's kind. Derived from the key grammar rather than from a separate
@@ -166,7 +176,7 @@ def _rank(state: str) -> int:
 def format_cost(usd: float) -> str:
     """A measured cost, rendered so a REAL one never reads as zero.
 
-    A live gpt-5-nano turn is ~$0.000042 (measured 2026-08-24), which `.4f` renders `$0.0000`:
+    A live gpt-5-nano turn can cost under $0.00005, which `.4f` renders `$0.0000`:
     indistinguishable from free, the claim the `None`/`0.0` distinction exists to avoid making.
 
     One helper because both renderers spell this (`graphlayout.svg._detail` and `to_mermaid`
@@ -398,7 +408,7 @@ def from_keys(
     **A separate parameter rather than a `states` entry, because `states` cannot express this.**
     It maps a key that is *already in* `keys` to a state; an entry for a key that is not there is
     silently ignored (pinned in `test_graphview.py`). Making it work would mean letting `states`
-    introduce nodes, at which point `keys` no longer means "what a reader returned": the same
+    introduce nodes, at which point `keys` would stop meaning "what a reader returned": the same
     record, two projections, one silently assumed to be the other. Its state still comes from
     the same seam, defaulting to `PARKED`: pass `states={key: …}` to say something else about it.
 
@@ -712,9 +722,7 @@ def _projected(key: str, found: Mapping[tuple[str, ...], frozenset[Column]]) -> 
         # Rebuild the TERM and let the grammar render it, rather than joining tags with `;`.
         # A foreign term that wraps our key joins its payload with `:` — the bytes the engine
         # wrote — and a hand-rolled join emits `$awaitEvent;review:m1`, which parses as a
-        # DIFFERENT valid key, so nothing downstream can notice. On 2026-08-29 that join would
-        # have changed 1,718 of the 7,126 distinct live names in `absurd.c_default`; the store
-        # grows with every suite run, so the ratio is not a constant.
+        # DIFFERENT valid key, so nothing downstream can notice.
         rendered.append(
             Term(term.tag, kept, foreign=term.foreign, wraps_payload=term.wraps_payload)
         )
@@ -958,6 +966,101 @@ def to_mermaid(graph: RunGraph, *, direction: str = "TD", title: str | None = No
         arrow = f' -->|"x{edge.count}"| ' if edge.count > 1 else " --> "
         lines.append(f"  {ids[edge.src]}{arrow}{ids[edge.dst]}")
     return "\n".join(lines)
+
+
+_SEQUENCE_TEXT = str.maketrans(
+    {";": "#59;", "#": "#35;", "<": "#60;", ">": "#62;", "\n": " ", "\r": ""}
+)
+"""Mermaid ends a sequence statement at `;`, reads `#` as an entity's start and `<` as markup,
+and a key can carry each, so each renders as its entity."""
+
+
+def to_sequence(graph: RunGraph) -> str:
+    """Render a run as a Mermaid sequence diagram: each branch's ops, in the order they committed.
+
+    The participants are the workflow's main line, one per gather or race branch, and the world
+    the ops reach. Each node is drawn on the branch it ran in, labeled with its key past the
+    gather and race frames (`past_frames`):
+
+    | node                        | drawn as                                                     |
+    |-----------------------------|--------------------------------------------------------------|
+    | an op                       | a message from the branch to the world                       |
+    | an await                    | a note on the branch, then the world's reply if it committed |
+    | a race's choice or endings  | a note on the branch that ran the race                       |
+
+    Within a branch the messages are program order. Across branches commit order is one run's
+    interleaving (`from_keys`), so the participants are ordered by coordinate, and by name where
+    coordinates tie."""
+    nodes = sorted(graph.nodes, key=lambda node: node.order)
+    drawn = frozenset(branch_frames(node.key) for node in nodes)
+    branches = sorted(
+        {_branch(node.key, drawn) for node in nodes} - {()},
+        key=lambda frames: (_coordinates(frames), frames),
+    )
+    lanes = {(): "run"} | {frames: "b" + str(i) for i, frames in enumerate(branches, 1)}
+    lines = [_statement(t"sequenceDiagram"), _statement(t"  participant run as workflow")]
+    for frames in branches:
+        lane, name = lanes[frames], " / ".join(frames)
+        lines.append(_statement(t"  participant {lane} as {name}"))
+    lines.append(_statement(t"  participant world"))
+    for node in nodes:
+        branch = _branch(node.key, drawn)
+        inner = split_frames(node.key)[0][len(branch_frames(node.key)) :]
+        lane, label = lanes[branch], past_frames(node.key)
+        if node.kind == "await":
+            lines.append(_statement(t"  Note over {lane}: awaits {label}"))
+            if node.state == COMMITTED:
+                lines.append(_statement(t"  world-->>{lane}: {label}"))
+        elif inner and _is_race(race := inner[-1]):
+            lines.append(_statement(t"  Note over {lane}: {race} {label}"))
+        else:
+            lines.append(_statement(t"  {lane}->>world: {label}"))
+    return "\n".join(lines)
+
+
+def _branch(key: str, drawn: frozenset[tuple[str, ...]] = frozenset()) -> tuple[str, ...]:
+    """The branch frames `key` ran under. A branch's await carries them at the head of its
+    address, inside the await arm; an authored name can spell a branch frame too, so frames
+    found deeper in the address count only when another node ran under them (`drawn`). The
+    address alone cannot tell a scoped branch's await from an authored name that spells the same
+    frames, so either can land on the wrong line: `place-awaits-by-provenance-task`."""
+    if frames := branch_frames(key):
+        return frames
+    if not key.startswith(AWAIT_TAG):
+        return ()
+    frames = branch_frames(key.removeprefix(AWAIT_TAG))
+    return frames if frames and (is_branch_frame(frames[0]) or frames in drawn) else ()
+
+
+def _statement(template: Template) -> str:
+    """One statement of a sequence diagram: the static text as written, and each hole as text with
+    `;`, `#`, `<`, `>` and line breaks rendered as entities."""
+    parts = []
+    for item in template:
+        match item:
+            case str() as text:
+                parts.append(text)
+            case Interpolation(value=value):
+                parts.append(str(value).translate(_SEQUENCE_TEXT))
+            case unreachable:
+                assert_never(unreachable)
+    return "".join(parts)
+
+
+def _coordinates(frames: tuple[str, ...]) -> tuple[tuple[str, tuple[int, ...]], ...]:
+    """Branch frames as `(tag, integers)` pairs, so `gather:0,10` sorts after `gather:0,2`."""
+    placed = []
+    for frame in frames:
+        tag, _, coordinates = frame.partition(TAG_SEPARATOR)
+        numbers = coordinates.split(ARITY_SEPARATOR)
+        placed.append((tag, tuple(int(n) for n in numbers if n.isdigit())))
+    return tuple(placed)
+
+
+def _is_race(frame: str) -> bool:
+    """A `race:{r}` frame, the one a race's own choice and endings sit under."""
+    tag, _, coordinates = frame.partition(TAG_SEPARATOR)
+    return tag == RACE_ARM and ARITY_SEPARATOR not in coordinates
 
 
 def identity(node: Node) -> str:

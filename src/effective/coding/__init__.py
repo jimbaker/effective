@@ -16,9 +16,9 @@ here fuses, which is the right default and not a limit.
 Each state has its own verdict enum, so the transition's domain is the dependent sum
 Σ_s Verdict(s) rather than the product State x Verdict — a product would demand an arm for
 `(TEST, ReviewVerdict.APPROVED)`, which no judge can produce. `assert_never` closes each
-per-state router, and that is the gate: `ty` narrows an enum match to `Never` (measured
-2026-08-15), so a dropped or added arm is a **type error**. `--totality src` sees none of it —
-its census emits zero rows for a `match` over an enum — so a green lint is not evidence here.
+per-state router, and that is the gate: `ty` narrows an enum match to `Never`, so a dropped
+or added arm is a **type error**. `--totality src` sees none of it: its census emits zero rows
+for a `match` over an enum, so a green lint is not evidence here.
 
 **Within a state, the model chooses among a repertoire-masked set of ops**, which is not a
 control-flow violation but the measured design. That is `run_agent` one grain down, and it is

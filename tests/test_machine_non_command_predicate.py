@@ -126,7 +126,7 @@ embodiment over `CommandRun` needs none — the default absorbs it."""
 def propose(ctx: SweepCtx) -> Any:
     """Propose a candidate — against the last round's diagnostic, once there is one.
 
-    **This is the read `Ctx`'s record parameter exists for, and until now nothing performed it.**
+    **This is the read `Ctx`'s record parameter exists for, and nothing else performs it.**
     `asi` is a field `Measured` does not have, so reaching it requires `incoming` to be typed by
     THIS embodiment's record rather than by the protocol. Both halves of that were run, not
     reasoned: spell the alias `Ctx[SweepState]` and the PEP 696 default fires, `measured` comes

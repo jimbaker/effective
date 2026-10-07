@@ -785,12 +785,12 @@ def test_durable_gather_sleep_parks_then_wakes(backend):
     **Both halves are timed against the ENGINE's clock, not against elapsed sleep.** A durable
     deadline is a wall-clock instant (`available_at`, compared to `time.time()` in `_claim`),
     and it has to be, because a durable timer must survive process death and a monotonic clock
-    restarts with the process. Wall clocks **step**. Measured on this WSL2 host 2026-07-26:
-    during a `time.sleep(0.1)` that advanced `time.monotonic()` by 0.1002s, `time.time()` went
-    **backward 0.846s**, a net -0.946s step. So `sleep(deadline + margin)` does not imply the
-    deadline passed: a backward step un-expires it, the task stays `sleeping`, and the test fails
-    while the engine is behaving exactly as specified. That was a real 1-in-12 failure here, and
-    it is not a race: no ordering makes it go away.
+    restarts with the process. Wall clocks **step**: on a WSL2 host `time.time()` can step
+    **backward** by most of a second during a `time.sleep(0.1)`. So `sleep(deadline + margin)` does
+    not imply the deadline passed: a backward step un-expires it, the task stays `sleeping`, and
+    the test fails while the engine is behaving exactly as specified. A test that slept the
+    margin failed one run in twelve on that host, and it is not a race: no ordering makes it go
+    away.
 
     The rule this test follows: **wait on the same clock the guard reads.** `_wait_past`
     polls `time.time()` until it is genuinely past the deadline (bounded on `monotonic`, so a
@@ -1832,11 +1832,10 @@ def test_a_seeded_prefix_value_survives_this_ENGINE_s_own_store(backend):
     The failure this case exists for happens one layer down, in serialization — and the two
     engines serialize differently *in kind*: SQLite writes checkpoint state as TEXT via
     `json.dumps`, Absurd writes `jsonb`, which is explicitly not byte-preserving (it reorders
-    keys, drops duplicates, re-renders numbers). Measured with coverage dynamic contexts
-    (2026-07-26): 39 tests reach `SeedingCtx.step` and exactly ONE does so on Absurd
-    (`test_fork_sweep_absurd`), which asserts fork outcomes and ledger kinds — not seeded values.
-    So the round-trip was pinned on one engine of two, and a green SQLite pass does not verify a
-    port.
+    keys, drops duplicates, re-renders numbers). The other tests that
+    reach `SeedingCtx.step` on Absurd (`scripts/cov_contexts.py` lists them) assert fork outcomes,
+    results and ledger kinds, never a seeded value. Without this case the round-trip is pinned on
+    one engine of two, and a green SQLite pass does not verify a port.
 
     **Why it matters that the copy is faithful.** A fork makes a counterfactual durable by
     re-committing the base's values into the CHILD's own checkpoints, so a crash mid-tail replays
@@ -3086,7 +3085,7 @@ def test_a_re_entered_state_stays_injective_on_both_engines(backend):
     # six distinct keys become three. Stated over the COMPOSITION rather than as a set-size check
     # on the tape, because a set-size check here would prove nothing: with `d:` deleted the
     # durable tape stays 13-of-13 distinct, since both engines apply the SDK's `name#N`
-    # duplicate-step rule (measured under the deletion, 2026-08-16). The list above reddens.
+    # duplicate-step rule. The list above reddens.
     assert len(set(expected)) == 6
     assert len({_visit_step(None, "draft", tool) for tool in DRAFT_TOOLS}) == 3
 

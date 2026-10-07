@@ -5,12 +5,12 @@
   steps are built: `handlers.base.walk_run`, `layers.layer_routing`, total dispatch in the replay
   and recording handlers, `ReplayHandler`'s `Respawn` arm, and `keys.gather_prefix` (§4). A
   principal's steer (§8) is built as `effective.steering.SteeringCtx`, below the walk.
-- **Relates to:** ADR-0020 (key composition; its gather-prefix trigger is what §4 discharged, and
-  it owns `FramePosition`), ADR-0008 (gather as structure, whose branch coordinate is the frame
-  this ADR unifies), ADR-0009 (the two engines whose conformance suite is one axis of the safety
-  net; `tests/_walks.py` is the other), ADR-0021 §6 (promote-a-fork-to-canonical, which will not
-  be built; §7 shows adding a `gather` branch is the same back edge), ADR-0022 §4a (the span join),
-  ADR-0025 (race, the second structural op with branches).
+- **Relates to:** [ADR-0020](0020-key-composition-one-grammar.md) (key composition; its gather-prefix trigger is what §4 discharged, and
+  it owns `FramePosition`), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (gather as structure, whose branch coordinate is the frame
+  this ADR unifies), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the two engines whose conformance suite is one axis of the safety
+  net; [`tests/_walks.py`](../../tests/_walks.py) is the other), [ADR-0021](0021-dynamic-graphs-as-projections.md) §6 (promote-a-fork-to-canonical, which will not
+  be built; §7 shows adding a `gather` branch is the same back edge), [ADR-0022](0022-dashboard-projections-the-read-side.md) §4a (the span join),
+  [ADR-0025](0025-race-and-quorum.md) (race, the second structural op with branches).
 
 ## 1. The decision
 
@@ -39,7 +39,7 @@ nowhere.
 | none | `fork.replay_prefix` and `_replay_scoped`, reached from `fork_at` | no |
 
 The census is the seven `with placing(` sites in `src/effective`: one each in the recording, replay
-and durable handlers (`src/effective/handlers/`), four in `src/effective/fork.py`. `tests/test_walks.py` buckets coverage by module,
+and durable handlers (`src/effective/handlers/`), four in [`src/effective/fork.py`](../../src/effective/fork.py). [`tests/test_walks.py`](../../tests/test_walks.py) buckets coverage by module,
 so it cannot see that `fork.py` holds an unenrolled walk beside two enrolled ones: a gate is
 bounded by what it scans, on the census itself.
 
@@ -50,7 +50,7 @@ bounded by what it scans, on the census itself.
 or was about to. The walk is being unified incrementally, and each increment was paid for after
 the fact.
 
-The counter-argument is the reason this is sequenced rather than immediate: `tests/_walks.py`
+The counter-argument is the reason this is sequenced rather than immediate: [`tests/_walks.py`](../../tests/_walks.py)
 already asserts the enrolled walks agree. Its own docstring states the limit: it catches
 divergence and is silent on a defect that is uniform across walks. The hand-spelled gather frames
 that §4 replaced were exactly that blind spot: they agreed with each other and would have been
@@ -58,14 +58,14 @@ wrong together.
 
 ## 4. Step 1: `gather_prefix` (built)
 
-ADR-0020 set the trigger for a `gather_prefix(branch)` sibling to `scope_prefix`: a sixth mint, or
+[ADR-0020](0020-key-composition-one-grammar.md) set the trigger for a `gather_prefix(branch)` sibling to `scope_prefix`: a sixth mint, or
 any reader that has to learn the shape. Both fired: there were six hand-spelled mints
 (`absurd._branch_handler`, three in `absurd._join`, `recording.run_branch`, `replay._drive`), and
 `graphview.strip_branches` is the reader.
 
 `keys.gather_prefix(g, i)` is the fragment form, composed by `compose_key` and ending in the term
 separator, and every handler site calls it. `race_prefix(r, i)` is its sibling for a race branch
-(ADR-0025). `api.gather_frame` stays separate because it wraps a finished key; the handlers need
+([ADR-0025](0025-race-and-quorum.md)). `api.gather_frame` stays separate because it wraps a finished key; the handlers need
 the fragment. `frame_path` cannot take a gather, since `op_key(Gather)` raises and there is no atom
 to pass.
 
@@ -130,7 +130,7 @@ What the protocol carries:
 ## 6. The answer type: provenance and authority are one field
 
 An interpreter answers the walk. The answer says how it was obtained, so the vacuity taxonomy that
-`scripts/vacuity_probe.py` reverse-engineers at the store seam becomes a field:
+[`scripts/vacuity_probe.py`](../../scripts/vacuity_probe.py) reverse-engineers at the store seam becomes a field:
 
 | answer | the key's role | who decided |
 |---|---|---|
@@ -154,7 +154,7 @@ only answer them; where the set is data you can change it.
 |---|---|
 | drop a `gather` branch | the result list is positional; it shrinks and every downstream index shifts. A type change, not an override |
 | renumber survivors after a drop | an index is a coordinate: unmodified `gather:0,2;step:b2` would become `gather:0,1;step:b2`, an identity nobody steered |
-| add a `gather` branch | a closure is not in the tape: the program yields 3 branches, the tape holds 4, and the fourth has no body to re-execute. ADR-0021 §6's back edge in another form |
+| add a `gather` branch | a closure is not in the tape: the program yields 3 branches, the tape holds 4, and the fourth has no body to re-execute. [ADR-0021](0021-dynamic-graphs-as-projections.md) §6's back edge in another form |
 
 Answering a branch (supplying its result without running it) is type-safe and key-stable, and is
 replay-safe by design once the answer is recorded at the branch coordinate, which is unbuilt.
@@ -195,9 +195,9 @@ answer (§6) is what would let the walk check the schema itself.
 | piece | what it closed |
 |---|---|
 | `handlers.base.walk_run` | the per-run ambient (`enter_task_run`, `run_scope`, no meter) in one place for every walk |
-| `layers.layer_routing` | the three layer-visibility tuples as one total decision; `tests/test_layers.py` pins that they are disjoint and cover every arm |
+| `layers.layer_routing` | the three layer-visibility tuples as one total decision; [`tests/test_layers.py`](../../tests/test_layers.py) pins that they are disjoint and cover every arm |
 | total dispatch | the replay and recording tables end in `case unreachable: assert_never(unreachable)` |
-| `ReplayHandler`'s `Respawn` arm | an unmatched `Respawn` no longer falls to the leaf path |
+| `ReplayHandler`'s `Respawn` arm | a `Respawn` has its own arm: it ends the run at the generation boundary, and is refused inside a gather branch |
 | `keys.gather_prefix` | step 1 (§4) |
 
 **Proposed, in order:**
@@ -207,7 +207,7 @@ answer (§6) is what would let the walk check the schema itself.
    Two sites cannot simply drop that state: `recording.ScopedSuspended`, which re-installs its
    `prefix` around each resume, and the durable handler's ctx swap. A stack local cannot survive a
    park, so this is stack state while live plus an explicit resume record while parked.
-2. **The unified walk.** Build `walk()` and its protocol, with `tests/_walks.py` extended to assert
+2. **The unified walk.** Build `walk()` and its protocol, with [`tests/_walks.py`](../../tests/_walks.py) extended to assert
    it agrees with every enrolled walk before any handler adopts it, and `replay_prefix` enrolled.
    Then migrate `ReplayWalk` (no layers, no park, smallest), `RecordingWalk` and the durable walk,
    then the fork drivers. Each old loop is deleted only when its walk passes conformance.

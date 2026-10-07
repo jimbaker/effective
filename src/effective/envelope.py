@@ -9,8 +9,8 @@ mode" and hardcoded that convention. This module makes the envelope a value:
 - ``parse(text)`` turns a raw completion into the ``Mapping`` that
   ``resolve()`` already takes.
 
-Two alphabets, chosen by the heterogeneous-alphabet principle (measured on the
-SkillsBench M1 wire ladder, 2026-07-02):
+Two alphabets, chosen by the heterogeneous-alphabet principle, as measured on
+the SkillsBench M1 wire ladder:
 
 - ``JsonEnvelope``: one JSON object, parsed LENIENTLY (first object wins,
   control characters tolerated). Right when every value is a scalar; wrong the

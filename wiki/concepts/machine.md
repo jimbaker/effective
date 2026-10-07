@@ -1,6 +1,6 @@
 # The machine is an extended finite state machine
 
-`src/effective/machine/`, `src/effective/coding/transition.py`.
+`src/effective/machine/`, [`src/effective/coding/transition.py`](../../src/effective/coding/transition.py).
 
 A state has **one slot** (`run: Run[S, V, R]` returning a `Report`), and the worker/judge pair is
 `specs.fuse`, a construction an embodiment may decline. A judgment that needs an address of its own

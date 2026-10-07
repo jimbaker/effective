@@ -9,7 +9,7 @@ The case that made this a design is researching an organization with one opaque 
 with web search finds the organization, names its domain and quotes its evidence in a single
 answer. Checked against the world, such answers name domains that do not resolve and quote text
 the cited page does not contain, and each call reads tens of times more tokens than a bounded
-judgment over gathered records ([[concepts/judgment]]). Splitting the call into sourced records
+judgment over gathered records ([concepts/judgment](judgment.md)). Splitting the call into sourced records
 and bounded decisions is what this page describes.
 
 ## The tiers
@@ -38,7 +38,7 @@ corroborated rather than looked up.
 
 The workflow keeps its shape: code gathers records, a judge decides the bounded questions over
 them, and code composes the call. Whether a record is about this organization is the question an
-anchored merge answers ([[concepts/judgment]]).
+anchored merge answers ([concepts/judgment](judgment.md)).
 
 ## Authority by corroboration
 

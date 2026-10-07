@@ -110,7 +110,7 @@ def test_summarize_does_not_silently_zero_cache_write(tmp_path):
 def test_one_response_many_content_blocks_is_counted_once(tmp_path):
     """The fan-out. Claude Code writes one record per CONTENT BLOCK, and every record of one
     response carries a COPY of that response's `usage` — so counting per record multiplies each
-    token by the block count. Measured on a real 1650-line transcript (2026-08-23): 508
+    token by the block count. Measured on a real 1650-line transcript: 508
     usage-bearing records for 232 responses, output 743,621 per record against 310,257 per
     response (2.40x), cache reads 2.20x. The factors DIFFER, so the session's cache-hit ratio
     moves too (94.47% -> 95.92%) — this is not a scaling that ratios shrug off."""

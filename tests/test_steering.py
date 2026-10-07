@@ -111,7 +111,7 @@ def test_the_checkpoint_holds_the_steered_value(backend):
 
 
 def test_a_steer_the_run_never_reaches_is_reported_unapplied(backend):
-    """A coordinate that missed — a key from a tape the workflow no longer produces. The run must
+    """A coordinate that missed: a key the workflow does not produce. The run must
     complete normally (a steer is not a demand), and the miss must be legible afterwards, because
     silence here is indistinguishable from a steer that fired."""
     stale = Key.parse("step;tool:zzz")

@@ -1,17 +1,17 @@
 # ADR-0019: Two composition combinators: `govern` (control gate) and `serve` (call transforms)
 
 - **Date:** 2026-07-19
-- **Status:** Accepted. Both are built: `govern` in `src/effective/govern.py`, `serve` and its
-  `Service` alias in `src/effective/cost.py`, with `retry_domain` (`src/effective/layers.py`) as
+- **Status:** Accepted. Both are built: `govern` in [`src/effective/govern.py`](../../src/effective/govern.py), `serve` and its
+  `Service` alias in [`src/effective/cost.py`](../../src/effective/cost.py), with `retry_domain` ([`src/effective/layers.py`](../../src/effective/layers.py)) as
   `serve`'s first service. `govern` is formalized in Lean and Quint (§7).
-- **Extends:** ADR-0002 (the harness-layer stack: the two seams and `drive_through`).
+- **Extends:** [ADR-0002](0002-harness-layer-stack.md) (the harness-layer stack: the two seams and `drive_through`).
 
 ## Context
 
 Budget, meter, permission and retry are all cross-cutting factors interpreted over the same op
 stream. The question is whether they share one interpreter loop.
 
-ADR-0002 gives **one loop mechanism**, `drive_through`, the trampoline that pumps a per-op layer
+[ADR-0002](0002-harness-layer-stack.md) gives **one loop mechanism**, `drive_through`, the trampoline that pumps a per-op layer
 stack down to a base, and **one writing idiom**, a generator middleware `result = yield op`. A
 layer may yield more than once, so a `for` or `while` around `yield op` is retry. It also gives
 **two seams**, kept apart on purpose:
@@ -31,7 +31,7 @@ live. Retry belongs below the checkpoint, on the domain seam.
 
 ### 1. One trampoline, one idiom, two seams
 
-The two seams stand, and the `src/effective/layers.py` header carries the rule for placing a new
+The two seams stand, and the [`src/effective/layers.py`](../../src/effective/layers.py) header carries the rule for placing a new
 factor as three questions asked in order:
 
 | question | yes means |
@@ -123,13 +123,13 @@ to bill saved cost. Naming it *serving* makes the order a conscious choice.
 `Service` is a type alias for `DomainLayer[Any]`: a `Protocol` with no constraint matched any
 callable and typed nothing. Extension is "write a callable of the shape", with no registry and no
 inheritance. State lives in a closure (`retry_domain`'s `attempts`) or a bound object
-(`Cache.store`); a bound object is the better seam for a factor you will tune or A/B (ADR-0017),
+(`Cache.store`); a bound object is the better seam for a factor you will tune or A/B ([ADR-0017](0017-tunable-seams-take-data.md)),
 since it exposes its state.
 
 ### 6. Budget is a composite
 
-Budget is a meter on the domain seam (`src/effective/cost.py`, folding usage) feeding a budget
-policy on the op seam (`src/effective/budget.py`, tripping and parking on the accrued value). A
+Budget is a meter on the domain seam ([`src/effective/cost.py`](../../src/effective/cost.py), folding usage) feeding a budget
+policy on the op seam ([`src/effective/budget.py`](../../src/effective/budget.py), tripping and parking on the accrued value). A
 governed resource is a domain meter plus an op policy that reads it, so budget lives in two files
 by decomposition.
 
@@ -150,12 +150,12 @@ hard cap). A factor that offers recourse is a policy.
 
 | check | what it holds |
 |---|---|
-| `formal/lean/Effective/Govern.lean` | `combine` as one total function: refuse dominates park, no silent proceed, asks fuse in argument order, an empty refusal still refuses, and `combine_kind_perm_invariant` (the ruling is permutation-invariant, the polarity row of §4) |
-| `formal/lean/Effective/Decide.lean` | permission's cascade: fail-closed, and `suffix_absorbed`, which licenses the driver's short-circuit |
-| `formal/lean/Effective/EnforceMeasured.lean` | the run-level overshoot bound `spend ≤ limit + Σgrants + c_max`, with a tightness witness |
-| `formal/quint/govern_park.qnt` | park, deliver, resume and worker death, one model covering both gates |
-| `tests/test_govern_conformance.py` | the Python `combine` over the Lean model's rows |
-| `tests/test_govern_durable.py` | the merged park on Absurd and Postgres, including worker death |
+| [`formal/lean/Effective/Govern.lean`](../../formal/lean/Effective/Govern.lean) | `combine` as one total function: refuse dominates park, no silent proceed, asks fuse in argument order, an empty refusal still refuses, and `combine_kind_perm_invariant` (the ruling is permutation-invariant, the polarity row of §4) |
+| [`formal/lean/Effective/Decide.lean`](../../formal/lean/Effective/Decide.lean) | permission's cascade: fail-closed, and `suffix_absorbed`, which licenses the driver's short-circuit |
+| [`formal/lean/Effective/EnforceMeasured.lean`](../../formal/lean/Effective/EnforceMeasured.lean) | the run-level overshoot bound `spend ≤ limit + Σgrants + c_max`, with a tightness witness |
+| [`formal/quint/govern_park.qnt`](../../formal/quint/govern_park.qnt) | park, deliver, resume and worker death, one model covering both gates |
+| [`tests/test_govern_conformance.py`](../../tests/test_govern_conformance.py) | the Python `combine` over the Lean model's rows |
+| [`tests/test_govern_durable.py`](../../tests/test_govern_durable.py) | the merged park on Absurd and Postgres, including worker death |
 
 `max_passes` bounds a gate that never settles: it refuses after that many resolutions instead of
 parking forever, which also gives the Quint model a finite reachability question.

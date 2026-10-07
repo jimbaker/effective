@@ -15,9 +15,9 @@ reach it.
 | `just docs-check` | dangling documentation links fail | repo-rooted paths, **not** the bare-basename form the wiki itself uses | five commits of file moves passed green while documents were left citing paths in the bare-basename form |
 | `--role-coverage`'s `_EFFECT_MODULES` | every effect module is covered | a list of **import spellings of one thing** | widened for `from effective import ask_llm`, then missed `from effective.react import run_agent` two commits later |
 | `--forged-join` | a key rebuilt by joining rendered terms | one spelling, **not the literal `";".join(...)` its own docstring uses to define the defect** | a reviewer wrote five forging functions; the gate saw one |
-| `scripts/fstring_sweep.py` | no new f-string leaks into `src/` | `(path, statics)`, deduped, so a new f-string in an already-baselined file is free | measured: two new f-strings, one a key mint and one a bare flatten inside the t-string processor, both `0 new, 0 stale` |
+| [`scripts/fstring_sweep.py`](../../scripts/fstring_sweep.py) | no new f-string leaks into `src/` | `(path, statics)`, deduped, so a new f-string in an already-baselined file is free | measured: two new f-strings, one a key mint and one a bare flatten inside the t-string processor, both `0 new, 0 stale` |
 | `just docs-check`, again | a citation that names nothing fails | links; **a backticked `-task` slug is not a link** | `just check` passed with a slug cited from `src/`, the layer that is current by contract |
-| `just docs-check`, a fourth time | a citation resolves | the **path**, never the LINE. `file.py:1513` grades identically to `file.py:1` | **not yet bitten, and the count is the point**: `docs/effective-design.md` carries 12 such citations into `absurd.py`, `layers.py` and `base.py`, all three edited by an open branch. Source moves, the number stays, the gate stays green. Re-verifying line citations is a manual pass |
+| `just docs-check`, a fourth time | a citation resolves | the **path**, never the LINE. `file.py:1513` grades identically to `file.py:1` | **not yet bitten, and the count is the point**: [`docs/effective-design.md`](../../docs/effective-design.md) carries 12 such citations into `absurd.py`, `layers.py` and `base.py`, all three edited by an open branch. Source moves, the number stays, the gate stays green. Re-verifying line citations is a manual pass |
 | `just docs-check`, a third time | a citation resolves | whatever is on **this machine**: `resolves()` asked the filesystem, so a gitignored artifact resolved here and in no clone | CI's `check` job died at `docs-check` before reaching a test, on every run for two months, while the same commit read `0 new, 0 stale` locally |
 
 ## The sub-shape that keeps recurring
@@ -76,7 +76,7 @@ four `whouses.py` defects reported absence: module-level `def`s swept as `$X.nam
 addressed 371 of the 1,522 module-level definitions under `src/effective` and `src/agent`, and a
 PEP 634 keyword pattern was invisible, 159 sites in `src/effective`. A "zero uses, delete it" sweep
 on that enumerator would have systematically proposed deleting the code this repo most prefers to
-write. Fixed by enumerating with ast-grep RULES instead of patterns; `tests/test_whouses.py` pins
+write. Fixed by enumerating with ast-grep RULES instead of patterns; [`tests/test_whouses.py`](../../tests/test_whouses.py) pins
 each.
 
 **And the enumerator's domain was ast-grep's pattern DSL, not ast-grep.** The filed diagnosis said

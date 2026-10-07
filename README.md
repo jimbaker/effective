@@ -57,7 +57,7 @@ def react(goal: str) -> Generator[Request, str]:
 
 `Reason` and `Act` are frozen dataclasses that describe a request. The loop performs no I/O, so
 whatever calls `send` decides what they mean: a test script, a live model, or the tape of an
-earlier run. `examples/react_toy.py` drives it with a script. In Effective, the code that calls
+earlier run. [`examples/react_toy.py`](examples/react_toy.py) drives it with a script. In Effective, the code that calls
 `send` is a handler.
 
 | | a state machine with hooks | a generator |
@@ -119,7 +119,7 @@ def set_temperature(request_id: str, request: str, ceiling: float = 30) -> Effec
 ```
 
 It runs as a task on the embedded SQLite engine, in a temporary file, and prints three lines;
-`docs/first-workflow.md` walks through it line by line:
+[`docs/first-workflow.md`](docs/first-workflow.md) walks through it line by line:
 
 | line | what it shows |
 |---|---|
@@ -158,7 +158,7 @@ result **by the op's name**. It serves an op it has a result for and runs an op 
 A changed prompt or tool argument keeps the name, so it is served the recorded result; a changed
 result type validates that result against the new type, and fails the run if it does not fit.
 A test is where a change in which ops are yielded, under which names, or in what order is caught:
-`wiki/concepts/testing.md`.
+[`wiki/concepts/testing.md`](wiki/concepts/testing.md).
 
 ## The handler and its engines
 
@@ -170,9 +170,9 @@ step of a task, and a wait is the engine's own await. The engine holds the tape:
 | [Absurd](https://github.com/earendil-works/absurd) on Postgres | many workers over one queue (vendored and pinned in `infra/absurd`) |
 | embedded SQLite (`effective.sqlite`) | one process and one file, with no service to run |
 
-The two engines run one conformance suite through the same handler (`tests/_conformance.py`), and
+The two engines run one conformance suite through the same handler ([`tests/_conformance.py`](tests/_conformance.py)), and
 the durable tests crash a run at every op and resume it. Testing a workflow needs neither: two
-in-memory handlers serve canned results and replay a recording (`wiki/concepts/testing.md`).
+in-memory handlers serve canned results and replay a recording ([`wiki/concepts/testing.md`](wiki/concepts/testing.md)).
 
 ## What's in the box
 
@@ -205,21 +205,21 @@ All under `src/effective/` unless noted.
 | `uv run python examples/hooks_as_layers.py` | the `audit` layer above, around the first workflow | nothing |
 | `uv run python examples/first_workflow.py` | the first workflow | nothing |
 | `uv run examples/smol_agent.py <url>` | a whole agent in a few lines, ported from Thomas Schranz's `smol.clj` | an OpenAI-compatible Responses endpoint |
-| `uv run python examples/smol_durable.py` | the same house agent, durable and interruptible, with a judge guarding the door (`examples/smol_door.py`) | nothing: offline without keys; `OPENAI_API_KEY` and `JEV_API_KEY` for a real model and judge |
-| `uv run python -m examples.coder <dir> "<task>"` | a small coding agent whose test suite decides when the work is done (`src/examples/coder/README.md`) | `OPENAI_API_KEY`, Podman |
-| `uv run python -m examples.deep_research "<question>" cell="..."` | a frontier search over web leads, stopped when two hosts agree on every cell (`src/examples/deep_research/README.md`) | `BRAVE_SEARCH_API_KEY`, `JEV_API_KEY`, the `claude` CLI |
+| `uv run python examples/smol_durable.py` | the same house agent, durable and interruptible, with a judge guarding the door ([`examples/smol_door.py`](examples/smol_door.py)) | nothing: offline without keys; `OPENAI_API_KEY` and `JEV_API_KEY` for a real model and judge |
+| `uv run python -m examples.coder <dir> "<task>"` | a small coding agent whose test suite decides when the work is done ([`src/examples/coder/README.md`](src/examples/coder/README.md)) | `OPENAI_API_KEY`, Podman |
+| `uv run python -m examples.deep_research "<question>" cell="..."` | a frontier search over web leads, stopped when two hosts agree on every cell ([`src/examples/deep_research/README.md`](src/examples/deep_research/README.md)) | `BRAVE_SEARCH_API_KEY`, `JEV_API_KEY`, the `claude` CLI |
 | `just tui-demo`, `just dashboard` | the terminal viewer and the run dashboard over a demo run | the `tui` extra for the viewer |
 
 ## Learn more
 
 | read | for |
 |---|---|
-| `docs/intro.md` | the model in ten minutes: generator, handler, tape, layers, combinators |
-| `docs/first-workflow.md` | the first workflow, line by line |
-| `wiki/concepts/testing.md` | testing a workflow: canned results, replay as the determinism oracle, crash at every op |
-| `docs/effective-101.md` | the concepts in depth: the op set, the combinator algebra, the temporal shapes |
+| [`docs/intro.md`](docs/intro.md) | the model in ten minutes: generator, handler, tape, layers, combinators |
+| [`docs/first-workflow.md`](docs/first-workflow.md) | the first workflow, line by line |
+| [`wiki/concepts/testing.md`](wiki/concepts/testing.md) | testing a workflow: canned results, replay as the determinism oracle, crash at every op |
+| [`docs/effective-101.md`](docs/effective-101.md) | the concepts in depth: the op set, the combinator algebra, the temporal shapes |
 | `wiki/index.md` | one concept a page, and the index of architecture decisions |
-| `wiki/references.md` | the work Effective builds on: Recursive Language Models, GEPA, ReAct, Absurd, tdom and more |
+| [`wiki/references.md`](wiki/references.md) | the work Effective builds on: Recursive Language Models, GEPA, ReAct, Absurd, tdom and more |
 
 ## Requirements
 

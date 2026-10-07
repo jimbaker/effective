@@ -1,14 +1,14 @@
 # ADR-0014: RLM combinators: sandboxed code execution as an effect (`run_code`), skill scripts as pinned code, recursion as configuration
 
 - **Date:** 2026-07-03
-- **Status:** Accepted. Built: `run_code` (`src/effective/code.py`), the Monty engine
-  (`src/effective/monty.py`), pinned skill scripts (`Pin.script` in `src/effective/skills.py`),
-  the `hoisted` / `recurse` / `route` / `descend` combinators (`src/effective/combinators.py`),
-  the structural `scoped` frame (`effective.api.scoped`), and `code_act` (`src/effective/compose.py`).
+- **Status:** Accepted. Built: `run_code` ([`src/effective/code.py`](../../src/effective/code.py)), the Monty engine
+  ([`src/effective/monty.py`](../../src/effective/monty.py)), pinned skill scripts (`Pin.script` in [`src/effective/skills.py`](../../src/effective/skills.py)),
+  the `hoisted` / `recurse` / `route` / `descend` combinators ([`src/effective/combinators.py`](../../src/effective/combinators.py)),
+  the structural `scoped` frame (`effective.api.scoped`), and `code_act` ([`src/effective/compose.py`](../../src/effective/compose.py)).
   Unbuilt: a second interpreter (the Pyodide fallback), a container tier, the prewarmed image.
-- **Relates to:** ADR-0002 (the permission cascade that actions flow through), ADR-0008
-  (a fleet run's sealed nondeterminism, the `fork` reservation, `gather` keying), ADR-0009 (the
-  cross-backend conformance pattern), ADR-0016 (the scope-flattening lemma), ADR-0022 (provenance
+- **Relates to:** [ADR-0002](0002-harness-layer-stack.md) (the permission cascade that actions flow through), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)
+  (a fleet run's sealed nondeterminism, the `fork` reservation, `gather` keying), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the
+  cross-backend conformance pattern), [ADR-0016](0016-formalization-and-operational-semantics.md) (the scope-flattening lemma), [ADR-0022](0022-dashboard-projections-the-read-side.md) (provenance
   as a key frame).
 
 ## Context
@@ -121,7 +121,7 @@ ambient authority, microsecond startup, resource limits (`max_duration_secs`, `m
 `max_allocations`, `max_recursion_depth`) passed through `MontyEngine(limits=...)`. `effective.code`
 never imports the engine, so the op contract owns the semantics and the engine owns execution; a
 second engine (a Pyodide subprocess) would join behind the same reserved tool and earn a
-cross-interpreter conformance suite in the shape of ADR-0009's cross-backend one. A
+cross-interpreter conformance suite in the shape of [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)'s cross-backend one. A
 container or microVM tier for hostile code is deferred until untrusted third-party code runs:
 Monty's capability model confines what code can name; it does not isolate a process. Firejail is rejected (a SUID-root
 escalation surface).
@@ -135,11 +135,11 @@ until Monty grows.
 
 `pin.script("summary.py")` resolves a script from the activation `Pin`: content the run recorded,
 never the working tree. A pinned run executes inside `scoped(script.key)`, so the pin is a frame in
-every segment's key and no provenance field rides the payload (ADR-0022). Improvised and pinned
+every segment's key and no provenance field rides the payload ([ADR-0022](0022-dashboard-projections-the-read-side.md)). Improvised and pinned
 code are told apart by selecting on keys. The disclosed skill body documents the skill's
 host-function contract, so a model writing gap code writes against named functions. Improvised
 code that earns its keep is reviewed and committed to the skill's `scripts/`: agentic discovery,
-then a distilled artifact, then deterministic re-application (ADR-0008), applied to code. The
+then a distilled artifact, then deterministic re-application ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)), applied to code. The
 improvised-code rate is a cost the Pareto surface watches shrink.
 
 ### 7. The RLM loop is a configuration
@@ -155,7 +155,7 @@ and `run_code`:
 | `hoisted` | skill activation is value-independent, so it runs once above the fan-out and every branch shares the recorded `Pin` |
 | `descend` | a level-by-level drill that ends on the judge's answer or on budget exhaustion as a durable park (or a `Grantor`) |
 
-`fork` stays reserved for counterfactual marginals (ADR-0008); the data-parallel shape here is
+`fork` stays reserved for counterfactual marginals ([ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)); the data-parallel shape here is
 always `gather`.
 
 ### 8. Scope is a handler-applied frame
@@ -172,8 +172,8 @@ because every key `run_code` mints leads with the `code` tag behind the `step` a
 `scoped(rec:0, run_code("x"))` records `rec:0;step;code:seg,0,x`, while a run named `rec:0;x`
 records `step;code;seg:0;rec:0;x`. `run_code` also refuses a name containing `/`, the path
 delimiter no key atom may hold. The flattening's injectivity on well-formed scopes is
-`flatten_injective_on` in `formal/lean/Effective/Scopes.lean`, with the aliasing foil
-`flattenBad` (ADR-0016); that model spells the separator `/`, and ADR-0016 names the gap.
+`flatten_injective_on` in [`formal/lean/Effective/Scopes.lean`](../../formal/lean/Effective/Scopes.lean), with the aliasing foil
+`flattenBad` ([ADR-0016](0016-formalization-and-operational-semantics.md)); that model spells the separator `/`, and [ADR-0016](0016-formalization-and-operational-semantics.md) names the gap.
 
 The rejected alternative was a scope string interpolated at the call site. It aliases: a scope
 ending in the delimiter, spliced ahead of a model-controlled tool name, composes the same key as
@@ -197,9 +197,9 @@ fails a real workload, and then as an explicit invariant discussion.
 The substrate gains RLM's explorative power as one combinator whose every effect is recorded,
 gated and replayable, and skills gain an executable tier: prose that guides code, scripts that
 are code, and a measured promotion path from the first to the second. The durable cases are pinned
-on both engines in `tests/test_conformance.py`: a clean run, crash at every op with the action
+on both engines in [`tests/test_conformance.py`](../../tests/test_conformance.py): a clean run, crash at every op with the action
 exactly-once, a mid-code human park, an in-sandbox denial, disjoint keys under `gather`, and
-per-branch parks under `gather`. `tests/test_run_code.py` pins the cross-process replay under a
+per-branch parks under `gather`. [`tests/test_run_code.py`](../../tests/test_run_code.py) pins the cross-process replay under a
 differing `PYTHONHASHSEED`. The cost is an alpha dependency held behind an engine seam, and a
 standing tension, structure taxing exploration, that the Pareto surface measures.
 

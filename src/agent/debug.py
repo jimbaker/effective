@@ -100,7 +100,7 @@ class Workspace:
     def apply(self, path: str, old: str, new: str) -> ApplyResult:
         content = self.files.get(path, "")
         if content.count(old) != 1:  # stale snapshot: passed the gate, fails the apply
-            return ApplyResult(ok=False, detail="anchor no longer unique at apply time")
+            return ApplyResult(ok=False, detail="anchor not unique at apply time")
         self.files[path] = content.replace(old, new, 1)
         return ApplyResult(ok=True, detail=f"applied to {path}")
 

@@ -4,8 +4,8 @@
 - **Status:** Accepted. `pyproject.toml` registers five role markers under `--strict-markers`, a
   test with no role is a `unit` test, and every other role is declared. The set is open: a new
   role is expected, with BDD a named candidate.
-- **Relates to:** ADR-0016 (the three-tier proof partition; this names the test tier's internal
-  structure and adds a second Lean-to-tests edge), ADR-0009 (the cross-backend conformance suite,
+- **Relates to:** [ADR-0016](0016-formalization-and-operational-semantics.md) (the three-tier proof partition; this names the test tier's internal
+  structure and adds a second Lean-to-tests edge), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the cross-backend conformance suite,
   the `conformance` role's exemplar).
 - **Context:** an adversarial test caught a defect in an approval gate that every confirmatory test
   had passed. It could not have been written as coverage, and the rules the repo applied to tests
@@ -28,7 +28,7 @@ each statable correctly.
 
 ### 2a. "Minimize overlap" is a unit-role rule
 
-It is right for unit tests and wrong for `tests/test_composition.py` and `tests/_conformance.py`,
+It is right for unit tests and wrong for [`tests/test_composition.py`](../../tests/test_composition.py) and [`tests/_conformance.py`](../../tests/_conformance.py),
 whose overlap is the product: one law over every ordered pair of combinator holes, one workflow over two
 engines. An overlap query across all roles flags the strongest suites in the repo as redundant.
 
@@ -46,7 +46,7 @@ The motivating case: the `human` permission tier named its park after the gated 
 occurrences of one tool in a run parked on one name and a single approval settled both. Every
 "does the tier park?" test passed. Only "can approving \$5 authorize \$5,000,000?" failed. The
 name now carries a per-run occurrence suffix, and
-`test_one_approval_does_not_authorize_a_second_charge_of_the_same_tool` (`tests/test_permission.py`)
+`test_one_approval_does_not_authorize_a_second_charge_of_the_same_tool` ([`tests/test_permission.py`](../../tests/test_permission.py))
 pins it.
 
 ## 3. The five roles
@@ -71,26 +71,26 @@ indistinguishable from a passing one.
 
 | file | role |
 |---|---|
-| `tests/test_decide_conformance.py`, `tests/test_govern_conformance.py`, `tests/test_enforce_measured_conformance.py` | conformance: a Lean model's rows over every interpreter (§5) |
-| `tests/test_conformance.py` with `tests/_conformance.py` | conformance: one workflow set, two engines (ADR-0009) |
-| `tests/test_composition.py` with `tests/_composition.py` | conformance: a table over every ordered pair of combinator holes |
-| `tests/test_funnel_triage_example.py` | journey: the workflow in `tests/_funnel.py` runs five combinators along two arms, the deepest composition the suite drives |
-| `tests/test_cart_checkout_example.py` | journey, over the canonical record: a ledger row per line item at one program point |
-| `tests/test_mcts_search_example.py` | journey, over a workflow whose control flow is decided by accumulated recorded values |
-| `tests/test_coding_machine_example.py` | journey, over a workflow with real backedges, so its projection is a state diagram |
-| `tests/test_projection.py` | spine: the projections against the workflows above, since a quotient means something only over tapes a workflow produced |
-| `tests/test_op_key_injectivity.py` | adversarial: injectivity attacks |
-| `tests/test_permission.py` (the approval attack) | adversarial |
+| [`tests/test_decide_conformance.py`](../../tests/test_decide_conformance.py), [`tests/test_govern_conformance.py`](../../tests/test_govern_conformance.py), [`tests/test_enforce_measured_conformance.py`](../../tests/test_enforce_measured_conformance.py) | conformance: a Lean model's rows over every interpreter (§5) |
+| [`tests/test_conformance.py`](../../tests/test_conformance.py) with [`tests/_conformance.py`](../../tests/_conformance.py) | conformance: one workflow set, two engines ([ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)) |
+| [`tests/test_composition.py`](../../tests/test_composition.py) with [`tests/_composition.py`](../../tests/_composition.py) | conformance: a table over every ordered pair of combinator holes |
+| [`tests/test_funnel_triage_example.py`](../../tests/test_funnel_triage_example.py) | journey: the workflow in [`tests/_funnel.py`](../../tests/_funnel.py) runs five combinators along two arms, the deepest composition the suite drives |
+| [`tests/test_cart_checkout_example.py`](../../tests/test_cart_checkout_example.py) | journey, over the canonical record: a ledger row per line item at one program point |
+| [`tests/test_mcts_search_example.py`](../../tests/test_mcts_search_example.py) | journey, over a workflow whose control flow is decided by accumulated recorded values |
+| [`tests/test_coding_machine_example.py`](../../tests/test_coding_machine_example.py) | journey, over a workflow with real backedges, so its projection is a state diagram |
+| [`tests/test_projection.py`](../../tests/test_projection.py) | spine: the projections against the workflows above, since a quotient means something only over tapes a workflow produced |
+| [`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py) | adversarial: injectivity attacks |
+| [`tests/test_permission.py`](../../tests/test_permission.py) (the approval attack) | adversarial |
 
 Each declares its role with a marker. A workflow a test drives lives under `tests/`, as
-`tests/_funnel.py` does, so the determinism-boundary lint (whose `WORKFLOW_ROLE_SRCS` is
+[`tests/_funnel.py`](../../tests/_funnel.py) does, so the determinism-boundary lint (whose `WORKFLOW_ROLE_SRCS` is
 path-keyed) and `ty` both reach it.
 
 ### 4a. Sampled properties
 
 A sampled property runs one workflow or combinator over generated cases and judges each by
-invariants, where a journey asserts one realistic path. `tests/test_funnel_sweep.py` (over the
-funnel) and `tests/test_descend_sweep.py` (over `descend`'s budget, grant and depth space) are the
+invariants, where a journey asserts one realistic path. [`tests/test_funnel_sweep.py`](../../tests/test_funnel_sweep.py) (over the
+funnel) and [`tests/test_descend_sweep.py`](../../tests/test_descend_sweep.py) (over `descend`'s budget, grant and depth space) are the
 exemplars. Two rules keep a sweep from being a slower journey test:
 
 | rule | why |
@@ -104,17 +104,17 @@ generator change that stops producing one fails there.
 
 A green sweep is evidence about its seeds until something shows they discriminate, and the mutation
 round is that something. Run the mutations against the generated cases as well as the scripted
-ones: on `tests/test_descend_sweep.py` the same mutations redden several times as many generated
+ones: on [`tests/test_descend_sweep.py`](../../tests/test_descend_sweep.py) the same mutations redden several times as many generated
 cases as scripted ones, and that ratio is what says the sampling does work.
 
-`tests/test_key_sweep.py` applies the same discipline to a reporting tool: `scripts/key_sweep.py`
+[`tests/test_key_sweep.py`](../../tests/test_key_sweep.py) applies the same discipline to a reporting tool: [`scripts/key_sweep.py`](../../scripts/key_sweep.py)
 had two rules that were wrong in ways no run of it could show, so each case there records the
 mutation that reddens it.
 
 ## 5. The second Lean-to-tests edge: the model as a row generator
 
-ADR-0016 partitions assurance into three tiers, tests the third. Where a proof tier stops, it hands
-the next tier a named assumption (`(A-serialize)`, `(A-canon)` in `formal/lean/Effective/Keys.lean`),
+[ADR-0016](0016-formalization-and-operational-semantics.md) partitions assurance into three tiers, tests the third. Where a proof tier stops, it hands
+the next tier a named assumption (`(A-serialize)`, `(A-canon)` in [`formal/lean/Effective/Keys.lean`](../../formal/lean/Effective/Keys.lean)),
 which a parameter grid discharges by sampling. A second, stronger edge is the `conformance` role's
 definition:
 
@@ -124,7 +124,7 @@ definition:
 3. `just formal-vectors` writes `formal/{enforce,decide,govern}_vectors.json`, which are committed;
 4. Python parametrizes every live interpreter over the committed rows.
 
-ADR-0016's edge is a named assumption plus adversarial sampling; this one is machine-derived rows.
+[ADR-0016](0016-formalization-and-operational-semantics.md)'s edge is a named assumption plus adversarial sampling; this one is machine-derived rows.
 Both are live.
 
 Two rules travel with it:
@@ -141,12 +141,12 @@ re-running `just formal-vectors`.
 ## 6. Mechanics
 
 Markers are registered in `pyproject.toml`, and `--strict-markers` refuses an unregistered one.
-A test that declares no role is a `unit` test: a collection hook in `tests/conftest.py` marks it,
+A test that declares no role is a `unit` test: a collection hook in [`tests/conftest.py`](../../tests/conftest.py) marks it,
 so `-m unit` selects every test whose pass proves one seam in isolation, and a test that proves
 more declares `spine`, `journey`, `adversarial` or `conformance`. The default is the common case,
 and the declaration marks the exception.
 
-`just cov-contexts` (`scripts/cov_contexts.py`, under `COVERAGE_CORE=pytrace`) records which test
+`just cov-contexts` ([`scripts/cov_contexts.py`](../../scripts/cov_contexts.py), under `COVERAGE_CORE=pytrace`) records which test
 ran each line, so the unit-role overlap rule is queryable. Scope the query by marker, or it indicts
 the conformance suites it should exempt.
 
@@ -166,7 +166,7 @@ of its own:
 | **convenience** | delegates to a primitive, adding no interpretive power | a primitive: the deliverable; another convenience: waste | a body that is one `yield from` of a primitive |
 | **minter** | a pure function whose output is an identity | two minters that agree on every input are one minter | the key template, in `build/key-registry.json` |
 
-`govern` and `serve` are the op-seam primitives (ADR-0019); `ask_llm` and `call_tool` are
+`govern` and `serve` are the op-seam primitives ([ADR-0019](0019-govern-serve-composition-combinators.md)); `ask_llm` and `call_tool` are
 conveniences over `step`. A minter exists so a namespace is composed in one place a reader can
 grep, and so a test asks for the name rather than spelling its bytes. A test parameterized on a
 different minter from production measures the copy; `react.tool_key` delegates to
@@ -180,4 +180,4 @@ measured about three in four correct, and a proposal set that wrong must not gat
 - The roles are an open set. Adding one is expected and needs no schema change.
 - The mutation craft is general; this ADR assigns the obligation to a role.
 - The unit-role overlap rule is statable, scoped by marker.
-- ADR-0016 stands: this adds a second edge to its Lean-to-tests boundary beside the first.
+- [ADR-0016](0016-formalization-and-operational-semantics.md) stands: this adds a second edge to its Lean-to-tests boundary beside the first.

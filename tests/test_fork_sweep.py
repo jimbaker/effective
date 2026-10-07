@@ -51,8 +51,8 @@ def new_message_id() -> str:
 
     On Absurd events are queue-global and an answer is permanent (exactly one NULL→payload
     transition per name, ever: `infra/absurd/absurd.sql`), so a message id reused across runs
-    lets a stale `review:` answer complete a fresh run *before it ever parks*. Measured on the
-    live engine 2026-07-25: with a module-constant message id, a second base run went straight to
+    lets a stale `review:` answer complete a fresh run *before it ever parks*. With a
+    module-constant message id, a second base run on the live engine goes straight to
     `completed` with the first run's decision, having never registered a wake. A test that runs
     only on SQLite cannot see this.
 
@@ -64,7 +64,7 @@ def new_message_id() -> str:
     the durable one — a defect visible on exactly one engine, which is the class the repo's
     "a green SQLite pass is not a port" rule exists for.
 
-    And it goes SILENTLY, which is the sharp half. Measured 2026-08-06:
+    And it goes SILENTLY, which is the sharp half:
     `json.dumps({"message_id": Segment("m1")})` is `{"message_id": "m1"}` and reads back a plain
     `str`: a `Segment` IS a `str`, so the encoder has nothing to object to. A `UUID` in the
     same payload raises `Object of type UUID is not JSON serializable`, an exit that is explicit
@@ -81,7 +81,7 @@ def decision_wf(message_id: str):
     rule a forkable workflow obeys. Every name authored here is FORK-STABLE: a child re-runs this
     same generator over the BASE's message id, so its step keys match the seed it was handed and
     its await matches the one `fork_point` the driver passed. Scope either on the run id instead
-    and the fork is refused — both arms measured 2026-07-25 on a real fork:
+    and the fork is refused:
 
     - run-scoped ledger ids → `SeedBoundaryError: step 'ledger;r-fork:extracted' ran LIVE during
       the Seeding phase` (the child's key is not in the base's seed);

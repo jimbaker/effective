@@ -53,24 +53,25 @@ models cite none, and state their invariants in their own words. Numbers with no
 
 | page | what it holds |
 |---|---|
-| [[concepts/architecture]] | where each subsystem lives, what to open first, and the dependency direction |
-| [[concepts/machine]] | the EFSM shape, its two refusals, and why durable suspend is replay |
-| [[concepts/tapes]] | three tapes joined by one address, two disciplines, and where the order obligations land |
-| [[concepts/graph]] | three projections that are two relational operations, over a run tape |
-| [[concepts/flatten]] | why a `Template` has no `__str__`, where each grammar's processor lives, and the one position an f-string is still right |
-| [[concepts/python-314]] | read 3.14 syntax as a feature; verify before "fixing" it |
-| [[concepts/judgment]] | the `Judge` op and its interpreters: the template as the request, what the probes measured, retrieval and replay |
-| [[concepts/sources]] | a fact carries the source that asserted it: the tiers, a source as a tool, authority by corroboration, reuse by content |
-| [[concepts/recursion-shapes]] | classic shapes as semantic probes, classified by the topology they add and the error kinds they need |
-| [[concepts/watchers]] | supervisor, watchdog, monitor and deadline, split by what each one watches |
-| [[concepts/bounded-wait]] | what decides a wait that names a deadline: the ordered arms, the wake's lifetime, the slot, and where it is refused |
-| [[concepts/forced-schedules]] | what a schedule instrument can decide and what it cannot, and why a race is outside it |
-| [[concepts/witness-quotient]] | the admission witness as a quotient of what a checkpoint keeps, its one runtime obligation, and the classes it merges |
-| [[concepts/enforcer-domain]] | a gate is bounded by what it scans, with worked cases and what a zero really means |
-| [[concepts/testing]] | testing a workflow: an instrument per question, replay as the strict judge, why production resume is lenient, the test roles |
-| [[concepts/evidence]] | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
+| [concepts/architecture](concepts/architecture.md) | where each subsystem lives, what to open first, and the dependency direction |
+| [concepts/machine](concepts/machine.md) | the EFSM shape, its two refusals, and why durable suspend is replay |
+| [concepts/tapes](concepts/tapes.md) | three tapes joined by one address, two disciplines, and where the order obligations land |
+| [concepts/graph](concepts/graph.md) | three projections that are two relational operations, over a run tape |
+| [concepts/flatten](concepts/flatten.md) | why a `Template` has no `__str__`, where each grammar's processor lives, and the one position an f-string is still right |
+| [concepts/python-314](concepts/python-314.md) | read 3.14 syntax as a feature; verify before "fixing" it |
+| [concepts/judgment](concepts/judgment.md) | the `Judge` op and its interpreters: the template as the request, what the probes measured, retrieval and replay |
+| [concepts/sources](concepts/sources.md) | a fact carries the source that asserted it: the tiers, a source as a tool, authority by corroboration, reuse by content |
+| [concepts/recursion-shapes](concepts/recursion-shapes.md) | classic shapes as semantic probes, classified by the topology they add and the error kinds they need |
+| [concepts/building-with-effective](concepts/building-with-effective.md) | what to build: real applications mapped onto the shapes, runnable startup workflows, and the boundaries |
+| [concepts/watchers](concepts/watchers.md) | supervisor, watchdog, monitor and deadline, split by what each one watches |
+| [concepts/bounded-wait](concepts/bounded-wait.md) | what decides a wait that names a deadline: the ordered arms, the wake's lifetime, the slot, and where it is refused |
+| [concepts/forced-schedules](concepts/forced-schedules.md) | what a schedule instrument can decide and what it cannot, and why a race is outside it |
+| [concepts/witness-quotient](concepts/witness-quotient.md) | the admission witness as a quotient of what a checkpoint keeps, its one runtime obligation, and the classes it merges |
+| [concepts/enforcer-domain](concepts/enforcer-domain.md) | a gate is bounded by what it scans, with worked cases and what a zero really means |
+| [concepts/testing](concepts/testing.md) | testing a workflow: an instrument per question, replay as the strict judge, why production resume is lenient, the test roles |
+| [concepts/evidence](concepts/evidence.md) | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
 
 ## References
 
-[[references]]: work this project builds on, follows or ships, with full citations, and background
+[references](references.md): work this project builds on, follows or ships, with full citations, and background
 reading. Source code names that work by a bare proper noun; the page resolves it.
