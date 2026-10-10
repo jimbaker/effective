@@ -36,15 +36,21 @@ run() {
 
 run_check() { run "$@"; }
 
-# A check that must FAIL: `quint verify` exits non-zero on a violation, so a ZERO exit means
-# the counterexample vanished — the guard rotted, and that is the loud failure.
+# A check that must FAIL with a counterexample. A zero exit means the counterexample vanished,
+# and a non-zero exit without one means quint never checked the property.
 run_expect_violation() {
     local file="$1" args="$2" what="$3"
     echo "==> [expect violation] $file $args — $what"
+    local out
     # shellcheck disable=SC2086
-    if podman run --rm --network=none -v ./formal/quint:/spec:ro,Z --tmpfs /work:rw,size=512m \
-           "$IMG" verify "$file" $args >/dev/null 2>&1; then
+    if out=$(podman run --rm --network=none -v ./formal/quint:/spec:ro,Z --tmpfs /work:rw,size=512m \
+           "$IMG" verify "$file" $args 2>&1); then
         echo "    GUARD FAILED: $what, but the check PASSED" >&2
+        exit 1
+    fi
+    if ! grep -qF "$FORMAL_COUNTEREXAMPLE" <<< "$out"; then
+        echo "    GUARD FAILED: $what, but quint found no counterexample:" >&2
+        tail -3 <<< "$out" >&2
         exit 1
     fi
     echo "    violated, as it must"
@@ -60,13 +66,19 @@ run_tooth() {
     chmod 755 "$dir"
     sed "s/$from/$to/" "formal/quint/$file" > "$dir/bug_$file"
     chmod 644 "$dir/bug_$file"
+    local out
     # shellcheck disable=SC2086
-    if podman run --rm --network=none -v "$dir":/spec:ro,Z --tmpfs /work:rw,size=512m \
-           "$IMG" verify "bug_$file" $args >/dev/null 2>&1; then
+    if out=$(podman run --rm --network=none -v "$dir":/spec:ro,Z --tmpfs /work:rw,size=512m \
+           "$IMG" verify "bug_$file" $args 2>&1); then
         echo "    TOOTH FAILED: $what, but the check PASSED" >&2
         rm -rf "$dir"; exit 1
     fi
     rm -rf "$dir"
+    if ! grep -qF "$FORMAL_COUNTEREXAMPLE" <<< "$out"; then
+        echo "    TOOTH FAILED: $what, but quint found no counterexample:" >&2
+        tail -3 <<< "$out" >&2
+        exit 1
+    fi
     echo "    broke, as it must"
 }
 

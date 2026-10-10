@@ -12,7 +12,7 @@ endings record says: two `stopped` and no call. A race reads its deadline before
 branch, so nothing of that level's work runs.
 
 **The clock is held and the run moves it, so no row here sleeps or waits out a margin.** Each
-level stamps `handlers.base.race_clock` at its own depth as its first op, which is this suite's
+level stamps `handlers.base.race_time` at its own depth as its first op, which is this suite's
 model of work taking time, and the level's stamp is what its race measures the bound against. The
 cut lands at `CUT_AT` because that is where the stamps reach the bound, not because a host was
 slow.
@@ -253,7 +253,7 @@ def held(monkeypatch):
     """The clock the races read, replaced for the whole row: `agree` and `sweep` run many runs and
     each of them stamps its own levels."""
     clock = Held()
-    monkeypatch.setattr(base, "race_clock", clock)
+    monkeypatch.setattr(base, "race_time", clock)
     return clock
 
 

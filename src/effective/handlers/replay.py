@@ -12,6 +12,7 @@ op are the same string.
 """
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import Any, assert_never
 
 from effective.api import Effect
@@ -26,6 +27,7 @@ from effective.handlers.base import (
     ending_of,
     placed_key,
     placing,
+    race_errors,
     settled,
     transient_errors,
     walk_run,
@@ -71,6 +73,19 @@ def _named(op: Any, prefix: str) -> str:
         return repr(placed_key(op).prefixed(prefix))
     except TypeError:
         return f"<{type(op).__name__}, no placed key>"
+
+
+def _settled_by(slots: list[Any], recorded: list[dict[str, Any]] | None) -> list[Any]:
+    """The slots, each loser the recorded endings settle as `raised` held as an ending: the
+    recording answered past its error, so replaying it must too."""
+    if recorded is None:
+        return slots
+    return [
+        replace(slot, before_choice=True)
+        if isinstance(slot, BranchRaised) and recorded[i]["ending"] == "raised"
+        else slot
+        for i, slot in enumerate(slots)
+    ]
 
 
 class ReplayHandler:
@@ -309,12 +324,12 @@ class ReplayHandler:
             for i, branch in enumerate(op.branches)
         ]
         if choice is None:
-            if raised := [slot.error for slot in slots if settled(slot) == "raised"]:
-                return delivered(ExceptionGroup("race branches raised", raised)), None
             if stopping:
-                raise Stopping
+                raise Stopping  # whatever its branches raised, as the recorder stopped it
+            if (raised := race_errors(slots)) is not None:
+                return delivered(raised), None
             raise ReplayMismatch(f"race {r} under {prefix!r} has no recorded choice")
-        if (transient := transient_errors(slots)) is not None:
+        if (transient := transient_errors(_settled_by(slots, recorded), choice)) is not None:
             return delivered(transient), None
         values = {i: slot for i, slot in enumerate(slots) if settled(slot) == "won"}
         if (endings := self._entry(race_endings(r).prefixed(prefix))) is None:

@@ -87,7 +87,7 @@ from effective.domain import (
     SpawnResult,
 )
 from effective.engines.absurd import _adapt_ctx, sdk_signals
-from effective.govern import BudgetRefused, all_refusals, delivered
+from effective.govern import REFUSALS, BudgetRefused, all_refusals, delivered
 from effective.handlers.admission import (
     Cursor,
     Halt,
@@ -109,6 +109,7 @@ from effective.handlers.base import (
     Stop,
     Stopping,
     TaskContext,
+    Unrecorded,
     _walk_run,
     artifact_id,
     barrier_errors,
@@ -172,16 +173,19 @@ from effective.ops import (
     Gather,
     LedgerRow,
     Race,
+    RecordedValueRejected,
     Respawn,
     Scoped,
     SleepUntil,
     Step,
     StoreArtifact,
+    Unretryable,
     WaitOutcome,
     WorkflowOp,
     Writer,
     awaits_an_absolute_name,
     leaves,
+    mark_rederived,
     refuse_a_bounded_wait_in_a_branch,
     refuse_a_park_in_a_race_branch,
     refuse_absolute_await_in_branch,
@@ -191,6 +195,7 @@ from effective.ops import (
 )
 from effective.permission import Refused
 from effective.steering import SteeringCtx
+from effective.telemetry import Sink, event
 from effective.viewing import ViewingCtx
 
 FORK = AuthorityTag("fork", scope=Scope.QUALIFIED)
@@ -498,18 +503,65 @@ class BranchParked:
 
 
 class GatherWakeRace(Exception):
-    """Every parked branch's wake condition was already satisfied at the re-arm —
-    there is nothing left to park on, and a parked branch cannot be re-run
-    in-process (the occurrence counters would shift its committed checkpoint
-    names). On a ctx bearing the optional ``repark`` capability (both production
-    adapters) the race re-queues via the engine's *park* path instead — no
-    attempt burned — and this exception is not raised on any known path. It
-    remains the loud FALLBACK for a peek-capable ctx without ``repark``, and for
-    the stale-checkpoint edge where ``repark`` returns without parking: the engine's
-    ordinary retry then re-queues the task and replay resolves every branch from
-    the durable record. On that fallback path only, the burn caveat applies — a
-    ``max_attempts=1`` task racing here fails PERMANENTLY despite being healthy,
-    so give such tasks a retry budget (the default 3 is fine)."""
+    """Every parked branch's wake condition was already satisfied at the re-arm, so nothing is
+    left to park on, and a parked branch cannot be re-run in-process: the occurrence counters
+    would shift its committed checkpoint names.
+
+    On a ctx with the optional ``repark`` capability (both production adapters) the race
+    re-queues through the engine's park path and spends no attempt. This is the fallback for a
+    peek-capable ctx without ``repark``, and for the stale-checkpoint edge where ``repark``
+    returns without parking. The re-arm read events the round's peeks did not, which the record
+    does not hold, so the engine's retry runs and replays every branch from the record. That
+    retry spends an attempt, so a task with ``max_attempts=1`` that meets this fails although
+    healthy."""
+
+
+class _StoreCalls:
+    """A ctx whose calls report an error they raise, other than a refusal or the handler's own
+    signal: the store failing is an outcome no record holds, and a retry can find it working.
+
+    A call reports no error a callable it was handed raised, such as a step's thunk: that error is
+    the domain's, and it is the call's own, whichever branch raised the same instance elsewhere."""
+
+    def __init__(self, ctx: Any, failed: Callable[[Exception], None]) -> None:
+        self._ctx = ctx
+        self._failed = failed
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            attr = getattr(self._ctx, name)
+        except AttributeError:
+            raise  # an optional capability the ctx lacks
+        except Exception as raised:  # a property that reads the store
+            self._failed(raised)
+            raise
+        if not callable(attr):
+            return attr
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            handed: list[BaseException] = []
+            watched = [_watched(arg, handed) if callable(arg) else arg for arg in args]
+            try:
+                return attr(*watched, **kwargs)
+            except Exception as raised:
+                if not any(seen is raised for seen in handed):
+                    self._failed(raised)
+                raise
+
+        return call
+
+
+def _watched(thunk: Callable[..., Any], raised: list[BaseException]) -> Callable[..., Any]:
+    """`thunk`, noting in `raised` what it raises."""
+
+    def watched(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return thunk(*args, **kwargs)
+        except BaseException as error:
+            raised.append(error)
+            raise
+
+    return watched
 
 
 def _supports_peek(ctx: Any) -> bool:
@@ -531,7 +583,7 @@ def _supports_peek(ctx: Any) -> bool:
     added.** At five names the list is itself the hazard: the structural form is
     ``while (inner := getattr(ctx, "_ctx", None)) is not None``, which every wrapper here
     already satisfies."""
-    while isinstance(ctx, (_PrefixedCtx, RenamedAwaitCtx, SeedingCtx, SteeringCtx, ViewingCtx)):
+    while isinstance(ctx, _WRAPPERS):
         ctx = ctx._ctx
     return callable(getattr(ctx, "peek_event", None))
 
@@ -544,23 +596,23 @@ def _supports_await_until(ctx: Any) -> bool:
     SQLite answers this today and the Absurd SDK ctx does not, so a caller that needs it asks
     here and refuses legibly rather than meeting an `AttributeError` from inside a branch.
     """
-    while isinstance(ctx, (_PrefixedCtx, RenamedAwaitCtx, SeedingCtx, SteeringCtx, ViewingCtx)):
+    while isinstance(ctx, _WRAPPERS):
         ctx = ctx._ctx
     return callable(getattr(ctx, "await_until", None))
 
 
-def _attempt_of(ctx: Any) -> int | None:
+def _attempt_of(ctx: Any) -> Unrecorded[int | None]:
     """The attempt `ctx` runs as, or `None` when it cannot tell, which a viewer never can: it
     replays another attempt's tape."""
     node = ctx
     while node is not None:
         if isinstance(node, ViewingCtx):
-            return None
+            return Unrecorded(None)
         node = vars(node).get("_ctx") if hasattr(node, "__dict__") else None
     try:
-        return ctx.attempt.number
+        return Unrecorded(ctx.attempt.number)
     except AttributeError, LookupError, NotImplementedError:
-        return None
+        return Unrecorded(None)
 
 
 def _diverged(slots: list[Any]) -> ExceptionGroup | None:
@@ -580,7 +632,7 @@ def _race_capable(ctx: Any) -> Any:
     checkpoint surface; a legible refusal otherwise. Each wrapper states its own answer to both
     (`_PrefixedCtx` frames them, a fork refuses them), so this probes only the engine."""
     base = ctx
-    while isinstance(base, (_PrefixedCtx, RenamedAwaitCtx, SeedingCtx, SteeringCtx, ViewingCtx)):
+    while isinstance(base, _WRAPPERS):
         base = base._ctx
     if not all(callable(getattr(base, name, None)) for name in ("peek_step", "settle")):
         raise NotImplementedError(
@@ -589,6 +641,111 @@ def _race_capable(ctx: Any) -> Any:
             "`ConcurrentAbsurdCtx`"
         )
     return ctx
+
+
+def _mark(raised: BaseException, replays: bool) -> None:
+    """Mark each leaf of `raised` that is not a refusal with whether a retry raises it again."""
+    for leaf in leaves(raised):
+        if not isinstance(leaf, REFUSALS):
+            mark_rederived(leaf, replays)
+
+
+def _mark_replayed_losers(children: list[DurableHandler], slots: list[Any]) -> None:
+    """Set on each loser's slot whether its branch would raise its error again on a retry; a loser
+    whose error replays ends `Raised`."""
+    for i, (child, slot) in enumerate(zip(children, slots, strict=True)):
+        if isinstance(slot, BranchRaised):
+            slots[i] = replace(slot, replays=child._replays(slot.error))
+
+
+class _Unreplayed:
+    """What a handler and the branches under it did on this attempt that a retry might not do the
+    same way.
+
+    | count  | each one is                                                                |
+    |--------|----------------------------------------------------------------------------|
+    | `ran`  | a domain call that returned or raised, or a value recorded for the first   |
+    |        | time; a call the domain refused, alone or in a group, is a refusal again   |
+    | `read` | a value the substrate read that the record does not hold: an error a store |
+    |        | call raised, a race's clock before its deadline, or a gather's re-arm that |
+    |        | found events its peeks did not                                             |
+
+    The workflow, its layers and its schemas are deterministic in what they are handed, so with
+    both counts at zero the attempt is a function of the record. All it wrote there is decisions a
+    retry reads back alike, a race's choice and endings and a refusal, so a retry runs it again to
+    the same end. Branches run on their own threads, so each count is taken under its lock and
+    climbs to every enclosing handler's.
+
+    The attempt's root count also keeps which counts each store error reached, so nothing is
+    written on an error a race may witness, and a new attempt starts with none."""
+
+    def __init__(self, enclosing: _Unreplayed | None = None) -> None:
+        self._lock = threading.Lock()
+        self._enclosing = enclosing
+        self.ran = 0
+        self.read = 0
+        self._reached: list[tuple[BaseException, set[_Unreplayed]]] = []
+
+    @property
+    def root(self) -> _Unreplayed:
+        """The count of the attempt this one belongs to: the task's handler's."""
+        here = self
+        while here._enclosing is not None:
+            here = here._enclosing
+        return here
+
+    @property
+    def replays(self) -> bool:
+        """Whether a retry runs this attempt again to the same end."""
+        return self.ran == 0 and self.read == 0
+
+    def counting(self, thunk: Callable[[], Any]) -> Callable[[], Any]:
+        """`thunk`, counted when it ends other than refused: an engine runs it only on a miss."""
+
+        def counted() -> Any:
+            try:
+                value = thunk()
+            except BaseException as raised:
+                if not all_refusals(raised):
+                    self._add(ran=1)
+                raise
+            self._add(ran=1)
+            return value
+
+        return counted
+
+    def unrecorded(self, raised: BaseException | None = None) -> None:
+        """Count a value handed to the workflow that the record does not hold.
+
+        Given the store error that is that value, count it here and in each enclosing count it
+        has not reached: a branch's ctx stacks its handler's store wrapper over its parent's, and
+        an error can cross both on its way out."""
+        root, chain = self.root, []
+        here: _Unreplayed | None = self
+        while here is not None:
+            chain.append(here)
+            here = here._enclosing
+        if raised is None:
+            fresh = chain
+        else:
+            with root._lock:
+                reached = next((counts for seen, counts in root._reached if seen is raised), None)
+                if reached is None:
+                    reached = set()
+                    root._reached.append((raised, reached))
+                fresh = [count for count in chain if count not in reached]
+                reached.update(fresh)
+        for count in fresh:
+            with count._lock:
+                count.read += 1
+
+    def _add(self, *, ran: int = 0, read: int = 0) -> None:
+        here: _Unreplayed | None = self
+        while here is not None:
+            with here._lock:
+                here.ran += ran
+                here.read += read
+            here = here._enclosing
 
 
 class _PrefixedCtx:
@@ -983,6 +1140,10 @@ class SeedingCtx:
         return getattr(self._ctx, attr)
 
 
+_WRAPPERS = (_StoreCalls, _PrefixedCtx, RenamedAwaitCtx, SeedingCtx, SteeringCtx, ViewingCtx)
+"""Every ctx wrapper the handler stacks over an engine's ctx, each holding the next as `_ctx`."""
+
+
 class DomainInterpreter(Protocol):
     """Executes a DomainOp for real, returning a typed result (e.g. a pydantic model)."""
 
@@ -1033,10 +1194,16 @@ def _dump(value: Any) -> Any:
 
 
 def _load(schema: type, raw: Any) -> Any:
-    """Schema-typed: validate a checkpointed value back into the op's type."""
+    """Schema-typed: validate a recorded value back into the op's type. A value the schema
+    rejects is `RecordedValueRejected`, since every later load reads the same record."""
     if schema is object or raw is None:
         return raw
-    return _adapter(schema).validate_python(raw)
+    try:
+        return _adapter(schema).validate_python(raw)
+    except ValidationError as rejected:
+        raise RecordedValueRejected(f"a recorded value does not fit its schema: {rejected}") from (
+            rejected
+        )
 
 
 def _load_step(schema: type, raw: Any) -> Any:
@@ -1127,10 +1294,13 @@ class DurableHandler:
         budget: MeasuredBudget | None = None,
         params: Mapping[str, Any] | None = None,
         stop: Stop = NO_RACE,
+        sink: Sink | None = None,
     ) -> None:
-        self.ctx = _adapt_ctx(ctx)
         # What the engine raises to end the walk at an op, which no layer sees.
         self._signals = (EngineSignal, *sdk_signals())
+        self.ctx: Any = _StoreCalls(_adapt_ctx(ctx), self._store_failed)
+        # Where the handler's own spans go: what the run settled that its result does not carry.
+        self._sink = sink
         # The ctx this handler was CONSTRUCTED at — `self.ctx` before any `scoped(...)` pushed a
         # frame onto it. `_run_scoped` swaps `self.ctx` and restores it; this never moves.
         #
@@ -1240,6 +1410,7 @@ class DurableHandler:
         self._domain_refusals: list[BaseException] = []
         self._inputs: list[Any | None] = []
         self._children: list[DurableHandler] = []
+        self._unreplayed = _Unreplayed()
 
     @property
     def domain(self) -> DomainInterpreter:
@@ -1302,7 +1473,31 @@ class DurableHandler:
         child answers its parent only when its walk finished."""
         spend = (lambda: self._meter) if meters(self._contract, self.domain) else None
         with _walk_run(spend):
-            return self._run(program)
+            try:
+                return self._run(program)
+            except Exception as raised:
+                _mark(raised, self._replays(raised))
+                raise
+
+    def _replays(self, raised: BaseException) -> bool:
+        """Whether a retry of this frame raises `raised` again: it ran nothing fresh and read
+        nothing the record does not hold, and no engine signal is in it."""
+        signaled = any(isinstance(leaf, self._signals) for leaf in leaves(raised))
+        return self._unreplayed.replays and not signaled
+
+    def _store_failed(self, raised: Exception) -> None:
+        """Count an error a store call raised as a value the record does not hold.
+
+        | the error                                   | counted |
+        |---------------------------------------------|---------|
+        | an `Unretryable` one, which a retry raises  | no      |
+        | `Stopping`, `RefusalDiverged`, an engine    | no      |
+        | signal: the handler's own control flow      |         |
+        | any other                                   | yes     |
+        """
+        ours = isinstance(raised, (Stopping, RefusalDiverged, Unretryable, *self._signals))
+        if not ours:
+            self._unreplayed.unrecorded(raised)
 
     def _respawn(self, op: Respawn) -> Never:
         """The generation boundary: spawn *n+1*, record it, and END this task.
@@ -1368,7 +1563,7 @@ class DurableHandler:
             )
             return _dump(self.domain.run(successor.call()))
 
-        raw = self.ctx.step(key, enqueue)
+        raw = self.ctx.step(key, self._unreplayed.counting(enqueue))
         # A checkpoint round-trips as JSON, so the value comes back a dict — validate it here
         # the way `_step` does for every other step, or `.task_id` is an AttributeError that
         # fails the task AFTER it has already enqueued its successor.
@@ -1581,6 +1776,7 @@ class DurableHandler:
             raise ReservedShape(name.stored()) from reserved
 
     def _checkpointed(self, op: WorkflowOp, name: Key, thunk: Callable[[], Any]) -> Any:
+        thunk = self._unreplayed.counting(thunk)
         if not self._stop.racing:
             return self.ctx.step(name, thunk)
         if self._gated:
@@ -2075,8 +2271,10 @@ class DurableHandler:
             if self._spawn_budget.depth is None
             else {BUDGET_DEPTH_PARAM: self._spawn_budget.depth},
             stop=stop,
+            sink=self._sink,
         )
         child._fresh = self._fresh
+        child._unreplayed = _Unreplayed(self._unreplayed)
         if self._cursor is not None:
             tree = self._stop.tree_lock()
             with tree:
@@ -2273,6 +2471,7 @@ class DurableHandler:
             # nit rather than a blocker, but it is the last name on the park
             # path that was still frame-blind.
             repark(name.prefixed(self._scope_path).stored())  # raises the park signal…
+        self._unreplayed.unrecorded()  # the re-arm found events the round's peeks did not
         raise GatherWakeRace(  # …and returns only on the stale-checkpoint edge: still raise
             f"gather:{g}: every parked branch's wake condition was already satisfied "
             "at the re-arm; re-queueing so replay resolves the branches from the "
@@ -2305,7 +2504,7 @@ class DurableHandler:
         ctx = _race_capable(self.ctx)
         r = self._position.next_race()
         if self._fresh is None:
-            self._fresh = _attempt_of(ctx) == 1
+            self._fresh = _attempt_of(ctx).elided() == 1
         found, stored = ctx.peek_step(race_choice(r))
         state = RaceState(
             Choice.from_stored(stored) if found else None,
@@ -2342,15 +2541,37 @@ class DurableHandler:
         if (diverged := _diverged(slots)) is not None:
             raise diverged
         if (choice := state.box.current()) is None:
-            if (raised := race_errors(slots)) is not None:
+            # An enclosing race's choice that stopped this race stops it whatever its branches
+            # raised, as it stops every loser.
+            if not self._stop.now() and (raised := race_errors(slots)) is not None:
+                if op.deadline is not None:
+                    self._unreplayed.unrecorded()  # a retry past the deadline answers `TimedOut`
                 raise raised
-            raise Stopping  # an enclosing race's choice stopped this race before it chose
-        if (transient := transient_errors(slots)) is not None:
+            raise Stopping
+        _mark_replayed_losers(children, slots)
+        if (transient := transient_errors(slots, choice)) is not None:
             raise transient
         values = {i: slot for i, slot in enumerate(slots) if settled(slot) == "won"}
         saved = self._settle_endings(ctx, r, choice, slots, children)
         self._inputs.append(observed(["race", choice.stored(), saved]))
         return answer(choice, endings_from_stored(saved, values))
+
+    def _report_raised(self, race: int, slots: list[Any]) -> None:
+        """A loser that raised ends `Raised`, its error's text in the race's answer, and fails no
+        task; a warning span carries the error to whoever reads telemetry."""
+        if self._sink is None:
+            return
+        for branch, slot in enumerate(slots):
+            match slot:
+                case BranchRaised(error=error) if not all_refusals(error):
+                    raised = type(error).__name__
+                    event(
+                        t"race {race} branch {branch} raised {raised}",
+                        sink=self._sink,
+                        level="warning",
+                    )
+                case _:
+                    pass
 
     def _settle_endings(
         self, ctx: Any, r: int, choice: Choice, slots: list[Any], children: list[DurableHandler]
@@ -2363,6 +2584,7 @@ class DurableHandler:
         if not replayed:
             endings = [ending_of(i, slot, choice) for i, slot in enumerate(slots)]
             saved = ctx.settle(race_endings(r), stored_endings(endings, inputs))
+            self._report_raised(r, slots)
         for i, raw in enumerate(saved):
             witness = raw.get("inputs_sha256")
             if raw["ending"] in ("won", "unchosen") and (

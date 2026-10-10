@@ -151,6 +151,34 @@ def sqlite_app():
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
+def engine(request):
+    """Either engine opened by URL, on a store of its own: a fresh SQLite memory store, or an
+    Absurd queue of this test's. Shared by the modules that exercise the `Engine` protocol."""
+    from uuid import uuid4
+
+    from _durable import DSN, pg_ready
+
+    from effective.engines import open
+    from effective.engines.absurd import AbsurdEngine
+
+    if request.param == "sqlite":
+        opened = open("sqlite://")
+        yield opened
+        opened.close()
+        return
+    if not pg_ready():
+        pytest.skip("needs Postgres/Absurd (just pgt-up)")
+    opened = open(DSN, queue="open_" + uuid4().hex[:12])
+    assert isinstance(opened, AbsurdEngine)
+    opened.app.create_queue()
+    try:
+        yield opened
+    finally:
+        opened.app.drop_queue()
+        opened.close()
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
 def backend(request):
     """The cross-engine sweep: every test taking `backend` runs twice, once per engine.
 

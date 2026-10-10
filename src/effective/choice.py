@@ -9,11 +9,13 @@ interpreter applies to it:
 | `s >= k`                                | winners: the earlier successes, then the lowest   |
 |                                         | indices of this batch's, until there are `k`      |
 | the deadline has arrived                | timeout                                           |
-| `s + u < k`                             | impossible                                        |
+| `u = 0`                                 | impossible                                        |
 | otherwise                               | undecided; the race waits for the next batch      |
 
 `s` counts successes so far and `u` the branches still running, and the rows are tried in that
-order: enough winners answer a race that also reached its deadline. A success counts toward `s`
+order: enough winners answer a race that also reached its deadline. Impossible waits for every
+branch to end, so no branch stops before it could raise, and a raise fails the race whichever
+branch was read first. A success counts toward `s`
 only if it landed strictly before the deadline, so a branch that returns at the instant itself is
 a loss. The choice is saved before any loser is told to stop, and whatever the store holds is the
 choice.
@@ -86,7 +88,7 @@ class TimedOut[T]:
 
 @dataclass(frozen=True)
 class Impossible[T]:
-    """A race whose successes and unresolved branches together fall short of `k`."""
+    """A race whose branches have all ended with fewer than `k` successes."""
 
     endings: tuple[Ending[T], ...]
 
@@ -143,7 +145,7 @@ def decide(
         return Choice("winners", winners, batch)
     if expired:
         return Choice("timeout", (), batch)
-    if len(earlier) + len(batch_wins) + running < want:
+    if running == 0:
         return Choice("impossible", (), batch)
     return None
 

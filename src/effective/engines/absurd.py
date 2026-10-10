@@ -87,6 +87,12 @@ def sdk_settle(sdk: Any, name: Key, value: Any) -> Any:
     return row[0]
 
 
+LONGEST_SDK_TIMEOUT = 2**31 - 1
+"""Seconds, the most psycopg binds as the `integer` that `absurd.await_event` takes.
+`sdk_pin_the_park` writes the deadline itself over the park, so a longer wait still ends where the
+workflow named it."""
+
+
 def sdk_await_until(sdk: Any, name: Key, deadline: float, decided: Key) -> WaitOutcome[Any]:
     """Wait on the event and the clock together through the SDK, and answer once.
 
@@ -128,7 +134,7 @@ def sdk_await_until(sdk: Any, name: Key, deadline: float, decided: Key) -> WaitO
     found, stored = sdk_peek_step(sdk, decided)
     if found:
         return settled_wait(stored)
-    remaining = math.ceil(max(0.0, deadline - time.time()))
+    remaining = min(math.ceil(max(0.0, deadline - time.time())), LONGEST_SDK_TIMEOUT)
     payload, parked = None, False
     try:
         # ONE transaction: the park and the deadline it ends at commit together or not at all.
@@ -352,6 +358,53 @@ class SdkClaim:
     queue: str
 
 
+DAY = 86400.0
+
+
+def retry_delay(strategy: Any, attempt: int) -> float:
+    """The seconds a retry after attempt `attempt` waits under `strategy`, as
+    `absurd.retry_delay_seconds` computes them.
+
+    | strategy      | waits                                                          |
+    |---------------|----------------------------------------------------------------|
+    | `fixed`       | its base, 60 when absent or null                               |
+    | `exponential` | base * factor ** (attempt - 1), capped at `max_seconds`; the  |
+    |               | base 30, the factor 2 and the cap a day when absent or null    |
+    | anything else | none                                                           |
+
+    A strategy whose numbers the SQL cannot read ends the task with no retry, so it waits none."""
+
+    def number(field: str, absent: float) -> float:
+        value = strategy.get(field)
+        return absent if value is None else float(value)
+
+    match strategy:
+        case {"kind": "fixed"}:
+            try:
+                return number("base_seconds", 60)
+            except ValueError:
+                return 0.0
+        case {"kind": "exponential"}:
+            try:
+                base, factor = number("base_seconds", 30), number("factor", 2)
+                cap = number("max_seconds", DAY)
+            except ValueError:
+                return 0.0
+            if base == 0:
+                return 0.0
+            try:
+                return min(base * factor ** max(attempt - 1, 0), cap)
+            except OverflowError:
+                return 0.0 if factor < 1 else cap
+        case _:
+            return 0.0
+
+
+def retry_waits(strategy: Any, attempt: int = 1) -> bool:
+    """Whether a retry after attempt `attempt` waits before it runs under `strategy`."""
+    return retry_delay(strategy, attempt) > 0
+
+
 def sdk_claim(ctx: Any) -> SdkClaim:
     """Read the claim the SDK keeps on its private `_task`, `_conn` and `_queue_name`, which no
     public surface carries."""
@@ -359,7 +412,11 @@ def sdk_claim(ctx: Any) -> SdkClaim:
     return SdkClaim(
         task_id=claimed["task_id"],
         run_id=claimed["run_id"],
-        attempt=Attempt(number=claimed["attempt"], limit=claimed["max_attempts"]),
+        attempt=Attempt(
+            number=claimed["attempt"],
+            limit=claimed["max_attempts"],
+            delayed=retry_waits(claimed["retry_strategy"], claimed["attempt"]),
+        ),
         params=claimed["params"],
         conn=ctx._conn,
         queue=ctx._queue_name,

@@ -43,7 +43,7 @@ def _broken(choice: Choice | None, k: int, earlier, won, lost, running, expired)
         case None if expired:
             return "undecided though the deadline had arrived"
         case None:
-            return None if s < k <= s + running else "undecided though the choice is determined"
+            return None if s < k and running else "undecided though the choice is determined"
         case Choice(batch=batch) if list(batch) != sorted(won + lost):
             return "the batch recorded is not the batch read"
         case Choice(kind="timeout", winners=winners) if winners:
@@ -53,7 +53,7 @@ def _broken(choice: Choice | None, k: int, earlier, won, lost, running, expired)
         case Choice(kind="impossible") if expired:
             return "impossible where the deadline had already decided it"
         case Choice(kind="impossible"):
-            return None if s + running < k else "impossible while s + u >= k"
+            return None if s < k and not running else "impossible while a branch runs or s >= k"
         case Choice(kind="winners", winners=winners):
             return _misread(list(winners), k, earlier, won)
     return "an unknown choice"

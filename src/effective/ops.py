@@ -6,7 +6,7 @@ the embedding deep: the same op stream can be run, recorded, replayed, or
 re-interpreted under a different handler.
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -461,9 +461,57 @@ def leaves(raised: BaseException) -> Iterator[BaseException]:
 
 
 def unretryable(raised: BaseException) -> Unretryable | None:
-    """The first leaf of `raised` a retry would raise again. One is enough: the task cannot
-    succeed on a retry, whatever the other leaves are."""
+    """The first leaf of `raised` whose type a retry would raise again. One is enough: the task
+    cannot succeed on a retry, whatever the other leaves are."""
     return next((leaf for leaf in leaves(raised) if isinstance(leaf, Unretryable)), None)
+
+
+_REDERIVED = "_effective_rederived"
+
+
+def mark_rederived(error: BaseException, rederived: bool = True) -> None:
+    """Mark whether `error`, as just raised, is one a retry would raise again: its frame ran
+    nothing fresh and read nothing the record does not hold, so a retry replays the same record to
+    the same raise. Each raise sets the mark, so an instance raised again carries no earlier
+    raise's mark."""
+    setattr(error, _REDERIVED, rederived)
+
+
+class RaceUndecided(ExceptionGroup):
+    """A race's branches raised before any choice, and no branch is left to win it. A retry may run
+    a branch fresh and win, so a typed error inside is not, on its own, one a retry would raise
+    again."""
+
+    def derive(self, excs: Sequence[Exception]) -> RaceUndecided:
+        return RaceUndecided(self.message, excs)
+
+
+def placed_leaves(
+    raised: BaseException, *, undecided: bool = False
+) -> Iterator[tuple[BaseException, bool]]:
+    """Each leaf of `raised`, in order, and whether an undecided race holds it."""
+    match raised:
+        case BaseExceptionGroup(exceptions=inner):
+            within = undecided or isinstance(raised, RaceUndecided)
+            for exception in inner:
+                yield from placed_leaves(exception, undecided=within)
+        case _:
+            yield raised, undecided
+
+
+def futile_leaf(raised: BaseException, *, delayed: bool = False) -> BaseException | None:
+    """The first leaf of `raised` a retry would raise again: an `Unretryable` one outside an
+    undecided race, or one marked rederived unless the retry is `delayed`, which leaves time to
+    deploy a fix to the code that raised it."""
+    return next(
+        (
+            leaf
+            for leaf, undecided in placed_leaves(raised)
+            if (isinstance(leaf, Unretryable) and not undecided)
+            or (getattr(leaf, _REDERIVED, False) and not delayed)
+        ),
+        None,
+    )
 
 
 def noted[E: BaseException](leaf: E, raised: BaseException) -> E:
@@ -472,6 +520,12 @@ def noted[E: BaseException](leaf: E, raised: BaseException) -> E:
         if other is not leaf:
             leaf.add_note(repr(other))
     return leaf
+
+
+class RecordedValueRejected(ValueError, Unretryable):
+    """A recorded value its schema rejects: an event's payload or a step's result. The record is
+    first-write-wins, so a retry would load the same value and reject it again, and a retry that
+    waits keeps no attempt for it: a run that would rescue the value catches the error."""
 
 
 class CompositionRefused(ValueError, Unretryable):

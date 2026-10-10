@@ -1171,13 +1171,18 @@ class _BoomingFirst(_Denying):
 @pytest.mark.parametrize("shape", SHAPES)
 def test_A20_a_race_that_left_records_without_a_choice_fails_its_attempt(backend, shape):
     """What makes a fresh walk safe: a race that wrote records and saved no choice cannot be
-    survived, since only refusals are delivered to the workflow. So no resume at attempt 1
-    reaches such a race's records."""
+    survived, since no branch was left to win it and only refusals are delivered to the
+    workflow. So no resume at attempt 1 reaches such a race's records."""
     tools = _BoomingFirst()
+
+    def caught_then_raises() -> Any:
+        with suppress(Refused):
+            yield from call_tool("deny", {}, str)
+        raise LookupError("the branch's own code raised after the refusal")
 
     def program(run_id: str) -> Any:
         with suppress(Exception):  # the workflow tries to survive the race's error
-            yield from race([lambda: call_tool("boom", {}, str), _caught_then_value])
+            yield from race([lambda: call_tool("boom", {}, str), caught_then_raises])
         return (yield from await_event(review_name(run_id), dict))
 
     name = private("fresh")

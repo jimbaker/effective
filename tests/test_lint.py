@@ -18,7 +18,10 @@ from effective.lint import (
     check_file,
     check_layer_file,
     check_layer_source,
+    check_schema_file,
+    check_schema_source,
     check_source,
+    configured_roots,
     seam_forbidden_for,
 )
 
@@ -288,6 +291,456 @@ def retry(op):
     assert check_layer_source(src) == []
 
 
+# --- determinism between yields, for op layers and schemas ---------------------------------
+
+READS_BACK = "op-layer-reads-back-state"
+SCHEMA_READS_BACK = "schema-reads-back-state"
+
+LAYER_SHAPES: dict[str, tuple[str, set[str]]] = {
+    "forwards, then changes the result from outside state": (
+        """
+values = iter([0, 7])
+@op_layer
+def outside(op):
+    value = yield op
+    return {**value, "n": next(values)}
+""",
+        {READS_BACK},
+    ),
+    "forwards, then raises from outside state": (
+        """
+values = iter([0, 7])
+@op_layer
+def outside(op):
+    yield op
+    if next(values) == 0:
+        raise RuntimeError("not ready")
+""",
+        {READS_BACK},
+    ),
+    "fails once on a flag it keeps in a closure": (
+        """
+def make():
+    failed = False
+    @op_layer
+    def flaky(op):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise TimeoutError(op)
+        return (yield op)
+    return flaky
+""",
+        {READS_BACK},
+    ),
+    "fails once on a flag it keeps on itself": (
+        """
+class Flaky:
+    @op_layer
+    def __call__(self, op):
+        if not self.failed:
+            self.failed = True
+            raise TimeoutError(op)
+        return (yield op)
+""",
+        {READS_BACK},
+    ),
+    "refuses the third op it has counted": (
+        """
+admitted = []
+@op_layer
+def count(op):
+    admitted.append(op)
+    if len(admitted) == 3:
+        raise Refused(op, "the third op")
+    return (yield op)
+""",
+        {READS_BACK},
+    ),
+    "reads the clock": (
+        """
+@op_layer
+def stamp(op):
+    started = time.time()
+    return (yield op)
+""",
+        {"op-layer-no-nondeterminism"},
+    ),
+    "mints an id": (
+        """
+from uuid import uuid4
+@op_layer
+def stamp(op):
+    result = yield op
+    return {**result, "id": uuid4()}
+""",
+        {"op-layer-no-nondeterminism"},
+    ),
+    "draws a number it imported from random": (
+        """
+from random import random
+@op_layer
+def coin(op):
+    if random() < 0.5:
+        raise TimeoutError(op)
+    return (yield op)
+""",
+        {"op-layer-no-nondeterminism"},
+    ),
+    "reads the environment and a file": (
+        """
+@op_layer
+def configured(op):
+    if os.environ.get("STRICT") and Path("flag").read_text():
+        raise RuntimeError(op)
+    return (yield op)
+""",
+        {"op-layer-no-nondeterminism"},
+    ),
+    "answers from a script it pops": (
+        """
+answers = ["first", "second"]
+@op_layer
+def scripted(op):
+    yield op
+    return answers.pop(0)
+""",
+        {READS_BACK},
+    ),
+    "fails once on a flag a partial binds ahead of the op": (
+        """
+@op_layer
+def run(state, op):
+    if not state["failed"]:
+        state["failed"] = True
+        raise TimeoutError(op)
+    return (yield op)
+layer = functools.partial(run, {"failed": False})
+""",
+        {READS_BACK},
+    ),
+    "writes what it saw to a sink it never reads": (
+        """
+def collecting(seen, sink):
+    @op_layer
+    def run(op):
+        result = yield op
+        seen.append(result)
+        sink(result)
+        return result
+    return run
+""",
+        set(),
+    ),
+    "adds to a meter it never reads": (
+        """
+spent = {"calls": 0}
+@op_layer
+def metered(op):
+    spent["calls"] += 1
+    return (yield op)
+""",
+        set(),
+    ),
+    "writes a sink on itself and reads its configuration beside it": (
+        """
+class Quiet:
+    @op_layer
+    def __call__(self, op):
+        result = yield op
+        self.seen.append(result)
+        if op.name in self.quiet:
+            return None
+        return result
+""",
+        set(),
+    ),
+    "adds to a meter spelled as an assignment": (
+        """
+spent = {"calls": 0}
+@op_layer
+def metered(op):
+    spent["calls"] = spent["calls"] + 1
+    return (yield op)
+""",
+        set(),
+    ),
+    "rebinds a captured name and an error it catches": (
+        """
+@op_layer
+def reshaped(op):
+    match op:
+        case Gather(branches=branches):
+            branches.append(op)
+    try:
+        return (yield op)
+    except KeyError as raised:
+        raised.args = (op,)
+        raise raised
+""",
+        set(),
+    ),
+    "fails once on a flag a nested helper sets": (
+        """
+def make():
+    failed = False
+    @op_layer
+    def flaky(op):
+        def mark():
+            nonlocal failed
+            failed = True
+        if not failed:
+            mark()
+            raise TimeoutError(op)
+        return (yield op)
+    return flaky
+""",
+        {READS_BACK},
+    ),
+    "decides inside the assignment to a meter": (
+        """
+spent = {"calls": 0}
+@op_layer
+def metered(op):
+    spent["calls"] = spent["calls"] + 1 if spent["calls"] < 2 else refuse(op)
+    return (yield op)
+""",
+        {READS_BACK},
+    ),
+    "parses an id the op carries": (
+        """
+import uuid
+@op_layer
+def keyed(op):
+    result = yield op
+    seeded = uuid.uuid5(uuid.NAMESPACE_URL, op.name)
+    return {**result, "id": uuid.UUID(op.args["id"]), "seeded": seeded}
+""",
+        set(),
+    ),
+    "reads configuration it never writes": (
+        """
+def retry(attempts):
+    @op_layer
+    def run(op):
+        for _ in range(attempts):
+            return (yield op)
+    return run
+""",
+        set(),
+    ),
+    "keeps its state in the attempt's own scope": (
+        """
+@op_layer
+def gate(op):
+    scope = layer_run_state(GATE)
+    seen = scope.setdefault("seen", {})
+    seen[op] = seen.get(op, 0) + 1
+    if seen[op] > 1:
+        raise Refused(op, "twice")
+    return (yield op)
+""",
+        set(),
+    ),
+    "a domain layer, which runs inside the fresh call": (
+        """
+failed = [False]
+@domain_layer
+def flaky(op):
+    if not failed[0]:
+        failed[0] = True
+        raise TimeoutError(op)
+    started = time.time()
+    return (yield op)
+""",
+        set(),
+    ),
+}
+
+
+def test_an_op_layer_computes_only_from_what_it_is_handed():
+    """A retry replays the record through each op layer, so a layer reading state it writes, or
+    the clock, can answer an attempt differently from the one before."""
+    got = {
+        name: {v.rule for v in check_layer_source(source)}
+        for name, (source, _) in LAYER_SHAPES.items()
+    }
+    assert got == {name: rules for name, (_, rules) in LAYER_SHAPES.items()}
+
+
+SCHEMA_SHAPES: dict[str, tuple[str, set[str]]] = {
+    "a default factory raising from outside state": (
+        """
+values = iter([0, 7])
+def factory():
+    n = next(values)
+    if n == 0:
+        raise RuntimeError("factory not ready")
+    return n
+class Response(BaseModel):
+    n: int = Field(default_factory=factory)
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a default factory lambda an after-validator marks as given": (
+        """
+values = iter([0, 7])
+class Response(BaseModel):
+    n: int = Field(default_factory=lambda: next(values))
+    @model_validator(mode="after")
+    def normalizes(self):
+        self.n = int(self.n)
+        return self
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a validator rewriting a supplied field from outside state": (
+        """
+values = iter([0, 7])
+class Response(BaseModel):
+    n: int
+    @field_validator("n")
+    @classmethod
+    def dynamic(cls, n):
+        return next(values)
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a validator counting on its class": (
+        """
+class Response(BaseModel):
+    n: int
+    @field_validator("n")
+    @classmethod
+    def counted(cls, n):
+        cls.seen += 1
+        return n + cls.seen
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a wrapped validator reading the clock": (
+        """
+def fresh(value):
+    return value if value < time.time() else 0
+Stamp = Annotated[float, AfterValidator(fresh)]
+""",
+        {"schema-no-nondeterminism"},
+    ),
+    "a default factory that is the clock": (
+        """
+class Stamped(BaseModel):
+    at: datetime = Field(default_factory=datetime.now)
+""",
+        {"schema-no-nondeterminism"},
+    ),
+    "a default id minted by a factory": (
+        """
+from uuid import uuid4
+class Event(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+""",
+        {"schema-no-nondeterminism"},
+    ),
+    "a default computed once per process": (
+        """
+class Event(BaseModel):
+    at: float = Field(default=time.time())
+""",
+        {"schema-no-nondeterminism"},
+    ),
+    "a load hook reading the clock": (
+        """
+@dataclass
+class Event:
+    at: float = 0.0
+    def __post_init__(self):
+        self.at = time.time()
+""",
+        {"schema-no-nondeterminism"},
+    ),
+    "a v1 validator and a keyword-wrapped one reading outside state": (
+        """
+values = iter([0, 7])
+def drawn(value):
+    return next(values)
+Drawn = Annotated[int, PlainValidator(func=drawn)]
+class Event(BaseModel):
+    n: int
+    @validator("n")
+    def dynamic(cls, n):
+        return next(values)
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a validator counting on a class it names otherwise": (
+        """
+class Response(BaseModel):
+    n: int
+    @field_validator("n")
+    @classmethod
+    def counted(klass, n):
+        klass.seen += 1
+        return n + klass.seen
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a validator counting on its class without the classmethod decorator": (
+        """
+class Response(BaseModel):
+    n: int
+    @field_validator("n")
+    def counted(cls, n):
+        cls.seen += 1
+        return n + cls.seen
+""",
+        {SCHEMA_READS_BACK},
+    ),
+    "a command line's default, which is no schema": (
+        """
+parser.add_argument("--model", default=os.environ.get("MODEL"))
+""",
+        set(),
+    ),
+    "an after-validator normalizing the value it is handed": (
+        """
+class Response(BaseModel):
+    n: int = Field(default_factory=lambda: 0)
+    @model_validator(mode="after")
+    def normalizes(self):
+        self.n = int(self.n)
+        return self
+""",
+        set(),
+    ),
+    "a default factory building an empty value": (
+        """
+@dataclass
+class Totals:
+    seen: list[int] = field(default_factory=list)
+    lock: Lock = field(default_factory=threading.Lock)
+""",
+        set(),
+    ),
+}
+
+
+def test_a_schema_loads_only_from_what_it_is_handed():
+    """A replay loads a recorded value through its schema again, so a factory or a validator
+    reading the world can load an attempt differently from the one before."""
+    got = {
+        name: {v.rule for v in check_schema_source(source)}
+        for name, (source, _) in SCHEMA_SHAPES.items()
+    }
+    assert got == {name: rules for name, (_, rules) in SCHEMA_SHAPES.items()}
+
+
+def test_shipped_schemas_pass_the_schema_lint():
+    roots = ["src", "examples"]
+    roots += configured_roots("--schemas", roots)
+    files = [path for root in roots for path in Path(root).rglob("*.py")]
+    assert [str(v) for f in files for v in check_schema_file(f)] == []
+
+
 def test_channel_lint_flags_nocache_before_cache_in_one_literal():
     src = 'p = t"{volatile:role=system;nocache}{preamble:role=system;cache}"'
     rules = [v.rule for v in check_channel_source(src)]
@@ -363,6 +816,8 @@ def test_shipping_layers_pass_the_authority_lint():
     assert check_layer_file(layers_mod.__file__) == []
     assert check_layer_file(cost_mod.__file__) == []
     assert check_layer_file(permission_mod.__file__) == []
+    for module in ("telemetry", "govern", "tape"):
+        assert check_layer_file(Path(cost_mod.__file__).with_name(f"{module}.py")) == []
 
 
 # --- seam dependency-direction (--deps; audit finding C-063) ------------------

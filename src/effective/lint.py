@@ -496,6 +496,425 @@ def _layer_violations(source: str, filename: str) -> Iterator[Violation]:
                         node.text().split(":", 1)[0],
                         filename,
                     )
+    yield from _op_layer_determinism(source, filename)
+
+
+# --- determinism between yields, for op layers and schemas ----------------------------------
+#
+# A retry replays the record through the workflow, its op layers and its schemas' factories and
+# validators, so what each computes must be a function of what it is handed. A domain layer runs
+# inside the step's own call, which a retry makes fresh, so it is free to read the world.
+
+_WORLD_CALLEES = FORBIDDEN_CALLEES | frozenset(
+    {
+        "datetime.datetime.now",
+        "datetime.datetime.utcnow",
+        "datetime.date.today",
+        "date.today",
+        "time.perf_counter",
+        "time.perf_counter_ns",
+        "time.monotonic_ns",
+        "uuid.uuid1",
+        "uuid.uuid4",
+        "uuid.uuid6",
+        "uuid.uuid7",
+        "uuid.uuid8",
+        "uuid1",
+        "uuid4",
+        "uuid6",
+        "uuid7",
+        "uuid8",
+        "os.urandom",
+        "os.getenv",
+        "os.environ.get",
+        "open",
+        "input",
+    }
+)
+"""Calls that read the clock, chance, the environment or a file, by their spelling here."""
+
+_WORLD_MODULES = ("random", "secrets")
+"""Modules whose functions read chance, but for those in `_DETERMINED`."""
+
+_DETERMINED = frozenset({"Random", "SystemRandom", "compare_digest"})
+"""What `random` and `secrets` export that answers from its arguments alone, or is a class."""
+
+_WORLD_READS = frozenset({"read_text", "read_bytes"})
+"""Methods that read a file, whatever names it."""
+
+_ADVANCING_CALLEES = frozenset({"next", "anext"})
+"""Builtins that read an argument and move it on, so the next call reads something else."""
+
+_ADVANCING_METHODS = frozenset({"pop", "popleft", "popitem", "setdefault", "send", "__next__"})
+"""Methods whose answer is what they took or put, so a kept answer is a read and a write."""
+
+_VALIDATOR_DECORATORS = frozenset(
+    {"field_validator", "model_validator", "validator", "root_validator"}
+)
+_VALIDATOR_WRAPPERS = frozenset(
+    {"AfterValidator", "BeforeValidator", "WrapValidator", "PlainValidator"}
+)
+_LOAD_HOOKS = frozenset({"__post_init__", "model_post_init"})
+"""Methods a dataclass or a model runs on the value it has just loaded."""
+
+
+def _defs(tree: ast.AST) -> Iterator[ast.FunctionDef]:
+    """Every function `tree` defines, at any depth. A layer, a factory and a validator are each
+    synchronous, so an `async def` is none of them."""
+    return (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef))
+
+
+def _world_names(tree: ast.AST) -> frozenset[str]:
+    """The bare names a module binds to a world-reading function by importing it."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        match node:
+            case ast.ImportFrom(module=str() as module, names=aliases):
+                for alias in aliases:
+                    spelled = f"{module}.{alias.name}"
+                    drawn = module in _WORLD_MODULES and alias.name not in _DETERMINED
+                    if drawn or spelled in _WORLD_CALLEES:
+                        names.add(alias.asname or alias.name)
+    return frozenset(names)
+
+
+def _reads_the_world(node: ast.expr, world: frozenset[str]) -> bool:
+    match node:
+        case ast.Call(func=func):
+            callee = ast.unparse(func)
+            return (
+                callee in _WORLD_CALLEES
+                or callee in world
+                or (
+                    callee.startswith(tuple(f"{module}." for module in _WORLD_MODULES))
+                    and callee.rsplit(".", 1)[-1] not in _DETERMINED
+                )
+                or (isinstance(func, ast.Attribute) and func.attr in _WORLD_READS)
+            )
+        case ast.Attribute(value=ast.Name(id="os"), attr="environ"):
+            return True
+    return False
+
+
+def _own_statements(body: ast.AST) -> Iterator[ast.AST]:
+    """The nodes of `body` outside any function it defines."""
+    stack = list(ast.iter_child_nodes(body))
+    while stack:
+        node = stack.pop()
+        yield node
+        match node:
+            case ast.FunctionDef() | ast.AsyncFunctionDef() | ast.Lambda():
+                pass
+            case _:
+                stack.extend(ast.iter_child_nodes(node))
+
+
+def _binds(node: ast.AST, body: ast.AST) -> set[str]:
+    """The names one node binds in its scope."""
+    match node:
+        case ast.arg(arg=name) | ast.Name(id=name, ctx=ast.Store() | ast.Del()):
+            return {name}
+        case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name) if node is not body:
+            return {name}
+        case ast.alias(name=name, asname=asname):
+            return {asname or name.split(".")[0]}
+        case (
+            ast.MatchAs(name=str() as name)
+            | ast.MatchStar(name=str() as name)
+            | ast.MatchMapping(rest=str() as name)
+            | ast.ExceptHandler(name=str() as name)
+        ):
+            return {name}
+        case ast.Nonlocal() | ast.Global():
+            return set()
+    return set()
+
+
+def _bound_in(body: ast.AST) -> set[str]:
+    """The names `body` and the functions it defines bind for themselves.
+
+    | the name                                       | bound                     |
+    |------------------------------------------------|---------------------------|
+    | a parameter, a store or a capture of `body`    | unless `body` shares it   |
+    | the same in a function `body` defines          | unless that function      |
+    |                                                | shares it                 |
+
+    A function `body` defines that shares a name `body` does not bind reaches outside, so the
+    name is outside for `body` too."""
+    own_nodes = set(_own_statements(body))
+    own: set[str] = set()
+    nested: set[str] = set()
+    own_shared: set[str] = set()
+    nested_shared: set[str] = set()
+    for node in ast.walk(body):
+        mine = node in own_nodes
+        (own if mine else nested).update(_binds(node, body))
+        match node:
+            case ast.Nonlocal(names=names) | ast.Global(names=names):
+                (own_shared if mine else nested_shared).update(names)
+    return (own - own_shared) | (nested - nested_shared)
+
+
+type _Path = tuple[str | tuple[object], ...]
+"""An attribute is its name and an item its key held in a tuple, so the two never meet."""
+
+
+def _path_of(node: ast.expr) -> _Path:
+    """An attribute and item path as its parts, up to its first item a variable selects."""
+    match node:
+        case ast.Name(id=name):
+            return (name,)
+        case ast.Attribute(value=value, attr=attr):
+            return (*_path_of(value), attr)
+        case ast.Subscript(value=value, slice=ast.Constant() as key):
+            return (*_path_of(value), (key.value,))
+        case ast.Subscript(value=value):
+            return _path_of(value)
+    return ()
+
+
+def _use(name: ast.Name, parents: dict[ast.AST, ast.AST]) -> tuple[_Path | None, _Path | None]:
+    """What this occurrence of an outside name writes and what it reads, each as the path it
+    heads (`self.seen` in `self.seen.append(x)`), or `None`.
+
+    | the path                                            | writes      | reads       |
+    |-----------------------------------------------------|-------------|-------------|
+    | assigned, deleted or added to in place              | the path    |             |
+    | a method of it called as a statement nobody keeps   | its object  |             |
+    | called as a statement nobody keeps                  | the path    |             |
+    | handed to `next`, or `pop` and its kin kept         | its object  | its object  |
+    | a method of it called and kept                      |             | its object  |
+    | read to compute what is assigned back to it         |             |             |
+    | anything else                                       |             | the path    |
+    """
+    path: ast.expr = name
+    while isinstance(up := parents.get(path), ast.Attribute | ast.Subscript) and up.value is path:
+        path = up
+    parent = parents.get(path)
+    kept = parent is None or not isinstance(parents.get(parent), ast.Expr)
+    match path, parent:
+        case (ast.Name() | ast.Attribute() | ast.Subscript()) as target, _ if isinstance(
+            target.ctx, ast.Store | ast.Del
+        ):
+            return _path_of(target), None
+        case ast.Attribute(value=receiver, attr=method), ast.Call(func=func) if func is path:
+            held = _path_of(receiver)
+            if method in _ADVANCING_METHODS and kept:
+                return held, held
+            return (None, held) if kept else (held, None)
+        case _, ast.Call(func=func) if func is path and not kept:
+            return _path_of(path), None
+        case _, ast.Call(func=ast.Name(id=callee), args=[first, *_]) if (
+            callee in _ADVANCING_CALLEES and first is path
+        ):
+            return _path_of(path), _path_of(path)
+    if _accumulates(path, parents):
+        return None, None
+    return None, _path_of(path)
+
+
+def _accumulates(path: ast.expr, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Whether `path` is read only to compute the value assigned back to it, as a meter spelled
+    `spent["n"] = spent["n"] + cost` is."""
+    node: ast.AST = path
+    while (up := parents.get(node)) is not None and not isinstance(up, ast.stmt):
+        node = up
+    match up:
+        case ast.Assign(targets=[target], value=value) if node is value:
+            return _path_of(target) == _path_of(path) and _arithmetic(value)
+    return False
+
+
+def _arithmetic(value: ast.expr) -> bool:
+    """Whether `value` is arithmetic over names and constants, which decides nothing."""
+    return all(
+        isinstance(
+            node,
+            ast.BinOp
+            | ast.UnaryOp
+            | ast.operator
+            | ast.unaryop
+            | ast.Constant
+            | ast.Name
+            | ast.Attribute
+            | ast.Subscript
+            | ast.expr_context,
+        )
+        for node in ast.walk(value)
+    )
+
+
+def _overlap(one: _Path, other: _Path) -> bool:
+    return one[: len(other)] == other[: len(one)]
+
+
+def _reads_back(body: ast.AST, receiver: str | None) -> Iterator[ast.Name]:
+    """The first read of each path from outside `body` that overlaps a path `body` writes.
+
+    `receiver` is a parameter that carries state across calls, as `self` does for a method and
+    `cls` for a class's validator; it counts as outside."""
+    inside = _bound_in(body) - {receiver}
+    parents = _parents(body)
+    writes: set[_Path] = set()
+    reads: list[tuple[_Path, ast.Name]] = []
+    for node in ast.walk(body):
+        if isinstance(node, ast.Name) and node.id not in inside:
+            wrote, read = _use(node, parents)
+            if wrote is not None:
+                writes.add(wrote)
+            if read is not None:
+                reads.append((read, node))
+    flagged: set[str] = set()
+    for read, node in sorted(reads, key=lambda r: (r[1].lineno, r[1].col_offset)):
+        if node.id not in flagged and any(_overlap(read, wrote) for wrote in writes):
+            flagged.add(node.id)
+            yield node
+
+
+@dataclass(frozen=True)
+class _Reader:
+    """What a replay runs again, and the rules it is held to."""
+
+    nondeterminism: str
+    reads_back: str
+    reads_the_world: str
+    reads_its_own_state: str
+
+
+_OP_LAYER = _Reader(
+    "op-layer-no-nondeterminism",
+    "op-layer-reads-back-state",
+    "an @op_layer reads the clock, chance, the environment or a file; a replay must compute "
+    "what the first run did, so "
+    "pass the value in or read it through an op",
+    "an @op_layer reads state it also writes, so a retry reads what an earlier attempt left; "
+    "keep the state per attempt, or write it to a sink nothing here reads",
+)
+_SCHEMA = _Reader(
+    "schema-no-nondeterminism",
+    "schema-reads-back-state",
+    "a schema reads the clock, chance, the environment or a file as it loads; a replay must "
+    "load what the first run did",
+    "a schema reads state it also writes as it loads, so a retry loads what an earlier attempt "
+    "left; compute the value from what the schema is handed",
+)
+
+
+def _determinism_violations(
+    reader: _Reader, body: ast.AST, receiver: str | None, world: frozenset[str], filename: str
+) -> Iterator[Violation]:
+    for node in ast.walk(body):
+        match node:
+            case ast.Call() | ast.Attribute() if _reads_the_world(node, world):
+                text = ast.unparse(node)
+                yield Violation(
+                    reader.nondeterminism, reader.reads_the_world, node.lineno, text, filename
+                )
+    for node in _reads_back(body, receiver):
+        yield Violation(
+            reader.reads_back, reader.reads_its_own_state, node.lineno, node.id, filename
+        )
+
+
+def _decorator_names(fn: ast.FunctionDef) -> set[str]:
+    return {
+        ast.unparse(d.func if isinstance(d, ast.Call) else d).rsplit(".", 1)[-1]
+        for d in fn.decorator_list
+    }
+
+
+def _first_param(fn: ast.FunctionDef) -> str | None:
+    params = (*fn.args.posonlyargs, *fn.args.args)
+    return params[0].arg if params else None
+
+
+def _receiver(layer: ast.FunctionDef) -> str | None:
+    """A layer's parameter before the op, which a method's object or a bound partial fills and
+    which carries state across calls."""
+    params = (*layer.args.posonlyargs, *layer.args.args)
+    return params[0].arg if len(params) > 1 else None
+
+
+def _op_layer_determinism(source: str, filename: str) -> Iterator[Violation]:
+    tree = ast.parse(source)
+    world = _world_names(tree)
+    for fn in _defs(tree):
+        if "op_layer" in _decorator_names(fn):
+            yield from _determinism_violations(_OP_LAYER, fn, _receiver(fn), world, filename)
+
+
+def check_schema_source(source: str, filename: str = "<schemas>") -> list[Violation]:
+    return list(_schema_violations(source, filename))
+
+
+def _schema_callables(tree: ast.Module) -> Iterator[tuple[ast.expr, int]]:
+    """What a schema names to run as it loads, and a default it computed once per process."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == "default_factory" or (
+                    keyword.arg == "default"
+                    and ast.unparse(node.func).endswith(("Field", "field"))
+                ):
+                    yield keyword.value, node.lineno
+            if ast.unparse(node.func).rsplit(".", 1)[-1] in _VALIDATOR_WRAPPERS:
+                given = [*node.args[:1], *(k.value for k in node.keywords if k.arg == "func")]
+                yield from ((validator, node.lineno) for validator in given)
+
+
+def _schema_violations(source: str, filename: str) -> Iterator[Violation]:
+    """Determinism for what a schema runs as it loads a value.
+
+    | the callable                                             | checked as                 |
+    |----------------------------------------------------------|----------------------------|
+    | a lambda or a def named as `default_factory=`             | its body                   |
+    | a def named in `AfterValidator(...)` and its kin          | its body                   |
+    | a method under a validator decorator, v1's included       | its body, a class outside  |
+    | `__post_init__` and `model_post_init`                     | its body                   |
+    | a world-reading callable named as a factory               | itself                     |
+    | a `default=` computed by a world-reading call             | the call                   |
+
+    A def is found by name anywhere in the module; a callable defined elsewhere is the gate of
+    the module that defines it."""
+    tree = ast.parse(source)
+    world = _world_names(tree)
+    defs: dict[str, list[ast.FunctionDef]] = {}
+    for fn in _defs(tree):
+        defs.setdefault(fn.name, []).append(fn)
+        if _decorator_names(fn) & _VALIDATOR_DECORATORS or fn.name in _LOAD_HOOKS:
+            classy = "classmethod" in _decorator_names(fn) or _first_param(fn) == "cls"
+            receiver = _first_param(fn) if classy else None
+            yield from _determinism_violations(_SCHEMA, fn, receiver, world, filename)
+    for named, line in _schema_callables(tree):
+        match named:
+            case ast.Lambda() as body:
+                yield from _determinism_violations(_SCHEMA, body, None, world, filename)
+            case ast.Name(id=name) if name in defs:
+                for body in defs[name]:
+                    yield from _determinism_violations(_SCHEMA, body, None, world, filename)
+            case ast.Call() as call if _reads_the_world(call, world):
+                yield Violation(
+                    _SCHEMA.nondeterminism,
+                    _SCHEMA.reads_the_world,
+                    line,
+                    ast.unparse(call),
+                    filename,
+                )
+            case ast.Name() | ast.Attribute() if _reads_the_world(
+                ast.Call(func=named, args=[], keywords=[]), world
+            ):
+                yield Violation(
+                    _SCHEMA.nondeterminism,
+                    _SCHEMA.reads_the_world,
+                    line,
+                    ast.unparse(named),
+                    filename,
+                )
+
+
+def check_schema_file(path: str | Path) -> list[Violation]:
+    path = Path(path)
+    return check_schema_source(path.read_text(), filename=str(path))
 
 
 def _directive_flags(spec_text: str) -> tuple[str, bool | None]:
@@ -4014,6 +4433,7 @@ def check_totality(paths: Iterable[str | Path]) -> list[Violation]:
 # rather than a branch per rule, so adding a rule is a row.
 _PER_FILE = {
     "--layers": check_layer_file,
+    "--schemas": check_schema_file,
     "--channels": check_channel_file,
     "--deps": check_deps_file,
     "--ledger-reads": check_ledger_reads_file,
@@ -4255,6 +4675,7 @@ def main(argv: list[str] | None = None) -> int:
     if violations:
         kind = {
             "--layers": "layer-authority",
+            "--schemas": "schema determinism (a factory or validator a replay re-runs)",
             "--channels": "channel (volatile-last-cache / independence)",
             "--deps": "seam dependency-direction",
             "--ledger-reads": "canonical ledger-read",

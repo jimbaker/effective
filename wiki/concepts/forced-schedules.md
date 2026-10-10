@@ -17,7 +17,7 @@ A schedule is not the only instrument, and the second one reaches what it cannot
 
 | the shape                     | a held CLOCK decides it | because                                     |
 |-------------------------------|-------------------------|---------------------------------------------|
-| a race's deadline firing       | yes                     | `handlers.base.race_clock` is the only clock a race reads |
+| a race's deadline firing       | yes                     | `handlers.base.race_time` is the only clock a race reads |
 | which instant a branch ended on | yes                    | the branch moves the held clock as it ends  |
 | a race's winner, still         | **no**                  | the completions the clock stamps are not the completions it orders |
 

@@ -1,7 +1,7 @@
 """A race that names a deadline, on the recording and replay core.
 
 Nothing here orders an event with a sleep or waits out a margin. A race reads one clock,
-`handlers.base.race_clock`, so a row holds that clock and the deadline fires where the row says
+`handlers.base.race_time`, so a row holds that clock and the deadline fires where the row says
 rather than where the host's load puts it. A branch lands on a NAMED instant by moving the held
 clock as it ends, which is what makes the tie at the deadline decidable at all.
 
@@ -36,7 +36,6 @@ from effective.choice import (
 from effective.domain import CallTool
 from effective.govern import Refused
 from effective.handlers import base
-from effective.handlers.base import BranchRaised
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.ops import CompositionRefused, Step
@@ -150,7 +149,7 @@ def _forever(name: str):
 def _run(
     monkeypatch, clock: Callable[[], float], program, responses: Mapping[str, object]
 ) -> tuple[Any, Any]:
-    monkeypatch.setattr(base, "race_clock", clock)
+    monkeypatch.setattr(base, "race_time", clock)
     handler = RecordingHandler(responses=responses)
     return handler.run(program), handler
 
@@ -303,7 +302,7 @@ def test_a_sequential_race_reads_its_deadline_at_a_branch_boundary(monkeypatch, 
     only place it has to read a clock. The promise a sequential ctx can keep is that the deadline
     is read between branches, never inside one, and what branch 0 ended on decides the kind."""
     clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
-    monkeypatch.setattr(base, "race_clock", clock)
+    monkeypatch.setattr(base, "race_time", clock)
     ran: list[int] = []
     decided_after: list[list[int]] = []
     chosen: list[Choice] = []
@@ -368,7 +367,7 @@ def test_a_branch_is_stamped_where_it_ran_not_where_the_loop_noticed(monkeypatch
             DEADLINE + A_LONG_WAY_OFF if ending.is_set() else DEADLINE - A_LONG_WAY_OFF
         ).timestamp()
 
-    monkeypatch.setattr(base, "race_clock", two_faced)
+    monkeypatch.setattr(base, "race_time", two_faced)
 
     def program():
         return (yield from race([_returns("a")], deadline=DEADLINE))
@@ -494,7 +493,7 @@ def test_a_clock_crossing_between_two_reads_cannot_disarm_the_deadline(monkeypat
     something to show for it."""
     crossed, released = threading.Event(), threading.Event()
     monkeypatch.setattr(
-        base, "race_clock", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
+        base, "race_time", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
     )
     waits: list[tuple[float | None, list[str]]] = []
     chosen: list[Choice] = []
@@ -554,12 +553,12 @@ def test_a_naive_deadline_is_refused_because_it_names_no_instant():
 
 @pytest.mark.parametrize(
     "stops_it",
-    ["a choice", "a branch that raised", "an enclosing choice", "a choice saved before it began"],
+    ["a choice", "an enclosing choice", "a choice saved before it began"],
 )
 def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, stops_it):
     """The mirror of the row above. A deadline is a reason to wake a race that still has
-    something to decide, and each of these ends that: a saved choice, a programming error before
-    any choice, and an enclosing race's choice. A bound outliving them would wake the race at
+    something to decide, and each of these ends that: a saved choice and an enclosing race's
+    choice. A bound outliving them would wake the race at
     `timeout=0` for as long as a loser took to drain, which the answer never shows.
 
     Branch 0 ends the race's deciding and branch 1 is released only once that has happened, so
@@ -567,12 +566,12 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
     nothing left to decide, which is a durable retry served its stored choice: there the wake
     under test is the first one."""
     released, crossed = threading.Event(), threading.Event()
-    enclosing, raised, chosen = [stops_it == "a choice saved before it began"], [False], []
+    enclosing, chosen = [stops_it == "a choice saved before it began"], []
     waits: list[tuple[float | None, bool]] = []
     real_wait = asyncio.wait
 
     def alive() -> bool:
-        return not (chosen or raised[0] or enclosing[0])
+        return not (chosen or enclosing[0])
 
     async def recording_wait(tasks: Any, **kw: Any) -> Any:
         waits.append((kw.get("timeout"), alive()))
@@ -580,7 +579,7 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
 
     monkeypatch.setattr(asyncio, "wait", recording_wait)
     monkeypatch.setattr(
-        base, "race_clock", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
+        base, "race_time", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
     )
 
     def run(i: int) -> Any:
@@ -588,9 +587,6 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
             assert released.wait(10), "the race never stopped deciding"
             return "second"
         match stops_it:
-            case "a branch that raised":
-                raised[0] = True
-                return BranchRaised(ValueError("a programming error"))
             case "an enclosing choice":
                 enclosing[0] = True
                 return "first"

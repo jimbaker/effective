@@ -299,11 +299,12 @@ def quorum[T](
             case Impossible(endings=endings):
                 ...
 
-    A refusal is a loss. Once `want` branches have succeeded, or too few can, the choice is saved
-    and every other branch stops at its next op admission; an op already admitted runs to its
+    A refusal is a loss. Once `want` branches have succeeded the choice is saved and every other
+    branch stops at its next op admission; an op already admitted runs to its
     end, and the race returns when every branch has ended. Winners come back in branch-index
-    order. `want` of 0 answers at once without starting a branch, and a `want` above the number of
-    branches is refused as a composition error.
+    order. Too few successes are impossible once every branch has ended, so a branch that would
+    raise always raises. `want` of 0 answers at once without starting a branch, and a `want` above
+    the number of branches is refused as a composition error.
 
     `deadline` is an instant the caller already holds, read through a `step` as `await_until`
     reads one, and it is a third way for the same choice to be decided rather than a second

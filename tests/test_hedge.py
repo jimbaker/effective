@@ -147,7 +147,7 @@ def test_the_second_attempt_starts_at_the_instant_and_the_first_is_cut(backend, 
     so its next op is admitted after the choice and cannot be admitted at all. Released by the
     call, it would race the choice and could win, which is the run this row must not report."""
     clock = _Held()
-    monkeypatch.setattr(base, "race_clock", clock)
+    monkeypatch.setattr(base, "race_time", clock)
     taken = _paths(monkeypatch)
     started, settled = threading.Event(), threading.Event()
     tools = _moving(
@@ -179,7 +179,7 @@ def test_a_sequential_ctx_runs_the_first_attempt_to_its_end(backend, monkeypatch
     No hold here, since there is nothing to hold: the first attempt has answered before the hedge
     arm is reached, so the timer never ticks and the second attempt never starts."""
     clock = _Held()
-    monkeypatch.setattr(base, "race_clock", clock)
+    monkeypatch.setattr(base, "race_time", clock)
     taken = _paths(monkeypatch)
     tools = _moving(clock, {})
 

@@ -101,5 +101,9 @@ module budget_confluence {
   //           differing from another schedule's {10,20}. The counterexample IS the schedule.
   val confluent: bool = atTerminal implies (executed == canonicalExecuted)
 
+  // Expected to be violated: a schedule drains every branch, so `confluent` is checked at a
+  // terminal it can fail on.
+  val neverAtTerminal: bool = not(atTerminal)
+
   val vars = (branches, spent, spentPer, executed)
 }

@@ -779,12 +779,13 @@ class RecordingHandler:
         slots = asyncio.run(racing.concurrently())
         merged = list(zip(children, slots, strict=True))
         if (choice := chosen.current()) is None:
-            if (raised := race_errors(slots)) is not None:
+            # An enclosing race's choice that stopped this race stops it whatever its branches
+            # raised, as it stops every loser.
+            self._merge_children(merged)  # a loss the enclosing race reads still walks its ops
+            if not self._stop.now() and (raised := race_errors(slots)) is not None:
                 raise raised
-            # An enclosing race's choice stopped this race's branches before it chose.
-            self._merge_children(merged)
             raise Stopping
-        if (transient := transient_errors(slots)) is not None:
+        if (transient := transient_errors(slots, choice)) is not None:
             raise transient
         endings = tuple(ending_of(i, slot, choice) for i, slot in enumerate(slots))
         self._record(TraceEntry(race_choice(r).prefixed(self._prefix), op, choice.stored()))

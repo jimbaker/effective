@@ -34,9 +34,9 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal, Never, Protocol, assert_never, runtime_checkable
+from typing import Any, Literal, Never, NoReturn, Protocol, assert_never, final, runtime_checkable
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -68,6 +68,7 @@ from effective.ops import (
     Gather,
     Minted,
     Race,
+    RaceUndecided,
     Respawn,
     Scoped,
     SleepUntil,
@@ -76,8 +77,8 @@ from effective.ops import (
     Unretryable,
     WorkflowOp,
     enter_task_run,
+    futile_leaf,
     leaves,
-    unretryable,
 )
 
 
@@ -529,9 +530,14 @@ class Continued:
 
 @dataclass(frozen=True)
 class BranchRaised:
-    """A gather branch's exception, held as the branch's slot until every branch has finished."""
+    """A gather branch's exception, held as the branch's slot until every branch has finished. In a
+    race, `before_choice` says it ended the branch before the race chose, and `replays` whether a
+    retry of the branch raises it again. The verdict is the slot's own, since siblings can raise
+    one exception instance."""
 
     error: Exception
+    before_choice: bool = False
+    replays: bool = False
 
 
 @dataclass(frozen=True)
@@ -612,7 +618,7 @@ def ending_of(index: int, slot: Any, choice: Choice) -> Ending[Any]:
             return Stopped(index)
         case BranchRaised(error=error) if all_refusals(error):
             return Refusal(index, str(next(leaves(error))))
-        case BranchRaised(error=error):  # an `Unretryable` one: `transient_errors` took the rest
+        case BranchRaised(error=error):  # before the choice, or one a retry would raise again
             return Raised(index, repr(error))
         case value if index in choice.winners:
             return Won(index, value)
@@ -631,7 +637,7 @@ def branch_slot(run: Callable[[Callable[[], Any]], Any], thunk: Callable[[], Any
         return BranchRaised(raised)
 
 
-def race_clock() -> float:
+def race_time() -> float:
     """The clock a race reads its deadline against, and the only clock a race reads at all.
 
     A race's branches run where the handler does rather than on the engine, so this is where a
@@ -640,6 +646,48 @@ def race_clock() -> float:
     deadline has arrived; it does not shorten the wait, so a clock held at or past the deadline
     is what a test uses to fire one."""
     return time.time()
+
+
+@final
+class Unrecorded[T]:
+    """A value the substrate read on this attempt that the record does not hold, so a retry may
+    read another. It reaches a decision only through an exit naming why the read stays sound:
+
+    | exit        | the value decides only                                                    |
+    |-------------|---------------------------------------------------------------------------|
+    | `settled()` | what the handler saves before acting on it, and is counted where it saves |
+    |             | nothing                                                                   |
+    | `elided()`  | whether a read of the record is skipped, which would answer the same      |
+
+    It has no truth value, no equality and no hash, so a branch on one fails rather than deciding.
+    `>=` against a float, and a float less one, answer another `Unrecorded`."""
+
+    __slots__ = ("_value",)
+    __bool__ = None
+    __hash__ = None  # equality is refused, so hashing is too
+
+    def __init__(self, value: T) -> None:
+        self._value = value
+
+    def __eq__(self, other: object) -> NoReturn:
+        raise TypeError("an unrecorded value decides nothing until an exit names why")
+
+    def __ge__(self: Unrecorded[float], other: float) -> Unrecorded[bool]:
+        return Unrecorded(self._value >= other)
+
+    def __rsub__(self: Unrecorded[float], other: float) -> Unrecorded[float]:
+        return Unrecorded(other - self._value)
+
+    def settled(self) -> T:
+        return self._value
+
+    def elided(self) -> T:
+        return self._value
+
+
+def race_clock() -> Unrecorded[float]:
+    """A race's read of `race_time`."""
+    return Unrecorded(race_time())
 
 
 def deadline_of(op: Race) -> float | None:
@@ -669,13 +717,18 @@ class Racing:
 
     def expired(self) -> bool:
         """Whether the deadline has arrived. The instant itself counts as arrived."""
-        return self.deadline is not None and race_clock() >= self.deadline
+        return self.deadline is not None and (race_clock() >= self.deadline).settled()
 
     def undecidable(self) -> bool:
         """Whether the race can decide nothing further: it has saved a choice, or an enclosing
         race's choice has stopped it. Its wakes need no bound from then on, and a branch that
         raised before any choice joins this from the loop that saw it."""
         return self.decided() or self.enclosed()
+
+    def stamp(self) -> float:
+        """When a branch ended, on the clock the deadline is read against. A race with no deadline
+        reads no clock, since no branch can end too late for it."""
+        return math.inf if self.deadline is None else race_clock().settled()
 
     def in_time(self, ended_at: float) -> bool:
         """Whether a branch that ended at `ended_at` ended in time to win. The instant itself is
@@ -691,23 +744,36 @@ class Racing:
         running: int,
         failing: bool,
     ) -> bool:
-        """Apply one batch to the choice, and whether a programming error has come before any
-        choice; from then on nothing is decided, so the race fails at its barrier with no loser
-        told to stop.
+        """Apply one batch to the choice, and whether the race has failed: a branch raised before
+        any choice and no branch is left to win. From then on nothing is decided, so the race fails
+        at its barrier with no loser told to stop.
+
+        A branch that raises before the choice counts as a loss while a sibling can still win, so
+        the order the branches are written in does not change the answer: its slot is marked
+        `before_choice`, and a race that a sibling wins ends it `Raised`. A branch read after the
+        choice raises after it, so the order can change which attempt answers.
 
         A batch can be empty, which is the race waking on its deadline with nothing new to read.
 
         A branch that ended at or after the deadline is itself evidence the deadline arrived, so
         it counts alongside the clock read: the two are read from different threads and a clock
         that steps back between them would otherwise answer impossible with a success in hand."""
-        kinds = {i: settled(slots[i]) for i in batch}
-        failing = failing or ("raised" in kinds.values() and not self.decided())
         if failing or self.decided() or self.enclosed():
             return failing
+        for i in batch:
+            match slots[i]:
+                case BranchRaised() as raised if settled(raised) == "raised":
+                    slots[i] = replace(raised, before_choice=True)
+                case _:
+                    pass
+        kinds = {i: settled(slots[i]) for i in batch}
         won = [i for i in batch if kinds[i] == "won" and self.in_time(ended_at[i])]
         late = [i for i in batch if kinds[i] == "won" and i not in won]
         lost = set(batch) - set(won)
-        if choice := decide(self.want, earlier, won, lost, running, self.expired() or bool(late)):
+        choice = decide(self.want, earlier, won, lost, running, self.expired() or bool(late))
+        if choice is not None and choice.kind != "winners" and race_errors(slots) is not None:
+            return True
+        if choice is not None:
             with self.tree:
                 if not self.enclosed():
                     self.choose(choice)
@@ -734,7 +800,7 @@ class Racing:
         def ended(i: int) -> tuple[Any, float]:
             # Stamped in the branch's own thread: a loaded event loop can reach a finished task
             # well after it finished, and stamping here is what a branch ENDED at either way.
-            return self.run(i), race_clock()
+            return self.run(i), self.stamp()
 
         slots: list[Any] = [None] * self.branches
         ended_at = [math.inf] * self.branches
@@ -745,7 +811,7 @@ class Racing:
         while pending:
             left = None
             if bounded and self.deadline is not None:
-                left = max(0.0, self.deadline - race_clock())
+                left = max(0.0, (self.deadline - race_clock()).settled())
             done, pending = await asyncio.wait(
                 pending, timeout=left, return_when=asyncio.FIRST_COMPLETED
             )
@@ -774,16 +840,20 @@ class Racing:
         self.before_any_branch(slots, ended_at)
         for i in range(self.branches):
             slots[i] = self.run(i)
-            ended_at[i] = race_clock()
+            ended_at[i] = self.stamp()
             failing = self.read([i], slots, ended_at, earlier, self.branches - i - 1, failing)
         return slots
 
 
-def race_errors(slots: Iterable[Any]) -> ExceptionGroup | None:
-    """The group a race raises at its barrier when a branch's programming error came before any
-    choice, or `None`."""
-    raised = [slot.error for slot in slots if settled(slot) == "raised"]
-    return ExceptionGroup("race branches raised", raised) if raised else None
+def race_errors(slots: Iterable[Any]) -> RaceUndecided | None:
+    """The group a race raises at its barrier when branches raised before any choice and none was
+    left to win, or `None`."""
+    raised = [
+        slot.error
+        for slot in slots
+        if isinstance(slot, BranchRaised) and settled(slot) == "raised"
+    ]
+    return RaceUndecided("race branches raised", raised) if raised else None
 
 
 class RefusalDiverged(Unretryable):
@@ -844,24 +914,32 @@ def served_refusal(stored: Any) -> bool:
             return False
 
 
-def transient_errors(slots: Iterable[Any]) -> ExceptionGroup | None:
+def fails_the_attempt(slot: BranchRaised, choice: Choice) -> bool:
+    """Whether a loser's error fails the attempt that raised it, as `transient_errors` tables."""
+    diverged = any(isinstance(leaf, RefusalDiverged) for leaf in leaves(slot.error))
+    typed = futile_leaf(slot.error, delayed=True) is not None  # an `Unretryable` leaf alone
+    if diverged or slot.before_choice:
+        return diverged  # the record, or the read before the choice, settled the rest
+    return choice.kind != "winners" or not (slot.replays or typed)
+
+
+def transient_errors(slots: Iterable[Any], choice: Choice) -> ExceptionGroup | None:
     """The group a race raises at its barrier after its choice, or `None`.
 
-    | a loser's error after the choice               | at the barrier                         |
+    | a loser's error                                | at the barrier                         |
     |------------------------------------------------|----------------------------------------|
-    | one a retry could clear                        | fails the attempt; the retry stops the |
-    |                                                | loser at the op it never recorded      |
     | a `RefusalDiverged`                            | fails the task: the record and the     |
     |                                                | gates disagree                         |
-    | any other `Unretryable`                        | the loser's `Raised` ending            |"""
+    | any, after a choice of no winners              | fails the attempt, as it would have    |
+    |                                                | failed the race had it been read first |
+    | raised before a choice of winners              | the loser's `Raised` ending            |
+    | one a retry would raise again                  | the loser's `Raised` ending            |
+    | any other after the choice                     | fails the attempt; the retry stops the |
+    |                                                | loser at the op it never recorded      |"""
     errors = [
         slot.error
         for slot in slots
-        if settled(slot) == "raised"
-        and (
-            unretryable(slot.error) is None
-            or any(isinstance(leaf, RefusalDiverged) for leaf in leaves(slot.error))
-        )
+        if settled(slot) == "raised" and fails_the_attempt(slot, choice)
     ]
     return ExceptionGroup("race branches raised", errors) if errors else None
 
@@ -878,11 +956,12 @@ def barrier_errors(slots: Iterable[Any], *, parked: bool) -> ExceptionGroup | No
 
 @dataclass(frozen=True)
 class Attempt:
-    """One execution of a task: its number, counted from 1, and the task's limit (`None` when the
-    engine sets none)."""
+    """One execution of a task: its number, counted from 1, the task's limit (`None` when the
+    engine sets none), and whether a retry after it waits before it runs."""
 
     number: int
     limit: int | None
+    delayed: bool = False
 
     @property
     def final(self) -> bool:
@@ -895,13 +974,19 @@ def failing_leaf(raised: BaseException, attempt: Attempt) -> BaseException | Non
     again, the first of a failure that is only refusals, or on the last attempt its first leaf.
     `None` while a retry could still succeed.
 
-    | failure                       | fails of                    | when             |
-    |-------------------------------|-----------------------------|------------------|
-    | holds an `Unretryable` leaf   | that leaf                   | this attempt     |
-    | only refusals                 | the first refusal           | this attempt     |
-    | anything else                 | its first leaf              | the last attempt |"""
-    match unretryable(raised), all_refusals(raised), attempt.final:
-        case (Unretryable() as leaf, _, _):
+    | failure                                          | fails of           | when             |
+    |--------------------------------------------------|--------------------|------------------|
+    | holds an `Unretryable` leaf                      | that leaf          | this attempt     |
+    | holds a leaf raised by a frame that ran nothing  | that leaf          | this attempt     |
+    | fresh and counted no substrate read the record   |                    |                  |
+    | does not hold, and the retry runs at once        |                    |                  |
+    | only refusals                                    | the first refusal  | this attempt     |
+    | anything else                                    | its first leaf     | the last attempt |
+
+    A refusal beside a crash waits for the retry: once the crash clears, the refusal alone is
+    delivered into the workflow, which may catch it."""
+    match futile_leaf(raised, delayed=attempt.delayed), all_refusals(raised), attempt.final:
+        case (BaseException() as leaf, _, _):
             return leaf
         case (None, True, _) | (None, False, True):
             return next(leaves(raised))
@@ -965,14 +1050,15 @@ class TaskContext(Protocol):
     fence, so a claim the task has moved past raises rather than writing. Neither applies an
     occurrence suffix: the name a race settles is positional and already unique in its thread.
 
-    **Optional capability: ``await_until(name: Key, deadline: float) -> WaitOutcome``**
-    (discovered the same way): ``await_event`` with a clock beside it. ``deadline`` is absolute,
-    in epoch seconds, so every attempt waits on the instant the first one chose. It answers
-    ``Arrived(payload)`` where an ``await_event`` would have returned, ``Expired`` once the
-    deadline has passed, and otherwise parks on both. The outcome is RECORDED when it is first
-    reached, so a replay serves it and an event landing after an expiry leaves that expiry
-    standing: a wait with two possible answers has to say which one it gave. A ctx without this
-    meets a named refusal (``DurableHandler._await_bounded``) rather than a dropped deadline.
+    **Optional capability: ``await_until(name: Key, deadline: float, decided: Key) ->
+    WaitOutcome``** (discovered the same way): ``await_event`` with a clock beside it.
+    ``deadline`` is absolute, in epoch seconds, so every attempt waits on the instant the first
+    one chose. It answers ``Arrived(payload)`` where an ``await_event`` would have returned,
+    ``Expired`` once the deadline has passed, and otherwise parks on both. The outcome is RECORDED
+    under ``decided`` when it is first reached, so a replay serves it and an event landing after
+    an expiry leaves that expiry standing: a wait with two possible answers has to say which one
+    it gave. A ctx without this meets a named refusal (``DurableHandler._await_bounded``) rather
+    than a dropped deadline.
     """
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:

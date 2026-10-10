@@ -203,8 +203,14 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `telemetry._guarded` reads a hole's value, expression, conversion and spec to rebuild it.
     # `lint.check_sdk_private_source` reads an attribute's receiver and name, and an import's
     # module and names.
-    # `DurableHandler._keyed` reads a tool call's name and args.
-    assert reached == 255, f"the corpus this fix was measured on held 255; found {reached}"
+    # `DurableHandler._keyed` reads a tool call's name and args, and `_report_raised` the error
+    # a raised loser's slot holds.
+    # `ops.placed_leaves` reads the exceptions a group holds, to find an undecided race's.
+    # The determinism lint for layers and schemas: `lint._binds` reads the names a node binds,
+    # stores, captures and shares, `_use` and `_accumulates` a write's target and a call's callee
+    # and arguments, `_path_of` an attribute or item path's parts, `_reads_the_world` and
+    # `_world_names` a call and an import, and `_schema_violations` a factory named by name.
+    assert reached == 292, f"the corpus this fix was measured on held 292; found {reached}"
 
     seen = {
         (str(p), line + 1)

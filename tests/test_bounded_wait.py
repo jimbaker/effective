@@ -10,8 +10,10 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, get_args, get_origin, get_type_hints
+from uuid import uuid4
 
 import pytest
+from _conformance import review_name
 from _shapes import run
 
 from effective.api import Effect, await_until, call_tool, gather
@@ -23,6 +25,7 @@ from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key
 from effective.ops import (
+    Addressing,
     Arrived,
     AwaitEvent,
     CompositionRefused,
@@ -124,6 +127,24 @@ def test_an_instant_read_through_a_step_keeps_its_zone_on_an_engine(backend, whe
     assert naive.snap.state == "failed", naive.snap
     assert backend.failure_kind(naive.snap) == "CompositionRefused"
     assert backend.task_attempts(naive.task) == 1
+
+
+FAR = datetime(2100, 1, 1, tzinfo=UTC)
+"""Past the seconds an `int4` holds, counted from now."""
+
+
+def _waits_for_an_absolute_arrival(name: Key) -> Effect[str]:
+    outcome = yield from await_until(name, dict, deadline=FAR, addressing=Addressing.ABSOLUTE)
+    return type(outcome).__name__
+
+
+def test_a_wait_whose_deadline_is_decades_out_parks_and_takes_its_arrival(backend) -> None:
+    """The name is the run's own, since an Absurd event outlives the test that emitted it."""
+    name = review_name(str(uuid4()))
+    outcome = run(backend, lambda _run_id: _waits_for_an_absolute_arrival(name), _Tool())
+    assert outcome.snap.state == "waiting", outcome.snap
+    backend.emit_event(outcome.task, name.stored(), {"ok": True})
+    assert backend.run_until_result(outcome.task).result == "Arrived"
 
 
 def test_the_op_reaches_the_recorder_as_an_arrival() -> None:
@@ -257,7 +278,6 @@ def test_an_absolute_bounded_wait_still_answers_at_its_deadline(tmp_path) -> Non
     that survives `RELATIVE` and vanishes under `ABSOLUTE` parks a run that asked to be released,
     which is the failure `AwaitEvent.deadline`'s own docstring names.
     """
-    from effective.ops import Addressing
 
     app = SqliteApp(str(tmp_path / "absolute.db"))
     past = datetime.now(UTC) - timedelta(seconds=5)

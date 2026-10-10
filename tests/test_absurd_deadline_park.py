@@ -62,12 +62,21 @@ def conn():
     c.close()
 
 
-def test_a_parked_bounded_wait_registers_the_deadline_it_was_given(conn):
+DEADLINES = {
+    "a rounding away": lambda: (
+        datetime.now().astimezone() + timedelta(seconds=A_DEADLINE_THE_ROUNDING_WOULD_MOVE)
+    ),
+    "past the seconds an integer holds": lambda: datetime(2100, 1, 1).astimezone(),
+}
+
+
+@pytest.mark.parametrize("deadline_of", list(DEADLINES.values()), ids=list(DEADLINES))
+def test_a_parked_bounded_wait_registers_the_deadline_it_was_given(conn, deadline_of):
     """The wait row and the run row both name the workflow's deadline, not a rounded one."""
     app = absurd()
     name = f"deadline-{uuid.uuid4().hex[:8]}"
     event = f"shared:{name}"
-    deadline = datetime.now().astimezone() + timedelta(seconds=A_DEADLINE_THE_ROUNDING_WOULD_MOVE)
+    deadline = deadline_of()
 
     def wf():
         outcome = yield from await_until(event, _Ack, deadline=deadline)

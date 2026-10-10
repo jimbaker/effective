@@ -34,14 +34,20 @@ run_check() {
     echo "    (done in $((SECONDS-t0))s)"
 }
 
-# A check that must FAIL. `quint verify` exits non-zero on a violation, so a ZERO exit here
-# means the counterexample vanished — the guard rotted, and that is the loud failure.
+# A check that must FAIL with a counterexample. A zero exit means the counterexample vanished,
+# and a non-zero exit without one means quint never checked the property.
 run_expect_violation() {
     local file="$1" args="$2" what="$3"
     echo "==> [expect violation] $file $args — $what"
+    local out
     # shellcheck disable=SC2086
-    if "$QUINT" verify "$file" $args >/dev/null 2>&1; then
+    if out=$("$QUINT" verify "$file" $args 2>&1); then
         echo "    GUARD FAILED: $what, but the check PASSED" >&2
+        return 1
+    fi
+    if ! grep -qF "$FORMAL_COUNTEREXAMPLE" <<< "$out"; then
+        echo "    GUARD FAILED: $what, but quint found no counterexample:" >&2
+        tail -3 <<< "$out" >&2
         return 1
     fi
     echo "    violated, as it must"
@@ -55,13 +61,19 @@ run_tooth() {
     local dir
     dir=$(mktemp -d)
     sed "s/$from/$to/" "$file" > "$dir/bug_$file"
+    local out
     # shellcheck disable=SC2086
-    if (cd "$dir" && "$QUINT" verify "bug_$file" $args) >/dev/null 2>&1; then
+    if out=$(cd "$dir" && "$QUINT" verify "bug_$file" $args 2>&1); then
         echo "    TOOTH FAILED: $what, but the check PASSED" >&2
         rm -rf "$dir"
         return 1
     fi
     rm -rf "$dir"
+    if ! grep -qF "$FORMAL_COUNTEREXAMPLE" <<< "$out"; then
+        echo "    TOOTH FAILED: $what, but quint found no counterexample:" >&2
+        tail -3 <<< "$out" >&2
+        return 1
+    fi
     echo "    broke, as it must"
 }
 

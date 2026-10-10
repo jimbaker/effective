@@ -45,6 +45,7 @@ lint:
     uv run ruff check src tests examples scripts
     uv run python -m effective.lint
     uv run python -m effective.lint --layers
+    uv run python -m effective.lint --schemas src examples
     uv run python -m effective.lint --channels {{CHANNEL_SRCS}}
     uv run python -m effective.lint --deps src/effective src/agent src/tui src/examples
     uv run python -m effective.lint --ledger-reads src/effective src/agent scripts
@@ -225,9 +226,7 @@ formal-quint-host:
     set -eo pipefail
     QUINT="$PWD/infra/formal/node_modules/.bin/quint"
     [ -x "$QUINT" ] || { echo "no pinned quint: run 'just formal-setup' first" >&2; exit 1; }
-    (cd formal/quint && "$QUINT" typecheck effective.qnt && "$QUINT" typecheck gather.qnt \
-        && "$QUINT" typecheck budget_confluence.qnt \
-        && "$QUINT" typecheck govern_park.qnt && "$QUINT" typecheck race.qnt)
+    (cd formal/quint && for spec in *.qnt; do "$QUINT" typecheck "$spec"; done)
     echo "formal-quint-host: OK"
 
 # Lean build + quint typecheck (seconds)
@@ -250,7 +249,9 @@ formal-vectors:
       && lake exe decide_vectors 2>/dev/null) > formal/decide_vectors.json
     (cd formal/lean && lake build govern_vectors >/dev/null 2>&1 \
       && lake exe govern_vectors 2>/dev/null) > formal/govern_vectors.json
-    echo "formal-vectors: regenerated formal/{enforce,decide,govern}_vectors.json"
+    (cd formal/lean && lake build retry_vectors >/dev/null 2>&1 \
+      && lake exe retry_vectors 2>/dev/null) > formal/retry_vectors.json
+    echo "formal-vectors: regenerated formal/{enforce,decide,govern,retry}_vectors.json"
 
 formal-image:
     podman build -t effective-formal:0.32.0-0.56.1 infra/formal/

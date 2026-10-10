@@ -32,3 +32,8 @@ root = "DecideVectors"
 name = "govern_vectors"
 root = "GovernVectors"
 # The same, for the `govern` gate's ruling (see GovernVectors.lean, Effective/Govern.lean).
+
+[[lean_exe]]
+name = "retry_vectors"
+root = "RetryVectors"
+# The same, for the edge's decision on a raised error (see RetryVectors.lean, Effective/Retry.lean).

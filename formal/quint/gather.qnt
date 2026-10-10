@@ -9,7 +9,7 @@
 // active op-head, a *defined transition OR a defined park*. The bug modeled: an
 // `Await` inside a gather branch had NEITHER on the durable path — a hole in the
 // relation, which surfaced as a silent suspend-in-gather crash. We encode I2 directly
-// as `total` (every reachable head is handled), so the bug is "an in-branch await the
+// as `total` (every reachable head has a rule), so the bug is "an in-branch await the
 // handler has no rule for", found as a reachable config where `total` fails.
 //
 // NOTE (I2 vs I3): an await waiting on an *absent* event is legitimately **Parked** —
@@ -85,6 +85,37 @@ module gather {
   pure def ledHas(l: List[int], x: int): bool =
     l.indices().exists(i => l[i] == x)
 
+  // The handler's rule for an op head, by where the head stands. The actions fire on it and
+  // the invariants read it, so a rule taken out of the handler is a hole `total` sees.
+  type Rule = Advance | ResumeOn(int) | NoRule
+
+  pure def rule(op: Op, inBranch: bool): Rule =
+    match op {
+      | Await(e) => if (inBranch and not(handlerFixed)) NoRule else ResumeOn(e)
+      | Gather   => if (inBranch) NoRule else Advance   // a nested gather is not modeled
+      | _        => Advance
+    }
+
+  pure def fires(r: Rule, delivered: Set[int]): bool =
+    match r {
+      | Advance     => true
+      | ResumeOn(e) => delivered.contains(e)
+      | NoRule      => false
+    }
+
+  pure def hasRule(r: Rule): bool =
+    match r {
+      | NoRule => false
+      | _      => true
+    }
+
+  // A head parked on an event the environment has yet to deliver.
+  pure def deliveryUnblocks(r: Rule, delivered: Set[int]): bool =
+    match r {
+      | ResumeOn(e) => events.contains(e) and not(delivered.contains(e))
+      | _           => false
+    }
+
   action init = all {
     main' = workflow,
     branches' = [],
@@ -103,19 +134,22 @@ module gather {
   else {
     val op = main.head()
     val rest = main.tail()
-    match op {
-      | Step(n) => all {
-          chk' = chk.union(Set(n)), main' = rest,
-          branches' = branches, led' = led, evt' = evt }
-      | Ledger(eid) => all {
-          led' = if (not(ledHas(led, eid))) led.append(eid) else led, main' = rest,
-          branches' = branches, chk' = chk, evt' = evt }
-      | Await(e) => all {                       // top-level await: resume once delivered
-          evt.contains(e), main' = rest,
-          branches' = branches, chk' = chk, led' = led, evt' = evt }
-      | Gather => all {                         // spawn the branches
-          branches' = branchSpecs, main' = rest,
-          chk' = chk, led' = led, evt' = evt }
+    all {
+      fires(rule(op, false), evt),
+      match op {
+        | Step(n) => all {
+            chk' = chk.union(Set(n)), main' = rest,
+            branches' = branches, led' = led, evt' = evt }
+        | Ledger(eid) => all {
+            led' = if (not(ledHas(led, eid))) led.append(eid) else led, main' = rest,
+            branches' = branches, chk' = chk, evt' = evt }
+        | Await(_) => all {                       // resumes once its event is delivered
+            main' = rest,
+            branches' = branches, chk' = chk, led' = led, evt' = evt }
+        | Gather => all {                         // spawn the branches
+            branches' = branchSpecs, main' = rest,
+            chk' = chk, led' = led, evt' = evt }
+      }
     }
   }
 
@@ -135,21 +169,22 @@ module gather {
     val b = branches[i]
     val op = b.head()
     val rest = b.tail()
-    match op {
-      | Step(n) => all {
-          chk' = chk.union(Set(n)), branches' = branches.replaceAt(i, rest),
-          main' = main, led' = led, evt' = evt }
-      | Ledger(eid) => all {
-          led' = if (not(ledHas(led, eid))) led.append(eid) else led,
-          branches' = branches.replaceAt(i, rest),
-          main' = main, chk' = chk, evt' = evt }
-      | Await(e) => all {                       // resume: needs the rule (fixed) AND the event
-          handlerFixed, evt.contains(e),        // buggy handler: disabled (no rule → `total` flags it)
-          branches' = branches.replaceAt(i, rest),
-          main' = main, chk' = chk, led' = led, evt' = evt }
-      | Gather => all {                         // no nested gather in branchSpecs (v1): disabled
-          false,
-          branches' = branches, main' = main, chk' = chk, led' = led, evt' = evt }
+    all {
+      fires(rule(op, true), evt),               // the buggy handler has no rule for an await here
+      match op {
+        | Step(n) => all {
+            chk' = chk.union(Set(n)), branches' = branches.replaceAt(i, rest),
+            main' = main, led' = led, evt' = evt }
+        | Ledger(eid) => all {
+            led' = if (not(ledHas(led, eid))) led.append(eid) else led,
+            branches' = branches.replaceAt(i, rest),
+            main' = main, chk' = chk, evt' = evt }
+        | Await(_) => all {
+            branches' = branches.replaceAt(i, rest),
+            main' = main, chk' = chk, led' = led, evt' = evt }
+        | Gather => all {                         // never fires: a nested gather has no rule
+            branches' = branches, main' = main, chk' = chk, led' = led, evt' = evt }
+      }
     }
   }
 
@@ -178,25 +213,17 @@ module gather {
 
   // --- invariants ---
 
-  // Does the handler define a transition-or-park for `op` at this position?
-  // Step/Ledger/Gather always step. An await is handled iff it is at top level OR the
-  // (fixed) handler gives in-branch awaits a rule. The buggy handler leaves in-branch
-  // awaits with neither a transition nor a park — the hole.
-  pure def headHandled(op: Op, inBranch: bool): bool =
-    match op {
-      | Await(_) => not(inBranch) or handlerFixed
-      | _        => true
-    }
-
-  // I2 (totality), faithfully: every reachable configuration's active heads — the main
-  // head and every branch head — are handled. FIXED handler: holds (total by
-  // construction — every op-position has a rule). BUGGY handler: Apalache finds a
-  // reachable config (branch head = Await(7)) the handler can't handle → violation.
-  // The non-vacuous content is the *buggy* direction: that the hole is REACHABLE.
+  // I2 (totality): every reachable configuration's active heads, the main head and every
+  // branch head, have a rule to fire on, a step or a resume. The buggy handler leaves the
+  // in-branch Await(7) with none, and a nested gather in `branchSpecs` would have none.
   val total: bool =
-    (main.length() == 0 or headHandled(main.head(), false)) and
+    (main.length() == 0 or hasRule(rule(main.head(), false))) and
     branches.indices().forall(i =>
-      branches[i].length() == 0 or headHandled(branches[i].head(), true))
+      branches[i].length() == 0 or hasRule(rule(branches[i].head(), true)))
+
+  // An await's effect waits for its event: branch 0's row after `Await(7)` lands only once
+  // event 7 is delivered. The stuckness checks cannot see a rule that fires too early.
+  val awaitHonored: bool = ledHas(led, 20) implies evt.contains(7)
 
   // T3 cross-check carried over: the ledger never holds a duplicate.
   val ledgerNodup: bool =
@@ -221,37 +248,32 @@ module gather {
   // `total` checks every reachable op-head has a rule. `noDeadlock` checks every reachable
   // non-terminal *configuration* can make progress now, or has a pending await that a
   // delivery would unblock AND the handler can resume. It catches a stuck *state* even when
-  // it isn't a missing-rule one — what `total` structurally can't see. It re-encodes the
-  // action guards as predicates, so keep it in sync with stepMain/stepBranch/joinGather (a
-  // known DRY seam — Quint invariants are state predicates, not `enabled(action)`).
+  // it isn't a missing-rule one, which `total` cannot see. Quint invariants are state
+  // predicates rather than `enabled(action)`, so the heads' enabledness reads `rule` and
+  // `fires`, as the actions do, and the join and the main gate restate their guards.
   val mainStepEnabled: bool =
-    main.length() > 0 and branches.length() == 0 and
-    (match main.head() { | Await(e) => evt.contains(e) | _ => true })
+    main.length() > 0 and branches.length() == 0 and fires(rule(main.head(), false), evt)
 
   val branchStepEnabled: bool =
-    activeBranches.exists(i =>
-      match branches[i].head() {
-        | Await(e) => handlerFixed and evt.contains(e)   // resume needs the rule + the event
-        | _        => true                               // Step/Ledger always step
-      })
+    activeBranches.exists(i => fires(rule(branches[i].head(), true), evt))
 
   val joinEnabled: bool = branches.length() > 0 and activeBranches == Set()
 
   // a not-yet-delivered, deliverable event whose await the handler will resume on delivery
   val deliverWouldHelp: bool =
     (main.length() > 0 and branches.length() == 0 and
-       (match main.head() { | Await(e) => events.contains(e) and not(evt.contains(e)) | _ => false }))
-    or activeBranches.exists(i =>
-       match branches[i].head() {
-         | Await(e) => handlerFixed and events.contains(e) and not(evt.contains(e))
-         | _        => false
-       })
+       deliveryUnblocks(rule(main.head(), false), evt))
+    or activeBranches.exists(i => deliveryUnblocks(rule(branches[i].head(), true), evt))
 
   // I2-adjacent: no reachable configuration is genuinely stuck. FIXED handler: holds.
-  // BUGGY handler: fires at `[[Await(7),Ledger(20)],[]]` — the in-branch await the handler
-  // can neither step nor be unblocked by delivery (its arm needs `handlerFixed`).
+  // BUGGY handler: fires at `[[Await(7),Ledger(20)],[]]`, the in-branch await with no rule,
+  // which neither steps nor waits on a delivery.
   val noDeadlock: bool =
     terminated or mainStepEnabled or branchStepEnabled or joinEnabled or deliverWouldHelp
+
+  // Expected to be violated: a head parks on an undelivered event, so `awaitHonored` is checked
+  // where it can fail.
+  val neverParked: bool = not(deliverWouldHelp)
 
   val vars = (main, branches, chk, led, evt)
 

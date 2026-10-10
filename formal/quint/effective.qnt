@@ -109,6 +109,10 @@ module effective {
   val ledgerNodup: bool =
     led.length() == led.foldl(Set(), (acc, x) => acc.union(Set(x))).size()
 
+  // Expected to be violated: the workflow runs to its end, through the resume on event 5 and
+  // both appends, so `ledgerNodup` is checked over states that reach them.
+  val neverFinished: bool = prog.length() > 0
+
   // I2 (totality), v0 form: the workflow is never *stuck* — either it is done
   // (prog empty), or its head op can make progress, or its head is an Await still
   // waiting (which `deliver` can always unblock).

@@ -17,9 +17,10 @@ podman image exists "$IMG" || {
     exit 1
 }
 
-SPECS=(effective.qnt gather.qnt budget_confluence.qnt govern_park.qnt race.qnt)
+SPECS=(formal/quint/*.qnt)
 
-for spec in "${SPECS[@]}"; do
+for path in "${SPECS[@]}"; do
+    spec=${path##*/}
     echo "==> quint typecheck $spec"
     podman run --rm --network=none \
         -v ./formal/quint:/spec:ro,Z \

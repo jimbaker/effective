@@ -450,6 +450,32 @@ def test_D12_endings_are_served_from_the_store(backend):
     assert result == ["chosen", [["won", 0, "a"], ["raised", 1, None]]]
 
 
+def test_D12_a_losers_code_raising_on_its_recorded_value_after_the_choice_is_its_ending(backend):
+    """The loser's op is recorded and then its own code raises on the value, after the winner was
+    chosen. A retry replays the op and raises again, so by the second attempt the loser ends
+    `Raised` and the race returns its winner."""
+    started, settled = threading.Event(), threading.Event()
+
+    def held() -> str:
+        started.set()
+        settled.wait(10)
+        return "recorded"
+
+    def loser():
+        value = yield from call_tool("b0", {}, str)
+        raise KeyError("the loser's code raised on " + value)
+
+    tools = _Tools({"a": lambda: started.wait(10), "b0": held})
+
+    def program():
+        return _described((yield from race([_calls("a"), loser])))
+
+    result = _run(
+        backend, "concurrent", program, tools, attempts=2, wrap=lambda ctx: _Settled(ctx, settled)
+    )
+    assert result == ["chosen", [["won", 0, "a"], ["raised", 1, None]]]
+
+
 def test_D8_a_losers_spend_and_ledger_row_reach_the_record(sqlite_app):
     """On SQLite. The loser appends a row and makes one metered call before the
     flag; the winner's call holds until that call is running, and the loser's call holds until
@@ -580,11 +606,27 @@ def test_a_park_a_layer_injects_in_a_race_branch_is_refused(concurrent, sqlite_a
     ctx = SqliteTaskContext(app.conn, uuid4(), app.write_lock if concurrent else None)
 
     def program():
-        return (yield from race([_calls("a"), _calls("b")]))
+        return (yield from race([_calls("a")]))
 
     with pytest.raises(ExceptionGroup) as raised:
         DurableHandler(ctx, tools, op_layers=[_parks_before_a]).run(program)
     assert [type(leaf) for leaf in leaves(raised.value)] == [CompositionRefused]
+    assert "a" not in tools.calls
+
+
+@pytest.mark.parametrize("concurrent", [False, True], ids=["sequential", "concurrent"])
+def test_a_branch_refused_an_injected_park_loses_to_its_sibling(concurrent, sqlite_app):
+    """The refusal comes before the choice, so it is a loss while the sibling can still win, and
+    the gated op never runs."""
+    app = sqlite_app()
+    tools = _Tools()
+    ctx = SqliteTaskContext(app.conn, uuid4(), app.write_lock if concurrent else None)
+
+    def program():
+        return _described((yield from race([_calls("a"), _calls("b")])))
+
+    result = DurableHandler(ctx, tools, op_layers=[_parks_before_a]).run(program)
+    assert result == ["chosen", [["raised", 0, None], ["won", 1, "b"]]]
     assert "a" not in tools.calls
 
 
@@ -1063,7 +1105,7 @@ def test_a_domain_refusal_subclass_calls_the_domain_again_on_a_retry(backend, sh
 
 
 DEADLINE = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-"""The instant the deadline rows race against. A race reads one clock, `base.race_clock`, so a
+"""The instant the deadline rows race against. A race reads one clock, `base.race_time`, so a
 row holds that clock rather than waiting for a real one."""
 
 
@@ -1074,7 +1116,7 @@ def test_D26_a_deadline_already_behind_the_race_stops_it_before_a_branch_runs(
     """A race reads its deadline before it launches a branch, so one whose deadline is already
     gone stops every branch at its first admission and calls no tool. This is the restart case:
     a crash before the choice can leave the retry starting with the deadline long behind it."""
-    monkeypatch.setattr(base, "race_clock", lambda: DEADLINE.timestamp() + 1.0)
+    monkeypatch.setattr(base, "race_time", lambda: DEADLINE.timestamp() + 1.0)
     tools = _Tools()
 
     def program():
@@ -1092,7 +1134,7 @@ def test_D27_a_sequential_race_records_a_late_success_as_unchosen(backend, monke
     sequential ctx can keep. Branch 0 moves the clock past the deadline on its way out, so its
     success is on record and late: unchosen rather than stopped, and branch 1 never starts."""
     held = {"at": (DEADLINE - timedelta(hours=1)).timestamp()}
-    monkeypatch.setattr(base, "race_clock", lambda: held["at"])
+    monkeypatch.setattr(base, "race_time", lambda: held["at"])
 
     def past_the_deadline() -> object:
         held["at"] = DEADLINE.timestamp() + 1.0
@@ -1118,7 +1160,7 @@ def test_D28_a_retry_is_served_the_timeout_with_the_deadline_ahead_of_it(
     the retry runs with the clock held an hour BEFORE the deadline. The stored choice stands, so
     a handler that re-decided would reopen a race the first attempt had closed."""
     held = {"at": DEADLINE.timestamp() + 1.0}
-    monkeypatch.setattr(base, "race_clock", lambda: held["at"])
+    monkeypatch.setattr(base, "race_time", lambda: held["at"])
 
     def program():
         return _described((yield from race([_calls("a"), _calls("b")], deadline=DEADLINE)))
@@ -1142,7 +1184,7 @@ def test_D29_a_crash_before_the_choice_meets_its_deadline_already_gone(
     with it an hour behind. The deadline is the workflow's own instant either way, so the retry
     times out at once and calls no tool, where D28 could have been served a stored choice."""
     held = {"at": (DEADLINE - timedelta(hours=1)).timestamp()}
-    monkeypatch.setattr(base, "race_clock", lambda: held["at"])
+    monkeypatch.setattr(base, "race_time", lambda: held["at"])
     calls_by_attempt: dict[int, list[str]] = {}
 
     def die() -> object:
@@ -1164,3 +1206,133 @@ def test_D29_a_crash_before_the_choice_meets_its_deadline_already_gone(
     result = _run(backend, shape, program, tools, attempts=2, wrap=fresh, after=record)
     assert result == ["timeout", [["stopped", 0, None], ["stopped", 1, None]]]
     assert calls_by_attempt[2] == [], "the retry called a tool under a deadline already gone"
+
+
+def _raises_code():
+    """A branch whose code raises before its first op, so a retry raises it again."""
+
+    def branch():
+        raise ValueError("a programming error in the branch")
+        yield  # a generator, which never reaches its first yield
+
+    return branch
+
+
+def _raises_after_its_op(name: str):
+    """A branch whose code raises once its op is on record, so a retry serves the op and raises."""
+
+    def branch():
+        yield from call_tool(name, {}, str)
+        raise ValueError("a programming error after the op")
+
+    return branch
+
+
+def _ended(backend: Any, shape: str, program: Callable[[], Any], attempts: int) -> Any:
+    """Run `program` as one task to its end, and return the task's state."""
+    name = private("race")
+
+    def body(params: Any, ctx: Any) -> Any:
+        held: Any = _Sequential(ctx) if shape == "sequential" and backend.name == "sqlite" else ctx
+        return DurableHandler(held, _Tools()).run(program)
+
+    backend.register_body(name, body, deployed=shape == "sequential")
+    snapshot = backend.run_until_result(backend.spawn(name, str(uuid4()), max_attempts=attempts))
+    assert snapshot is not None
+    return snapshot.state
+
+
+NO_WINNERS_HOLDING_AN_ERROR = {
+    "a refusal read before the errors": lambda: quorum(
+        3, [_refuses("no"), _raises_code(), _raises_code()]
+    ),
+    "a refusal read after the errors": lambda: quorum(
+        3, [_raises_code(), _raises_code(), _refuses("no")]
+    ),
+    "a deadline already gone": lambda: race(
+        [_raises_code()], deadline=datetime(2000, 1, 1, tzinfo=UTC)
+    ),
+    "a refusal read before a raise after an op": lambda: quorum(
+        3, [_refuses("no"), _calls("a"), _raises_after_its_op("x")]
+    ),
+    "a refusal read after a raise after an op": lambda: quorum(
+        3, [_raises_after_its_op("x"), _calls("a"), _refuses("no")]
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+@pytest.mark.parametrize("race_of", list(NO_WINNERS_HOLDING_AN_ERROR))
+def test_a_race_of_no_winners_holding_an_error_fails_its_task_in_every_order(
+    backend, shape, race_of
+):
+    """A race answers a choice of no winners only from an attempt in which no branch raised, so
+    whether the task answers cannot turn on which branch was read first."""
+
+    def program():
+        return _described((yield from NO_WINNERS_HOLDING_AN_ERROR[race_of]()))
+
+    assert _ended(backend, shape, program, attempts=3) == "failed"
+
+
+def _until(event: threading.Event) -> None:
+    assert event.wait(10), "a hold was never released"
+
+
+class _ReleasedByChoice:
+    """Wraps a ctx and sets `settled` when the race's choice lands, and for nothing else.
+
+    `_Settled` fires on every settle, so a loser is released by whatever the
+    winner checkpointed first. Keying on the choice names the event the assertion is about."""
+
+    def __init__(self, ctx: Any, settled: threading.Event, choice: Key) -> None:
+        self._ctx, self._settled, self._choice = ctx, settled, choice
+
+    def settle(self, name: Key, value: Any) -> Any:
+        stored = self._ctx.settle(name, value)
+        if name == self._choice:
+            self._settled.set()
+        return stored
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._ctx, name)
+
+
+ENCLOSED_HOLDING_AN_ERROR = {
+    "hopeless": lambda: quorum(3, [_refuses("no"), _raises_code(), _calls("slow")]),
+    "still winnable": lambda: quorum(2, [_raises_code(), _calls("slow"), _calls("slow2")]),
+}
+
+
+@pytest.mark.parametrize("inner", list(ENCLOSED_HOLDING_AN_ERROR))
+def test_an_inner_race_its_outer_choice_ends_stops_whatever_its_branches_raised(backend, inner):
+    """The inner race is held open past the outer choice, which names it a loser: the winner
+    waits until the inner race is inside its first call, and that call waits for the choice. It
+    stops, as every loser does, so the outer race answers on its first attempt, the loser
+    `Stopped`."""
+    released, inside = threading.Event(), threading.Event()
+
+    def held() -> None:
+        inside.set()
+        _until(released)
+
+    tools = _Tools({"slow": held, "slow2": held, "w": lambda: _until(inside)})
+    attempts: list[int] = []
+
+    def program():
+        return _described((yield from race([ENCLOSED_HOLDING_AN_ERROR[inner], _calls("w")])))
+
+    def record(ctx: Any, attempt: int) -> None:
+        attempts.append(attempt)
+
+    result = _run(
+        backend,
+        "concurrent",
+        program,
+        tools,
+        attempts=2,
+        wrap=lambda ctx: _ReleasedByChoice(ctx, released, race_choice(0)),
+        after=record,
+    )
+    assert (result, attempts) == (["chosen", [["stopped", 0, None], ["won", 1, "w"]]], [1])
+    assert {"slow", "slow2"} & set(tools.calls), "the inner race never reached its first call"

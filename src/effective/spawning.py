@@ -164,7 +164,7 @@ def stopped_at(
     """Where a child that raised `raised` stopped, for its task body to answer or re-raise.
 
     A `Refusal` when every leaf is one of `refusals`. When refusals were raised beside a crash, and
-    no leaf would be raised again on a retry, every leaf with the first crash leading: a
+    no leaf is of a type a retry would raise again, every leaf with the first crash leading: a
     refusal alone would have completed the child, so the crash is what its worker retries and
     reports. `None` when `raised` goes on to the worker as it is."""
     stopped = list(leaves(raised))

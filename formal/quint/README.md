@@ -22,6 +22,8 @@ guard-bearing ops, one invariant *with teeth*.
 
 Teeth: flip `buggyLedger = true` (drop the append guard) → the checker finds a
 reachable `Ledger(10) → deliver(5) → resume → Ledger(10) ⇒ [10,10]` trace.
+`neverFinished` is registered to be violated, so `ledgerNodup` is checked over a run that
+reaches the end.
 
 **v1 — `gather.qnt`** (where the model checker earns its keep): models `gather` —
 branches running concurrently under their own continuations, the thing Lean's `Step`
@@ -29,7 +31,9 @@ relation punted on — and checks **I2 totality** faithfully, reproducing the
 *suspend-in-gather* bug.
 
 `total` encodes I2 directly: every reachable configuration's active
-heads — main + each branch — have a *defined transition or park* (`headHandled`). It
+heads, main and each branch, have a *defined transition or park*: a `rule` other than
+`NoRule`, the same function the actions fire on, so a rule taken out of the handler is a
+violation of `total` and of `noDeadlock` rather than a change they cannot see. It
 is **not** a deadlock/liveness check — an await on an absent event is legitimately
 Parked (I2-OK); whether it ever resumes is I3, a later rung.
 
@@ -38,6 +42,7 @@ Parked (I2-OK); whether it ever resumes is I3, a later rung.
 | `total` (I2 totality) | every reachable op-head has a transition-or-park (no suspend-in-gather hole) | ✅ Apalache `NoError` @20 (fixed) |
 | `noDeadlock` | whole-state deadlock-freedom: every non-terminal config can progress or be unblocked by a resumable delivery | ✅ Apalache `NoError` @14 (fixed; ~5min — SMT-heavy) |
 | `ledgerNodup` | the ledger never holds a duplicate (T3 cross-check) | ✅ Apalache `NoError` @20 |
+| `awaitHonored` | branch 0's row after `Await(7)` lands only once event 7 is delivered, so an await that fires early is a violation the stuckness checks cannot see | ✅ TLC, complete state space |
 | `liveness` (I3) | `fairness ⟹ eventually terminated` — a parked await resumes and the workflow completes | ✅ TLC, complete state space (fixed) |
 
 `noDeadlock` is the per-*state* sibling of the per-*head* `total` — it catches a stuck
@@ -67,8 +72,12 @@ Teeth — the real bug, machine-found: flip `handlerFixed = false` (a
 handler with no rule for await-in-branch) → Apalache finds the reachable config
 `Step(1) → Gather` (spawn) `→ branch0:Step(2) → branch0 head = Await(7)` that the
 handler can't handle (`total` fails) in ~6s. The non-vacuous content is this *buggy*
-direction (the hole is **reachable**); the fixed handler is total **by construction**
-(every op-position has a rule), which `total` reflects. The result is **bounded**
+direction (the hole is **reachable**). A nested gather in `branchSpecs` breaks `total` the
+same way, since `rule` gives an in-branch `Gather` none; a guard added beside `rule` in an
+action is invisible to `total`, and `liveness` and `nonVacuityWitness` catch it. The teeth
+belong to the reachability argument here: `nonVacuityWitness` only shows a run terminates, which
+a model whose workflow skips the gather also satisfies, and each `handlerFixed = false` tooth
+needs the in-branch await reached. The result is **bounded**
 (Apalache to N steps), but not bound-sensitive — `total` holds at 16/20/24/30 and the
 violation sits at depth ~4; the reachable *shapes* are exhausted well within the bound
 because continuations only shrink and `chk`/`evt`/`led` grow over a tiny finite
@@ -84,7 +93,8 @@ the *operational* cross-check: `confluent` holds on every interleaving for Model
 `sharedMeter = true` and Apalache returns the `[a₁,a₂,b₁]` schedule reaching `executed
 = {10,11} ≠ {10,20}` — the operational witness of Lean's `shared_gate_order_dependent`. The
 model is *atomic* (a step reads-then-writes `spent` in one action = a **locked** meter) and
-still non-confluent: the machine-checked "the lock is not enough."
+still non-confluent: the machine-checked "the lock is not enough." `neverAtTerminal` is registered to be
+violated, since `confluent` holds vacuously on a model that never drains.
 
 **v3 — `govern_park.qnt`** (the park protocol; the half `Govern.lean` disclaims): a
 `govern` gate's suspend/resume cycle — park → request → deliver → resume → **worker death** →
@@ -125,7 +135,7 @@ read at the moment it can fail, and TLC enumerates the whole graph (11.3M distin
 |---|---|
 | `choiceStable`, `everyStopHasItsChoice`, `noWinnerWasStopped` | once saved, the choice never changes; a loser stops only for the choice on record, and no winner is stopped |
 | `exactlyK`, `zeroStartsNothing` | exactly `k` winners, each a completed success; `k = 0` starts nothing |
-| `impossibleOnlyWhenHopeless` | the race is impossible only when, at the decision, successes plus unresolved branches fell short of `k` |
+| `impossibleOnlyWhenHopeless` | the race is impossible only when, at the decision, every branch had ended with fewer than `k` successes |
 | `noAdmitAfterFlag`, over every incarnation and after a crash that found the choice saved; `admittedRecordedAtBarrier` | no loser admits an op once its flag is published; every op the returning incarnation admitted has its checkpoint |
 | `returnsQuiescent` | the race returns only when no loser has an op in flight or can still admit one |
 | `loserSpendReachesMeter` | every checkpointed op, a loser's included, is folded into the meter at the barrier |
@@ -138,6 +148,58 @@ checkpoint at the barrier (`everyAdmittedRecordedAtBarrier`), and every ledger r
 checkpoint (`everyRowHasItsCheckpoint`, the orphan row). A crash after the choice, with a loser's
 op in flight, breaks both, and neither breaks without a crash. Each teeth toggle is a rejected
 design.
+
+**v5: `retry.qnt`** (retries): a task's program is two ops chosen at init, each a step, a race
+with a deadline whose branch thunks stand as one, or a wake race, plus whether user code raises on
+the value it was handed for op 0 after the last op. A fresh thunk hands user code its value and
+stores it or a canonical twin, the seam a key order or a tuple read back as a list opens. The program is held fixed across attempts, which is how the model states determinism.
+Each read of the tape is an effect: the environment chooses its outcome among the rows that read
+has in `src/effective/handlers/transitions.py`, a hit, a miss whose thunk writes, raises or loses
+its write, a store error, a park, a race failing before its deadline or answering late, and a wake
+race lost, and a crash can end any run. A run counts the thunks it ran and the substrate reads it
+counted; the edge fails a code error at once when both are zero, and retries while attempts
+remain. TLC enumerates the whole graph, and `just formal-verify` prints its size.
+
+| Invariant | the rule it checks |
+|---|---|
+| `noRecoverableTaskFailedEarly` | the edge fails a task early only on user code's own error, raised by a run that read only the record |
+| `noFutileAttemptBurned` | no retry follows user code's error from a run that ran no thunk, whatever it counted |
+| `countIsTheSubstrates` | a run counts the substrate reads that answered other than the record, and nothing else; only a toggle parts the two, so it names what a tooth breaks |
+
+Each teeth toggle is a discarded rule: no futile rule, a mark from the static walk alone, two
+attempts' errors compared, and the count without store errors, without the race clock or without
+the wake race, or a successful thunk left uncounted, each failing a recoverable task early; and a
+thunk's own error counted as a store read, breaking the count. The model leaves out race and gather branches as frames of their own, a
+typed `Unretryable` error, a retry strategy that waits, refusals, and a branch's error before the
+choice, which v6 models.
+
+**v6: `race_errors.qnt`** (a race's branch errors across retries): three branches race for `k`
+winners, each one of six programs (`ok`; `flaky`, raising a retryable error before its op on the
+first attempt it runs; `code`, raising before its op on every attempt, having run nothing fresh;
+`typed`, raising an `Unretryable` error; `refuse`; `late`, raising after its recorded op). The
+in-order reader runs one branch at a time and reads each as it ends; the concurrent reader reads
+whatever has ended at each wake. A loser reaching its admission after the choice stops there, and
+a choice of no winners waits until every branch has ended. A failed attempt retries, up to three,
+keeping the saved choice. The model races the programs in a canonical order with the in-order
+reader, then a permutation of them with either reader, so an invariant compares the two runs. TLC
+enumerates the whole graph.
+
+| Invariant | the rule it checks |
+|---|---|
+| `orderIndependent` | the order and the reader change neither whether the task answers, nor the kind of choice it answers with, nor the attempt that saves a choice of winners; which of several branches succeeding on that attempt wins is the reader's |
+| `answeringAttemptWithinOne` | the attempt that answers moves by at most one between the two runs |
+| `aSucceedingBranchWins` | with `k` branches that always succeed, the task answers with winners |
+| `impossibleOnlyWhenHopeless` | impossible only when fewer than `k` branches succeed on any attempt |
+| `impossibleOnlyOnceEveryBranchEnded` | a choice of no winners is saved only when no branch runs |
+| `noClearableErrorIsAnEnding`, `winnersSucceeded` | no race answers holding a retryable loser error; winners are `k` branches that succeeded |
+
+`sameAnsweringAttempt` and `sameEndings`, the strongest readings, are registered as violations:
+the in-order reader can answer one attempt later, and a loser read before the choice ends
+`Raised` where one read after it ends `Stopped`. Each teeth toggle is a discarded rule: an error
+failing the race at once, which moves the choice and fails a task a branch would win; impossible
+decided before every branch has ended, which stops a `late` branch short of its raise in one
+order and not the other; and a retryable error after the choice kept as an ending. The race's deadline, its flag
+and crashes are v4's.
 
 ## Run
 
@@ -169,8 +231,13 @@ Three kinds of entry, all enforced:
 | kind | must |
 |---|---|
 | `FORMAL_CHECKS` | pass |
-| `FORMAL_EXPECT_VIOLATION` | **fail**: a `nonVacuityWitness` proving `fairness` satisfiable, a `never<Kind>` proving a state reachable, or a strongest reading of a document and the run that breaks it |
-| `FORMAL_TEETH` | **fail**: a design toggle flipped to its known-buggy value must still produce its counterexample |
+| `FORMAL_EXPECT_VIOLATION` | **fail with a counterexample**: a `nonVacuityWitness` proving `fairness` satisfiable, a `never<Kind>` proving a state reachable, or a strongest reading of a document and the run that breaks it |
+| `FORMAL_TEETH` | **fail with a counterexample**: a design toggle flipped to its known-buggy value must still produce it |
+
+A run that exits non-zero without quint's counterexample line fails the gate, since an unknown
+name or a model that does not parse exits non-zero too. Every model registers at least one
+`FORMAL_CHECKS` entry and one run that reaches its states, which `tests/test_formal_registry.py`
+holds.
 
 Every guard and tooth is registered there, so each one runs; together they cost ~27 s.
 

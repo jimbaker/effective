@@ -2,13 +2,12 @@
 
 import sqlite3
 import threading
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4, uuid7
 
 import pytest
-from _durable import DSN, pg_ready
+from _durable import DSN
 from pydantic import BaseModel
 
 from effective.api import await_event, call_tool, sleep_until
@@ -33,26 +32,6 @@ class NoDomain:
 class Tools:
     def run(self, op: Any) -> Any:
         return {"tool": op.name}
-
-
-@pytest.fixture(params=["sqlite", "postgres"])
-def engine(request) -> Iterator[SqliteApp | AbsurdEngine]:
-    """An engine on a store of its own: a fresh SQLite memory store, or a queue of this test's."""
-    if request.param == "sqlite":
-        opened = open("sqlite://")
-        yield opened
-        opened.close()
-        return
-    if not pg_ready():
-        pytest.skip("needs Postgres/Absurd (just pgt-up)")
-    opened = open(DSN, queue="open_" + uuid4().hex[:12])
-    assert isinstance(opened, AbsurdEngine)
-    opened.app.create_queue()
-    try:
-        yield opened
-    finally:
-        opened.app.drop_queue()
-        opened.close()
 
 
 @pytest.mark.parametrize(

@@ -107,7 +107,7 @@ module race {
     else d.now >= d.deadline
   val hopeless: bool =
     if (impossibleFromOutcomes) B.filter(i => d.succeeds.get(i)).size() < d.k
-    else eligible.size() + unresolved.size() < d.k
+    else unresolved == Set() and eligible.size() < d.k
 
   // What the parent would save if it woke now.
   val nextKind: str =
@@ -297,8 +297,8 @@ module race {
 
   val zeroStartsNothing: bool = d.k != 0 or h.everAdmitted == Set()
 
-  // impossible only when, at the decision, successes plus unresolved fell short of k.
-  val impossibleOnlyWhenHopeless: bool = d.kind != "impossible" or h.decS + h.decU < d.k
+  // impossible only when, at the decision, every branch had ended short of k successes.
+  val impossibleOnlyWhenHopeless: bool = d.kind != "impossible" or (h.decU == 0 and h.decS < d.k)
 
   // no loser of the saved choice admits an op once a flag has been published, in any
   // incarnation, or after a crash that found the choice saved.

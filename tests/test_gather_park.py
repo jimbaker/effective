@@ -8,6 +8,7 @@ from _conformance import CountingDomain, gather_await_wf
 
 from effective.api import await_event, call_tool, gather
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.handlers.base import Attempt, failing_leaf
 from effective.handlers.durable import DurableHandler, GatherWakeRace
 from effective.keys import Key
 from effective.ops import leaves
@@ -116,6 +117,14 @@ def test_repark_that_returns_falls_through_to_gather_wake_race():
     with pytest.raises(GatherWakeRace, match="already satisfied"):
         DurableHandler(ctx, CountingDomain()).run(_await_branch_wf)
     assert ctx.reparked == ["gather:0;wake-race:0;ev"]
+
+
+def test_a_wake_race_keeps_its_retries():
+    """The re-arm found what the round's peeks did not, so a retry resolves the branches from the
+    record: the fallback's error is no repeat."""
+    with pytest.raises(GatherWakeRace) as raised:
+        DurableHandler(_ReparkReturnsCtx(), CountingDomain()).run(_await_branch_wf)
+    assert failing_leaf(raised.value, Attempt(1, 3)) is None
 
 
 def test_peekless_ctx_keeps_the_legible_wall():

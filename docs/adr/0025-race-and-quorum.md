@@ -27,13 +27,57 @@ evidence and has no op yet.
 |---|---|---|
 | success | eligible to win | `Won` or `Unchosen`, with its value |
 | a refusal | a loss; the branch drops out | `Refusal`, with its reason |
-| an error a retry could clear | the attempt fails, and the task retries by replay | none: the retry decides |
-| an `Unretryable` error, before the choice is saved | the race fails, naming the branch | none |
-| an `Unretryable` error, after the choice is saved | none; the choice stands | `Raised` |
+| an error, before the choice is saved | a loss while a sibling can still win; once none can, the race fails naming every error, and the task retries by replay | `Raised`, when a sibling wins |
+| any error, after a timeout is saved | the attempt fails, as the error would have failed the race read before the deadline | none: the retry decides |
+| an error a retry would raise again, after a choice of winners is saved | none; the choice stands | `Raised` |
+| any other error, after a choice of winners is saved | the attempt fails, and the task retries by replay | none: the retry decides |
 | a stop at admission (§5) | none | `Stopped` |
 
-With `s` successes and `u` branches unresolved, the quorum is impossible once `s + u < k`, and the
-race answers at once, carrying the successes, the refusals and the unresolved branches.
+So the order the branches are written in does not change the choice: `race(failing, succeeding)`
+chooses the branch that succeeds, as `race(succeeding, failing)` does. Nor does it change whether
+the task answers: an impossible race is decided once every branch has ended, so every branch that
+would raise has raised, and a timed-out race is answered only by an attempt in which no branch
+raised. A timeout can still stop a branch before it reaches a raise that follows an op, so there
+the order a deadline cuts the branches short in decides whether that raise happens. It can
+change the attempt that answers, and a loser's ending: a loser read before the choice ends `Raised`, and one read
+after it may end `Stopped`. Read in index order, a branch written after the winner that raises before its first
+op raises after the choice, so it fails that attempt, and the retry serves the winner from the
+record.
+
+An error a retry would raise again is an `Unretryable` one, or one raised by a frame that ran
+nothing fresh and read nothing the record does not hold, the frame being the task or the loser's
+branch. The workflow, its op layers and its schemas' factories and validators are deterministic in
+what they are handed, as code between yields is, so the reads that remain are the substrate's own.
+The record is one of them: the engine answers each read of it as an effect, which can hit, miss,
+park the task or fail, and only a hit is the record.
+
+| a value the substrate read that the record does not hold | why a retry can differ |
+|---|---|
+| an error a store call raised | the store can work on a retry |
+| a race with a deadline that failed with no choice saved | a retry past the deadline answers `TimedOut` |
+| a gather's re-arm that found events its peeks did not | a retry resolves the branches from the record |
+
+The other reads the record does not hold leave a retry the same: a park ends the attempt before
+any failure, a clock that found an instant passed finds it passed again, a race's clock decides
+only a choice the handler saves before acting on it, and the attempt number only skips reads whose
+answer the record fixes. `src/effective/handlers/transitions.py` labels every read the handler
+makes, by site and outcome. A test holds the table to the handler's source, to what both engines
+answer, and to the handler's own counts: an attempt runs something fresh exactly when it took a
+`fresh` read, and one that raises counted each read labeled counted. Which reason keeps an
+uncounted read sound is an argument the counts cannot check. With no counted read, the attempt is a function of the
+record, and what it wrote there a retry reads back alike, so a retry replays it to the same
+raise.
+
+Inside a race that saved no choice, a typed error does not fail its task at once, since a
+retry may run a sibling fresh and win. A retry strategy that waits keeps a code error's retries,
+for a fix to deploy. A `Raised` ending carries the error's text in the race's answer and fails no
+task, and a handler given a telemetry sink also reports each one on a warning span.
+
+With `s` successes and `u` branches unresolved, the quorum is impossible once `u = 0` and
+`s < k`, and the race answers carrying the successes and the refusals. It waits for the branches
+still running once `s + u < k`: a branch stopped then could have raised, and whether the task
+answers would turn on which branch was read first. So a race too short of successes to win waits
+for its slowest branch, and under a deadline that branch outliving it makes the answer `TimedOut`.
 
 A value ending carries a digest of the inputs its branch was handed, taken as each input arrives,
 so a retry that reaches the same ending must be handed the same inputs. A retry whose branch is
@@ -51,10 +95,14 @@ by its structure, and one with neither leaves the ending unverifiable. A set is 
 is encoded, since its encoding follows an order the process's hash seed decides and the attempt
 that retries is another process.
 
-**Falsified if:** a race answers impossible while `s + u >= k`; an error a retry could clear becomes
-an ending; a retry answers with a value its branch derived from inputs whose encodings differ from
+**Falsified if:** a race answers impossible while a branch runs or `s >= k`; a race fails while a branch that
+would win is still running; its choice depends on the order its branches are written in; an error
+after the choice that a retry could clear becomes an ending; a retry answers with a value its branch derived from inputs whose encodings differ from
 the first attempt's; or a retry handed what the store holds of its first attempt's inputs fails.
-**Checked by** `impossibleOnlyWhenHopeless`. The input digests are not modeled.
+**Checked by** `impossibleOnlyWhenHopeless` and `impossibleOnlyOnceEveryBranchEnded`, and across task retries, in two orders and with both
+readers, `orderIndependent`, `aSucceedingBranchWins`, `answeringAttemptWithinOne` and
+`noClearableErrorIsAnEnding`, with a branch that raises after its op among the programs. A branch
+error under a deadline and the input digests are not modeled.
 
 ## 3. `want=k`, and the batch
 
@@ -154,7 +202,7 @@ placement that names it.
 
 | an inner race, when its enclosing loser's choice arrives | does |
 |---|---|
-| has not saved its choice | never saves one; its branches stop at admission |
+| has not saved its choice | never saves one; its branches stop at admission, and the race stops whatever its branches raised, so the enclosing loser ends `Stopped` |
 | has saved its choice | keeps it on record; its enclosing loser then stops |
 
 Every race in one tree of nested races decides under one lock: it checks whether an enclosing choice
@@ -162,8 +210,10 @@ has stopped it, saves its own choice and publishes it while holding that lock, s
 lands after an enclosing loser's choice. On replay, a loser's inner race with no saved choice
 starts nothing.
 
-**Falsified if:** an inner race saves a choice after its enclosing loser's choice was published.
-**Checked by** `noInnerChoiceAfterOuterFlag`.
+**Falsified if:** an inner race saves a choice after its enclosing loser's choice was published,
+or an inner race the enclosing choice stopped fails the enclosing loser's attempt.
+**Checked by** `noInnerChoiceAfterOuterFlag`; the stop of an inner race holding an error is pinned
+by tests and not modeled.
 
 ## 9. Identity: the records a race writes
 
@@ -181,8 +231,12 @@ Checkpoints stay bare values, inside a race and out. A **fresh** walk reads neit
 record: one at attempt 1, in a race whose choice the store does not hold. A resume after a park
 runs on the attempt that parked, so the attempt alone does not say that no earlier execution wrote
 a record. What makes the rule safe is that a race which wrote records and saved no choice fails
-its attempt: only refusals are delivered to the workflow, so an error before the choice ends the
-attempt whatever the workflow catches, and the next execution is a later attempt.
+its attempt: a branch's error leaves it undecided only once no branch is left to win, it then
+fails with its branches' errors, and only refusals are delivered to the workflow, so the error
+ends the attempt whatever the workflow catches, and the next execution is a later attempt. An
+inner race an enclosing choice stopped writes records and saves no choice without failing its
+attempt; the enclosing choice is on the store, so the next walk through it is not fresh and reads
+them.
 
 **Falsified if:** a race frame's key, or any of these records, aliases another race's or a
 gather's; a horizon grows with a loser's ops rather than its live threads; a fresh walk reads a

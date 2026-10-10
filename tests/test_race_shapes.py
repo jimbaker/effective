@@ -15,12 +15,11 @@ watches for that one checkpoint rather than any settle, so the release is the ch
 
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import pytest
 from _schedules import Turnstile
 from _shapes import allowed, cut_short_by_a_race, placed_step, run
-from test_race_durable import _described, _Tools
+from test_race_durable import _described, _ReleasedByChoice, _Tools
 
 from effective.api import append_ledger, call_tool, direct_tool_key, quorum, race, scoped
 from effective.choice import Chosen
@@ -39,25 +38,6 @@ so rather than letting the row carry on ten seconds late."""
 
 def until(event: threading.Event) -> None:
     assert event.wait(HOLD), "a hold was never released"
-
-
-class _ReleasedByChoice:
-    """Wraps a ctx and sets `settled` when the race's choice lands, and for nothing else.
-
-    `test_race_durable`'s `_Settled` fires on every settle, so a loser is released by whatever the
-    winner checkpointed first. Keying on the choice names the event the assertion is about."""
-
-    def __init__(self, ctx: Any, settled: threading.Event, choice: Key) -> None:
-        self._ctx, self._settled, self._choice = ctx, settled, choice
-
-    def settle(self, name: Key, value: Any) -> Any:
-        stored = self._ctx.settle(name, value)
-        if name == self._choice:
-            self._settled.set()
-        return stored
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._ctx, name)
 
 
 def branch(*names: str):
@@ -264,7 +244,7 @@ def test_the_allowance_forgives_an_op_the_turnstile_never_sees(backend, monkeypa
     The allowance is checked both ways in this one row: taken, the check passes; withheld, it
     names `b-tail` as the op nothing allows."""
     clock = [AHEAD]
-    monkeypatch.setattr(base, "race_clock", lambda: clock[0])
+    monkeypatch.setattr(base, "race_time", lambda: clock[0])
     started, settled = threading.Event(), threading.Event()
 
     def onto_the_deadline() -> None:
