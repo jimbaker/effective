@@ -24,7 +24,7 @@ from agent.tasks import Task
 from effective.contexts import RecordingCtx, ReplayCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import AgentTool, ToolFn, make_tool_runner
 from effective.react import AssistantTurn, Trajectory, run_agent

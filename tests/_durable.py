@@ -1,7 +1,7 @@
 """Shared fixtures for the durable-replay tests (run against the Podman test PG).
 
 Not a test module (leading underscore) — just the common machinery the
-`test_replay_*` files reuse: the DSN + readiness gate, an Absurd app factory,
+`test_replay_*` files reuse: the DSN + readiness gate, the Absurd engine opened by URL,
 the `FaultCtx` crash injector, and ledger/result helpers. Domain-free: the canned
 domain the durable tests drive lives in ``_approval_domain.py``.
 """
@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 import psycopg
 
+from effective.engines.absurd import AbsurdEngine
 from effective.keys import Key
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective")
@@ -83,14 +84,17 @@ class FaultCtx:
         return getattr(self._ctx, name)
 
 
-def absurd() -> Any:
-    from effective.absurd_worker import absurd_worker
+def absurd() -> AbsurdEngine:
+    """The Absurd engine on the default queue, opened by its URL."""
+    from effective.engines import open
 
-    return absurd_worker(DSN)
+    opened = open(DSN)
+    assert isinstance(opened, AbsurdEngine)
+    return opened
 
 
 @contextlib.contextmanager
-def clock_at(app: Any, when: dt.datetime) -> Iterator[None]:
+def clock_at(engine: AbsurdEngine, when: dt.datetime) -> Iterator[None]:
     """Hold BOTH clocks a durable sleep consults at `when`, so a park wakes without waiting.
 
     A parked sleep resumes only if two independent conditions agree, and they are read by
@@ -124,21 +128,14 @@ def clock_at(app: Any, when: dt.datetime) -> Iterator[None]:
     # `invalid-assignment` error no signature can satisfy. The SDK invites the patch — its
     # docstring reads "can be monkeypatched in tests" — and `frozen` matches the signature.
     setattr(absurd_sdk, "_get_current_time", frozen)  # noqa: B010
-    app._conn.execute("SELECT set_config('absurd.fake_now', %s, false)", (when.isoformat(),))
+    engine.app._conn.execute(
+        "SELECT set_config('absurd.fake_now', %s, false)", (when.isoformat(),)
+    )
     try:
         yield
     finally:
         setattr(absurd_sdk, "_get_current_time", real)  # noqa: B010
-        app._conn.execute("SELECT set_config('absurd.fake_now', '', false)")
-
-
-def run_until_result(app: Any, task_id: Any, max_batches: int = 24) -> Any:
-    for _ in range(max_batches):
-        snap = app.fetch_task_result(task_id)
-        if snap and snap.state in ("completed", "failed", "cancelled"):
-            return snap
-        app.work_batch()
-    return app.fetch_task_result(task_id)
+        engine.app._conn.execute("SELECT set_config('absurd.fake_now', '', false)")
 
 
 class Executes(Protocol):

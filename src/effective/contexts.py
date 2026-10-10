@@ -1,7 +1,7 @@
 """In-process task contexts: `DurableHandler` without an engine.
 
-A context is what `DurableHandler` checkpoints through. The engines (`effective.sqlite`, Absurd)
-persist each step; these keep it in memory, for runs that need no file and no service:
+A context is what `DurableHandler` checkpoints through. The engines (`effective.engines.sqlite`,
+Absurd) persist each step; these keep it in memory, for runs that need no file and no service:
 
 | context | a step | for |
 |---|---|---|

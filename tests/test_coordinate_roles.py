@@ -329,7 +329,7 @@ def test_a_role_wrapping_a_role_is_typed_by_the_outer_one():
 
 
 def test_a_rewrapped_coordinate_declares_by_its_OUTERMOST_marker():
-    # `Subject(epoch_atom(until))` at `handlers/absurd.py` is the live case: the helper returns a
+    # `Subject(epoch_atom(until))` at `handlers/durable.py` is the live case: the helper returns a
     # `Segment` and the mint says what it means.
     shapes, problems = _shapes(REWRAPPED)
     assert problems == []

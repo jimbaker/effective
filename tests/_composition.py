@@ -96,8 +96,8 @@ from effective.combinators import (
 )
 from effective.domain import CallTool, Spawned
 from effective.fork import join_fork, spawn_fork
-from effective.handlers.absurd import spawn_done_name
 from effective.handlers.base import step_key
+from effective.handlers.durable import spawn_done_name
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended
 from effective.keys import Key, compose_key
 from effective.ops import Writer

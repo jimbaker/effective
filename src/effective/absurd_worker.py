@@ -11,6 +11,7 @@ from typing import Any
 
 from absurd_sdk import Absurd, CancelledTask, FailedTask, SuspendTask
 
+import effective.pgkeys  # noqa: F401  (registers the `Key` psycopg dumper)
 from effective.bridge_absurd import end_attempts_at_this_run
 from effective.engines.absurd import sdk_claim
 from effective.handlers.base import failing_leaf

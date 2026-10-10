@@ -15,7 +15,7 @@ import random
 import pytest
 
 from effective.domain import CallTool
-from effective.handlers.absurd import _Reforwards
+from effective.handlers.durable import _Reforwards
 from effective.keys import Key
 from effective.ops import Step
 

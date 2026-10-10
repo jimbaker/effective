@@ -21,18 +21,16 @@ from uuid import uuid4
 import pytest
 from _durable import (
     DSN,
-    IMMEDIATE_RETRY,
     Fault,
     FaultCtx,
     absurd,
     pg_ready,
-    run_until_result,
 )
 
 from effective import step
 from effective.cost import CostBudget, MeteredInterpreter
 from effective.domain import CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.improve import Measurement, improve
 from effective.ledger import PostgresLedger
 from effective.pareto import Objective
@@ -89,8 +87,8 @@ def _run(app, run_id: str, crash_at: int | None):
         finally:
             ledger.close()
 
-    spawned = app.spawn(name, {"run_id": run_id}, retry_strategy=IMMEDIATE_RETRY)
-    return run_until_result(app, spawned["task_id"]), fault
+    spawned = app.spawn(name, {"run_id": run_id})
+    return app.run_until_result(spawned), fault
 
 
 def test_improve_replays_to_identical_frontier_across_crash_at_every_op():

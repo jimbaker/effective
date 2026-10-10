@@ -3,7 +3,7 @@
 ROLE: journey: one path end to end through both grains, on a durable engine. It runs on SQLite
 rather than under `RecordingHandler` because `RecordingHandler` returns a canned response
 **uncoerced**, so a test of this composition under it is blind to the defect. The durable path
-validates a `CallTool` result against the op's `result_schema` (`handlers/absurd.py`'s `_load`),
+validates a `CallTool` result against the op's `result_schema` (`handlers/durable.py`'s `_load`),
 which is where the two grains are actually forced to agree.
 
 The defect has two halves and only one of them is loud:
@@ -31,7 +31,8 @@ from effective.coding.specs import coding_bind, coding_read
 from effective.coding.states import DraftVerdict, FinalizeVerdict, ReviewVerdict, State
 from effective.coding.transition import transition
 from effective.domain import AskLLM, CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Run, Segment
@@ -48,7 +49,6 @@ from effective.react import (
     run_agent,
     typed_act,
 )
-from effective.sqlite import SqliteApp
 
 pytestmark = pytest.mark.journey
 
@@ -225,7 +225,7 @@ def test_an_UNDECLARED_tool_returning_a_tree_is_refused(app):
     snap = drive(app, domain)
     assert snap is not None
     assert snap.state == "failed"
-    assert "ToolResult" in (snap.failure or ""), snap.failure
+    assert "ToolResult" in str(snap.failure or ""), snap.failure
 
 
 def test_the_packages_own_table_composes_with_the_loop(app):

@@ -31,7 +31,7 @@ from effective.keys.grammar import KeySyntaxError, ParsedKey, Term, parse
 from effective.ops import LedgerRow, Writer
 
 if TYPE_CHECKING:
-    from effective.handlers.absurd import LedgerWriter
+    from effective.handlers.durable import LedgerWriter
 
 FORKED_KIND = "forked"
 
@@ -76,7 +76,7 @@ class ForkedSleep(RuntimeError):
     Fork a region with no durable sleep, or move the time dependency out of the forked tail.
 
     **Lives HERE, apart from the rest of the sandbox vocabulary in `effective.sandbox`** (which
-    re-exports it): the DURABLE fork raises it from `SeedingCtx` (`handlers/absurd.py`), so the
+    re-exports it): the DURABLE fork raises it from `SeedingCtx` (`handlers/durable.py`), so the
     refusal has to sit where the handler can reach it. One definition governs both driver
     families, the in-process drivers and the durable child; without the durable arm, a forked
     tail's sleep would park the child against the wall clock.

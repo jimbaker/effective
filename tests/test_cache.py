@@ -19,10 +19,10 @@ from effective.cache import Cache, FileStore, op_digest
 from effective.channels import Message
 from effective.cost import Contract, MeteredInterpreter, Usage, serve
 from effective.domain import AskLLM, CallTool, Judge, WireNoul
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteTaskContext
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.layers import compose_domain, domain_layer
-from effective.sqlite import SqliteTaskContext
 from effective.telemetry import Span, traced
 
 FIRST = UUID("019fa000-0000-7000-8000-00000000c001")

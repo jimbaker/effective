@@ -21,7 +21,7 @@ from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, Spawned, SpawnResult
 from effective.fork import spawn_fork
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler, idempotency_key_for, respawn_name
+from effective.handlers.durable import DurableHandler, idempotency_key_for, respawn_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, compose_key
 from effective.ops import Writer

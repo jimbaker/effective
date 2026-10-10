@@ -33,14 +33,14 @@ from effective.code import _action_key, _segment_key
 from effective.counterfactual import fork_scoped
 from effective.domain import CallTool
 from effective.govern import GateState
-from effective.handlers.absurd import (
+from effective.handlers.base import op_key, step_key
+from effective.handlers.durable import (
     fork_event_name,
     respawn_name,
     respawned_name,
     wake_race_at_time,
     wake_race_on_event,
 )
-from effective.handlers.base import op_key, step_key
 from effective.keys import Key, Segment, compose_key
 from effective.keys.registry import KeyMap
 from effective.ops import AppendLedgerRow, AwaitEvent, LedgerRow, Step, StoreArtifact

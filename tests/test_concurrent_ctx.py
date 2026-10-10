@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from effective.engines.absurd import ConcurrentAbsurdCtx
-from effective.handlers.absurd import _PrefixedCtx
+from effective.handlers.durable import _PrefixedCtx
 from effective.keys import Key
 
 

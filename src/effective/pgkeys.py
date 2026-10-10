@@ -2,16 +2,15 @@
 
 `effective.keys.Key` names exactly two positions that may treat a key as text: the composer's
 splice, and **serde registered against a driver** so no call site ever converts on the way to a
-database. sqlite3's half lives in `effective.sqlite` (which owns that driver). This is psycopg's.
+database. sqlite3's half lives in `effective.engines.sqlite`, which owns that driver; this is
+psycopg's.
 
-**Why its own module rather than a few lines in one of its consumers.** A `psycopg.adapters`
-registration is process-global but only takes effect if the module holding it is *imported*, and
-the psycopg consumers here do not import each other: `effective.ledger` is SQLAlchemy/SQLModel
-(and the core is deliberately DB-free, so the durable handler must not pull it in),
-`effective.handlers.absurd` drives the Absurd SDK, `effective.parked` is a read-only fleet
-reader. Putting the dumper in any one of them leaves the others unprotected — which is not
-hypothetical: it first lived in `handlers.absurd`, and `PostgresLedger.append` promptly failed
-with ``cannot adapt type 'Key'`` because the SQLAlchemy path never imports that module.
+**Its own module.** A `psycopg.adapters` registration is process-global, takes effect only once the
+module holding it is imported, and reaches only connections opened after it. So each module that
+opens a connection a `Key` may reach imports this one for its side effect, before it connects: the
+SQLAlchemy ledger (`effective.ledger`) and the Absurd worker. Effective itself hands the Absurd SDK
+text on every path, through its ctx adapters, and the durable handler imports neither psycopg nor
+this module.
 
 So: one module, no dependencies beyond psycopg and the leaf `keys`, imported for its side effect
 by each consumer. Cheap to import, impossible to half-apply.

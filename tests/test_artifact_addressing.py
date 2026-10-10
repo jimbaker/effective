@@ -19,11 +19,11 @@ import pytest
 
 from effective.api import gather, store_artifact
 from effective.domain import DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
 from effective.handlers.base import artifact_id, content_digest, op_key
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.ops import StoreArtifact
-from effective.sqlite import SqliteApp
 
 # --- op_key injectivity + the approval-event contract -------------------------
 

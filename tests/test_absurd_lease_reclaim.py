@@ -16,7 +16,7 @@ from _durable import DSN, absurd, pg_ready
 from effective.api import step
 from effective.domain import CallTool
 from effective.engines.absurd import ConcurrentAbsurdCtx
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (just pgt-up)")
 
@@ -53,12 +53,12 @@ def test_an_expired_lease_is_reclaimed_and_the_run_completes(conn):
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), domain).run(_wf)
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
 
     # A worker that claimed and then died: `claim_tasks` takes the lease and we never execute,
     # which is the real shape (`work_batch` would claim AND run it to completion). The lease
     # lives on the RUN row — `t_default` carries only `last_attempt_run`, the pointer to it.
-    claimed = app.claim_tasks(batch_size=1, worker_id="dead-worker")
+    claimed = app.app.claim_tasks(batch_size=1, worker_id="dead-worker")
     assert claimed, "the dead worker must actually hold a lease for this to test anything"
     conn.execute(
         t"UPDATE absurd.r_default SET claim_expires_at = now() - interval '1 hour' "

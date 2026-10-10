@@ -37,9 +37,10 @@ from effective.choice import (
 )
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
+from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.govern import Refused
 from effective.handlers import base
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import (
@@ -61,7 +62,6 @@ from effective.ops import (
     leaves,
     unretryable,
 )
-from effective.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.viewing import ViewingCtx
 
 SHAPES = ["concurrent", "sequential"]

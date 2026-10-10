@@ -18,7 +18,7 @@ from openai import OpenAI
 
 from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter
 from effective.domain import CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import OpenAITurnCaller
 from effective.react import ToolResult, Trajectory, run_agent
 

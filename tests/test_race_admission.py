@@ -39,15 +39,15 @@ from effective.api import (
 from effective.choice import Chosen, EndingLost, Stopped, Unchosen, Won
 from effective.combinators import recurse
 from effective.domain import CallTool
+from effective.engines.sqlite import SqliteTaskContext
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.admission import digest, observed
 from effective.handlers.base import Racing, Stopping
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Index, Key, compose_key
 from effective.ops import AppendLedgerRow, LedgerRow, Step, StoreArtifact
-from effective.sqlite import SqliteTaskContext
 
 type Layers = Callable[[int], list[Callable[[Any], Any]]]
 

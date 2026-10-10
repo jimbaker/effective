@@ -896,7 +896,7 @@ def ledger_collisions(graph: RunGraph) -> tuple[Collision, ...]:
     The scopes line up, and not by luck. A tape is per TASK, and the store-side refusal's
     predicate is per task, so the cross-generation idempotency this substrate documents as a
     FEATURE
-    (`handlers/absurd.py:1185-1190`: one row for a message triaged in generation 0 and again in 3)
+    (`handlers/durable.py:1185-1190`: one row for a message triaged in generation 0 and again in 3)
     lives across tasks and is structurally invisible here. This cannot false-positive on it.
 
     What it is for, until the refusal lands: `run_fork` seals over a lineage that silently lost a

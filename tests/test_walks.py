@@ -33,6 +33,7 @@ from _walks import (
 from effective.api import await_event, step
 from effective.budget import Grant, depth_grant_name
 from effective.domain import CallTool
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.layers import layer_run_state
 from effective.ops import CHAIN_DEPTH, CHAIN_GENERATION
@@ -135,7 +136,8 @@ def test_the_registered_walks_cover_every_site_that_mints_an_identity():
     covered = {
         "handlers/recording.py": "recording",
         "handlers/replay.py": "replay",
-        "handlers/absurd.py": "sqlite",  # and "absurd" — one handler, two engines
+        f"{DurableHandler.__module__.removeprefix('effective.').replace('.', '/')}.py": "sqlite",
+        # and "absurd": one handler, two engines
         "fork.py": "live_drive",  # and "measured_drive", and the two replay-prefix sites
     }
     assert sites == set(covered), (

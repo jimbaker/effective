@@ -20,7 +20,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from _conformance import Approval, Fault, FaultPosition, private
-from _durable import run_until_result
 from _shapes import Program, Shape, agree, ledger_ids, placed, run, sweep, sweep_pairs
 from pydantic import TypeAdapter
 
@@ -42,8 +41,8 @@ from effective.combinators import (
 )
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp, SpawnArgs, Spawned, SpawnResult
-from effective.handlers.absurd import spawn_done_name
 from effective.handlers.base import op_key
+from effective.handlers.durable import spawn_done_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Index, Key, Run, Segment, compose_key
 from effective.ops import DONE_EVENT_PARAM, LedgerRow, Step, Writer
@@ -636,7 +635,7 @@ class Grown:
 
 def settle(backend, task: UUID) -> Any:
     """Work the queue until `task` is terminal; a tree of tasks takes more batches than one."""
-    return run_until_result(backend.app, task, max_batches=400)
+    return backend.engine.run_until_result(task, max_batches=400)
 
 
 def grow(
@@ -680,7 +679,7 @@ def names_by_task(backend, grown: Grown) -> list[list[str]]:
 
 
 def states(backend, grown: Grown) -> list[str]:
-    return sorted(backend.app.fetch_task_result(t).state for t in tasks(backend, grown))
+    return sorted(backend.engine.fetch_task_result(t).state for t in tasks(backend, grown))
 
 
 def returned(grown: Grown) -> Any:

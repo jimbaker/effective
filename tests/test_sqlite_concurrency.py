@@ -31,8 +31,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.keys import Key
-from effective.sqlite import SqliteApp, SqliteTaskContext
 
 pytestmark = pytest.mark.adversarial
 

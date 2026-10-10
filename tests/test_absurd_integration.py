@@ -15,7 +15,7 @@ import pytest
 from _approval_domain import CannedDomain, process_refund, review_name
 from psycopg.types.json import Json
 
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.ledger import PostgresLedger
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective")

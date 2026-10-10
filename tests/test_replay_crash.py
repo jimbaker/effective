@@ -30,16 +30,14 @@ import pytest
 from _approval_domain import CannedDomain, process_refund
 from _durable import (
     DSN,
-    IMMEDIATE_RETRY,
     Fault,
     FaultCtx,
     absurd,
     ledger_kinds,
     pg_ready,
-    run_until_result,
 )
 
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.layers import retry
 from effective.ledger import PostgresLedger
 
@@ -73,8 +71,8 @@ def _run_one(
         finally:
             ledger.close()
 
-    spawned = app.spawn(name, {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
-    snap = run_until_result(app, spawned["task_id"])
+    spawned = app.spawn(name, {"request_id": mid})
+    snap = app.run_until_result(spawned)
     return snap, domain, fault
 
 

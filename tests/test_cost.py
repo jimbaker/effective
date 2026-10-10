@@ -16,7 +16,7 @@ import pytest
 
 from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
 

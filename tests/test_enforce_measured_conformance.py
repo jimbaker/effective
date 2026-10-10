@@ -7,7 +7,7 @@ axiom-free) and emitted to `formal/enforce_vectors.json` by `lake exe enforce_ve
 row:
 
   - `effective.fork.enforce_measured` — the in-process VOI-probe transition;
-  - `DurableHandler._enforce_measured` — the PRODUCTION durable interpreter (`handlers.absurd`).
+  - `DurableHandler._enforce_measured` — the PRODUCTION durable interpreter (`handlers.durable`).
 
 The two share ONE transition, so there is one copy of the trip *arithmetic*. This pins each
 **driver's realization** against the Lean vectors: the in-process return, and the durable
@@ -33,7 +33,7 @@ from effective.cost import Contract, Usage
 from effective.domain import AskLLM, DomainOp
 from effective.fork import Cleared, Exceeded, Parked, enforce_measured
 from effective.govern import BudgetRefused
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Segment, compose_key
 from effective.ops import Step
 
@@ -184,7 +184,7 @@ def test_trip_index_carries_forward_across_enforce_calls():
     # `_enforce_measured` calls on ONE handler. The 2nd trip must await the NEXT trip name
     # (`:1`), never re-await the consumed `:0` and never reset to `:0`. Asserts the CLASS —
     # a strictly-monotonic awaited-name sequence + final state == summed grants — not one row.
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     g0, g1 = 5 * UNIT, 5 * UNIT
     ctx = _RecordingGrantCtx(

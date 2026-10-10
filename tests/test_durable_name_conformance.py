@@ -63,7 +63,7 @@ def _repeats_a_step_name() -> Effect[str]:
 
 def test_sqlite_writes_only_names_that_are_in_the_language(tmp_path: Path, sqlite_app) -> None:
     """The 0↔1 engine. Cheap, infra-free, and it runs everywhere."""
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     db = tmp_path / "task.db"
     app = sqlite_app(str(db))
@@ -100,7 +100,7 @@ def test_no_durable_name_anywhere_carries_a_Key_REPR(tmp_path: Path, sqlite_app)
     stays. A `Key` has no `__str__`, so this substring can only come from an f-string over one,
     and that is worth asserting on its own terms.
     """
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     db = tmp_path / "task.db"
     app = sqlite_app(str(db))
@@ -201,7 +201,7 @@ def test_absurd_writes_only_names_that_are_in_the_language_THROUGH_A_WRAPPER_STA
     from _conformance import PG_DSN
 
     from effective.absurd_worker import absurd_worker
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     class _Wrapper:
         """One of ours, over the raw SDK ctx: the stack `_adapt_ctx` must walk.
@@ -324,7 +324,7 @@ def test_sqlite_stores_EXACTLY_the_names_the_substrate_handed_down(
     tmp_path: Path, sqlite_app
 ) -> None:
     """Fidelity, 0↔1. A well-formed name that is the WRONG name passes the in-language gate."""
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     db = tmp_path / "task.db"
     app = sqlite_app(str(db))
@@ -352,7 +352,7 @@ def test_absurd_stores_EXACTLY_the_names_the_substrate_handed_down() -> None:
     from _conformance import PG_DSN
 
     from effective.absurd_worker import absurd_worker
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     app = absurd_worker(PG_DSN)
     captured: dict[str, _CapturingCtx] = {}

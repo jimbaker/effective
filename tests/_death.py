@@ -21,7 +21,7 @@ from _schedules import Turnstile, ledger_path
 
 from effective.api import Effect, append_ledger, gather, race
 from effective.choice import Answer
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Run, Segment, compose_key
 from effective.ops import LedgerRow
 
@@ -161,7 +161,7 @@ def work(engine: str, where: str, task: str, dsn: str, scenario: str = "gather")
     """Claim `task` and run `scenario` until the cut ends this process."""
     program, handler = SCENARIOS[scenario]
     if engine == "sqlite":
-        import effective.sqlite as sqlite
+        import effective.engines.sqlite as sqlite
 
         sqlite.CLAIM_LEASE_SECONDS = 0.0  # the lease is spent the moment it is taken
         app = sqlite.SqliteApp(where)

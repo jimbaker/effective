@@ -13,10 +13,10 @@ from typing import Any
 
 import pytest
 
-from effective import sqlite
+from effective.engines import sqlite
+from effective.engines.sqlite import ClaimLost, SqliteApp
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, Unretryable
-from effective.sqlite import ClaimLost, SqliteApp
 
 
 class _Refuses(Unretryable):

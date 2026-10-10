@@ -17,7 +17,8 @@ from _shapes import run
 from effective.api import Effect, await_until, call_tool, gather
 from effective.api import sleep_until as api_sleep_until
 from effective.domain import DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key
@@ -30,7 +31,6 @@ from effective.ops import (
     SleepUntil,
     WorkflowOp,
 )
-from effective.sqlite import SqliteApp
 
 pytestmark = pytest.mark.adversarial
 
@@ -295,7 +295,7 @@ def test_the_capability_probe_reads_past_every_ctx_wrapper() -> None:
     down. Asserted in BOTH directions: a wrapper over a clock-less ctx says no, and the same
     wrapper over an engine that answers says yes.
     """
-    from effective.handlers.absurd import _PrefixedCtx, _supports_await_until
+    from effective.handlers.durable import _PrefixedCtx, _supports_await_until
 
     class _EventOnly:
         """The two required members and no clock — `TaskContext`'s floor."""
@@ -324,7 +324,7 @@ def test_a_fork_childs_bounded_wait_parks_in_its_own_event_world() -> None:
     without that arm keeps the bare name, which is the same wrapper defect one class over from
     `_PrefixedCtx`'s frame.
     """
-    from effective.handlers.absurd import RenamedAwaitCtx
+    from effective.handlers.durable import RenamedAwaitCtx
 
     asked: list[Key] = []
 
@@ -517,7 +517,7 @@ def test_a_durable_forks_tail_refuses_a_wait_that_names_a_deadline() -> None:
     a replayed PREFIX happened in reality, and only the tail is the dream.
     """
     from effective.counterfactual import ForkedDeadline
-    from effective.handlers.absurd import Live, SeedingCtx
+    from effective.handlers.durable import Live, SeedingCtx
 
     class _Engine:
         def step(self, name: Key, thunk: Any, /) -> Any:

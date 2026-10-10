@@ -14,10 +14,10 @@ from uuid import UUID
 
 from effective.api import call_tool, race
 from effective.domain import CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key, race_choice
 from effective.ops import Step
-from effective.sqlite import SqliteApp, SqliteTaskContext
 
 DIED = 9
 

@@ -239,7 +239,7 @@ def test_the_trip_and_the_decode_agree_on_which_op_is_metered():
     from effective.domain import AskLLM
     from effective.fork import trip_at
     from effective.govern import BudgetRefused
-    from effective.handlers.absurd import metered_call
+    from effective.handlers.durable import metered_call
     from effective.ops import Step
 
     ask = Step(name="ask0", op=AskLLM(messages="m", response_schema=str))

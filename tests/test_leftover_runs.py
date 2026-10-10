@@ -4,12 +4,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from _durable import DSN, absurd, cancel_leftover_runs, is_disposable, pg_ready
 from conftest import _LOCK_KEY
+
+from effective.engines import TaskState
+from effective.engines.absurd import AbsurdEngine
 
 
 def _marked() -> bool:
@@ -38,25 +41,31 @@ def serial_pytest(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def state(engine: AbsurdEngine, task_id: UUID) -> TaskState:
+    snapshot = engine.fetch_task_result(task_id)
+    assert snapshot is not None
+    return snapshot.state
+
+
 def test_a_leftover_run_spends_a_batch_until_it_is_cancelled():
     app = absurd()
     try:
-        orphan = app.spawn(f"orphan-{uuid4().hex[:8]}", {}, queue="default")
+        orphan = app.spawn(f"orphan-{uuid4().hex[:8]}", {})
         name = f"own-{uuid4().hex[:8]}"
         app.register_task(name)(lambda params, ctx: "done")
 
         first = app.spawn(name, {})
         app.work_batch()
-        assert app.fetch_task_result(first["task_id"]).state == "pending"
+        assert state(app, first) == "pending"
 
         with psycopg.connect(DSN, autocommit=True) as conn:
             cancel_leftover_runs(conn)
         for spawned in (orphan, first):
-            assert app.fetch_task_result(spawned["task_id"]).state == "cancelled"
+            assert state(app, spawned) == "cancelled"
 
         second = app.spawn(name, {})
         app.work_batch()
-        assert app.fetch_task_result(second["task_id"]).state == "completed"
+        assert state(app, second) == "completed"
     finally:
         app.close()
 
@@ -82,7 +91,7 @@ from _durable import absurd
 
 def test_a_leaves_a_run_nobody_registers():
     app = absurd()
-    app.spawn(f"orphan-{uuid4().hex[:8]}", {}, queue="default")
+    app.spawn(f"orphan-{uuid4().hex[:8]}", {})
     app.close()
 
 
@@ -93,7 +102,7 @@ def test_b_drives_its_own_run_with_one_batch():
         app.register_task(name)(lambda params, ctx: "done")
         spawned = app.spawn(name, {})
         app.work_batch()
-        assert app.fetch_task_result(spawned["task_id"]).state == "completed"
+        assert app.fetch_task_result(spawned).state == "completed"
     finally:
         app.close()
 """

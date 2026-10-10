@@ -23,12 +23,12 @@ from effective.budget import Budget, MeasuredBudget
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import CONTRACT_PARAM, Contract, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Respawned
 from effective.interpreters.tools import spawn_tool
 from effective.keys import compose_key
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteApp, SqliteLedger
 
 
 class Watch(BaseModel):

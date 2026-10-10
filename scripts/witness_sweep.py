@@ -37,8 +37,8 @@ from uuid import UUID
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
-from effective.handlers.absurd import _load
 from effective.handlers.admission import observed
+from effective.handlers.durable import _load
 
 DEFAULT_DSN = "postgresql://effective:effective@localhost:5432/effective"
 

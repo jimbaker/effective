@@ -16,7 +16,7 @@ from _schedules import Turnstile, step_name
 
 from effective.api import ask_llm, await_event, call_tool, gather
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Key
 from effective.layers import op_layer

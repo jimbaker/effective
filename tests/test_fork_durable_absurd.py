@@ -17,14 +17,14 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
-from _durable import DSN, IMMEDIATE_RETRY, absurd, pg_ready
+from _durable import DSN, absurd, pg_ready
 from test_fork_sweep import new_message_id
 
 from effective.api import append_ledger, ask_llm, await_event, sleep_until
 from effective.bridge_absurd import read_absurd_task
 from effective.cost import MeteredInterpreter, Usage
 from effective.fork import fork_seed, run_fork
-from effective.handlers.absurd import DurableHandler, fork_event_name
+from effective.handlers.durable import DurableHandler, fork_event_name
 from effective.keys import Key, Segment, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow
@@ -43,15 +43,6 @@ def conn():
     c = psycopg.connect(DSN, autocommit=True)
     yield c
     c.close()
-
-
-def _run_until(app, task_id: str, max_batches: int = 64):
-    for _ in range(max_batches):
-        snap = app.fetch_task_result(task_id)
-        if snap is not None and snap.state in ("completed", "failed", "cancelled"):
-            return snap
-        app.work_batch()
-    return app.fetch_task_result(task_id)
 
 
 def _rows(conn, run_id: str) -> list[str]:
@@ -111,11 +102,10 @@ def test_an_elapsed_prefix_sleep_replays_on_the_DEPLOYED_engine(conn):
     base_id = app.spawn(
         f"base-{base_rid}",
         {"run_id": base_rid, "message_id": message_id},
-        retry_strategy=IMMEDIATE_RETRY,
-    )["task_id"]
-    _run_until(app, base_id)
+    )
+    app.run_until_result(base_id)
     app.emit_event(f"review:{message_id}", {"decision": "reject"})
-    snap = _run_until(app, base_id)
+    snap = app.run_until_result(base_id)
     assert snap is not None
     assert snap.state == "completed", snap
     assert snap.result == "reject"
@@ -141,15 +131,13 @@ def test_an_elapsed_prefix_sleep_replays_on_the_DEPLOYED_engine(conn):
         finally:
             hyp.close()
 
-    fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid}, retry_strategy=IMMEDIATE_RETRY)[
-        "task_id"
-    ]
-    _run_until(app, fork_id)
+    fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid})
+    app.run_until_result(fork_id)
     app.emit_event(
         fork_event_name(fork_rid, Key.parse(f"review:{message_id}")).stored(),
         {"decision": "approve"},
     )
-    snap = _run_until(app, fork_id)
+    snap = app.run_until_result(fork_id)
 
     assert snap is not None, "the fork never completed"
     assert snap.state == "completed", f"the forked prefix sleep did not replay: {snap.failure}"
@@ -204,11 +192,12 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
     base_id = app.spawn(
         f"base-{base_rid}",
         {"run_id": base_rid, "message_id": message_id},
-        retry_strategy=IMMEDIATE_RETRY,
-    )["task_id"]
-    _run_until(app, base_id)
+    )
+    app.run_until_result(base_id)
     app.emit_event(f"review:{message_id}", {"decision": "reject"})
-    assert _run_until(app, base_id).state == "completed"
+    snap = app.run_until_result(base_id)
+    assert snap is not None
+    assert snap.state == "completed"
 
     seed = fork_seed(read_absurd_task(conn, base_id), through=f"ledger;extracted:{message_id}")
 
@@ -231,15 +220,13 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
         finally:
             hyp.close()
 
-    fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid}, retry_strategy=IMMEDIATE_RETRY)[
-        "task_id"
-    ]
-    _run_until(app, fork_id)
+    fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid})
+    app.run_until_result(fork_id)
     app.emit_event(
         fork_event_name(fork_rid, Key.parse(f"review:{message_id}")).stored(),
         {"decision": "approve"},
     )
-    snap = _run_until(app, fork_id)
+    snap = app.run_until_result(fork_id)
     assert snap is not None
     assert snap.state == "completed", snap
 

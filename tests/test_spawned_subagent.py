@@ -14,10 +14,10 @@ Podman test Postgres:
   parent resumes to the same answer.
 """
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from _durable import IMMEDIATE_RETRY, Fault, FaultCtx, absurd, pg_ready, run_until_result
+from _durable import IMMEDIATE_RETRY, Fault, FaultCtx, absurd, pg_ready
 from _spawning import absurd_spawner
 
 from effective import call_tool
@@ -26,7 +26,7 @@ from effective.compose import spawn_subagent_task
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective.react import AssistantTurn, ToolRequest, ToolResult, run_agent
@@ -102,8 +102,8 @@ def test_spawned_child_is_its_own_task_and_the_parent_awaits_it():
         _register_child(app, cname)
         _register_parent(app, pname, cname, absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids))
 
-        spawned = app.spawn(pname, {"mid": mid}, retry_strategy=IMMEDIATE_RETRY)
-        snap = run_until_result(app, spawned["task_id"])
+        spawned = app.spawn(pname, {"mid": mid})
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
@@ -111,8 +111,8 @@ def test_spawned_child_is_its_own_task_and_the_parent_awaits_it():
 
         # the child ran as its OWN task: a distinct, completed task with its own result
         child_id = ids[0]
-        assert child_id != str(spawned["task_id"])
-        child_snap = app.fetch_task_result(child_id)
+        assert child_id != str(spawned)
+        child_snap = app.fetch_task_result(UUID(child_id))
         assert child_snap is not None
         assert child_snap.state == "completed"
         assert child_snap.result["answer"] == "42"
@@ -133,8 +133,8 @@ def test_parent_crash_at_the_await_does_not_respawn_or_restart_the_child():
             app, pname, cname, absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids), fault=Fault(2)
         )
 
-        spawned = app.spawn(pname, {"mid": mid}, retry_strategy=IMMEDIATE_RETRY)
-        snap = run_until_result(app, spawned["task_id"])
+        spawned = app.spawn(pname, {"mid": mid})
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
@@ -165,8 +165,8 @@ def test_the_depth_ceiling_holds_on_the_engine(depth, answered, children):
         _register_parent(app, pname, cname, spawner, max_attempts=1)
 
         params = {"mid": mid, BUDGET_DEPTH_PARAM: depth}
-        spawned = app.spawn(pname, params, retry_strategy=IMMEDIATE_RETRY)
-        snap = run_until_result(app, spawned["task_id"])
+        spawned = app.spawn(pname, params)
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"

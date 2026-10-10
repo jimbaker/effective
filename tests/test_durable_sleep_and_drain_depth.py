@@ -23,11 +23,11 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from _durable import DSN, absurd, clock_at, pg_ready, run_until_result
+from _durable import DSN, absurd, clock_at, pg_ready
 
 from effective.api import sleep_until
 from effective.bridge_absurd import read_absurd_task
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 
@@ -136,7 +136,7 @@ def test_top_level_durable_sleep_completes_on_absurd():
         # `run_until_result`, not one `work_batch()`: an advanced clock makes every dormant
         # leftover in the shared queue claimable at once (measured: 1 -> 3), so a single
         # claim may land on somebody else's task. Drain until THIS one is terminal.
-        run_until_result(app, task_id)
+        app.run_until_result(task_id)
 
     snapshot = app.fetch_task_result(task_id)
     assert snapshot is not None, "no snapshot for the napping task"
@@ -224,10 +224,9 @@ def test_two_sleeps_to_one_instant_get_two_durable_names():
         )
 
     task_id = app.spawn(name, {"run_id": f"r-{name}"})
-    task_id = task_id["task_id"] if isinstance(task_id, dict) else task_id
     app.work_batch()
     with clock_at(app, wake_at + dt.timedelta(seconds=1)):
-        run_until_result(app, task_id)
+        app.run_until_result(task_id)
 
     snapshot = app.fetch_task_result(task_id)
     assert snapshot is not None, "the napping task vanished"
@@ -270,10 +269,9 @@ def test_a_scoped_sleep_is_frame_qualified_on_the_durable_path():
         )
 
     task_id = app.spawn(name, {"run_id": f"r-{name}"})
-    task_id = task_id["task_id"] if isinstance(task_id, dict) else task_id
     app.work_batch()
     with clock_at(app, wake_at + dt.timedelta(seconds=1)):
-        run_until_result(app, task_id)
+        app.run_until_result(task_id)
 
     snapshot = app.fetch_task_result(task_id)
     assert snapshot is not None, "the napping task vanished"

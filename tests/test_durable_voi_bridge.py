@@ -14,10 +14,10 @@ from effective.bridge_sqlite import export_measured_prefix, park_name
 from effective.budget import Grant, MeasuredBudget
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
+from effective.engines.sqlite import SqliteApp
 from effective.fork import measured_drive
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
-from effective.sqlite import SqliteApp
 
 COST = 0.001
 

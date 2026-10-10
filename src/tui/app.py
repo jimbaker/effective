@@ -33,6 +33,7 @@ from textual.widgets import DataTable, Footer, Header, Input, Markdown, Static, 
 from textual.widgets.tree import TreeNode
 
 from effective import runread
+from effective.engines.sqlite import SqliteApp
 from effective.graphview import (
     Node,
     RunGraph,
@@ -45,7 +46,6 @@ from effective.graphview import (
 from effective.parked import ParkedTask, answer
 from effective.runs import RunStatus
 from effective.runview import RunView, files_line, to_markdown
-from effective.sqlite import SqliteApp
 
 PROJECTIONS = ("unrolled", "project", "fold")
 """The three views of one tape, named as the substrate names them.

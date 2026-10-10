@@ -35,9 +35,9 @@ src/effective/fork.py :: prose :: ledger:extracted:{message_id} :: unreviewed �
 src/effective/fork.py :: prose :: ledger:reviewed:* :: unreviewed — bootstrapped, replace with the judgement
 src/effective/govern.py :: prose :: govern:spend:run-g:0:0: :: unreviewed — bootstrapped, replace with the judgement
 src/effective/govern.py :: prose :: govern:{gate},{run_id}[,generation=N][,pass-n=N][,occurrence=N];{op_key} :: the park name's own wire form, in the docstring that composes it
-src/effective/handlers/absurd.py :: prose :: approve:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
-src/effective/handlers/absurd.py :: prose :: gather:0:0:{approve} :: unreviewed — bootstrapped, replace with the judgement
-src/effective/handlers/absurd.py :: prose :: govern:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/handlers/durable.py :: prose :: approve:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/handlers/durable.py :: prose :: gather:0:0:{approve} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/handlers/durable.py :: prose :: govern:{…}:{op_key} :: unreviewed — bootstrapped, replace with the judgement
 src/effective/keys/registry.py :: prose :: approve:r1:tool:charge_card :: unreviewed — bootstrapped, replace with the judgement
 src/effective/keys/registry.py :: prose :: approve:r1:tool:charge_card#2 :: unreviewed — bootstrapped, replace with the judgement
 src/effective/keys/registry.py :: prose :: hyp:r-fork,review%3Am1 :: deliberate: the percent-escaped spelling the module docstring quotes to show what escaping costs a reader's glance

@@ -25,16 +25,16 @@ if (_source := os.environ.get("EFFECT_WITNESS_SOURCE")) is not None:
 
 from effective.api import append_ledger, await_event, call_tool, store_artifact  # noqa: E402
 from effective.counterfactual import ForkLedger  # noqa: E402
+from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext  # noqa: E402
 from effective.govern import govern  # noqa: E402
-from effective.handlers import absurd, recording  # noqa: E402
-from effective.handlers.absurd import DurableHandler  # noqa: E402
+from effective.handlers import durable, recording  # noqa: E402
+from effective.handlers.durable import DurableHandler  # noqa: E402
 from effective.handlers.recording import RecordingHandler  # noqa: E402
 from effective.handlers.replay import ReplayHandler  # noqa: E402
 from effective.keys import Segment, compose_key  # noqa: E402
 from effective.layers import op_layer  # noqa: E402
 from effective.ops import AppendLedgerRow, DomainOp, LedgerRow  # noqa: E402
 from effective.permission import Allow, as_policy, cascade, rules  # noqa: E402
-from effective.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext  # noqa: E402
 from scripts import effect_witness as ew  # noqa: E402
 
 pytestmark = pytest.mark.adversarial
@@ -149,7 +149,7 @@ def test_the_same_row_through_a_cascaded_durable_handler_sits_under_one_guard(wi
     assert ledger["position"] == "stream, 1 guard"
     assert ledger["layers"] == ["effective.permission.cascade.<locals>.gate"]
     assert (ledger["writer"]["path"], ledger["writer"]["qualname"]) == (
-        "src/effective/handlers/absurd.py",
+        f"src/{DurableHandler.__module__.replace('.', '/')}.py",
         "DurableHandler._handle.<locals>.<lambda>",
     )
     (checkpoint,) = of(witness, "checkpoint")
@@ -612,7 +612,7 @@ def test_uninstall_restores_every_seam_and_frees_the_monitoring_tool():
         (DurableHandler, "_record_ledger"),
         (RecordingHandler, "_interpret"),
         (recording, "drive_through"),
-        (absurd, "drive_through"),
+        (durable, "drive_through"),
     ]
     originals = [vars(owner)[name] for owner, name in seams]
     probe = ew.Witness(out=None)

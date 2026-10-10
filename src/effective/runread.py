@@ -14,12 +14,12 @@ from pathlib import Path
 from uuid import UUID
 
 from effective.checkpoints import Checkpoint, read_sqlite_task
+from effective.engines.sqlite import connect
 from effective.graphview import RunGraph, from_keys
 from effective.ledgerread import sqlite_payloads
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked
 from effective.runs import RunStatus, read_sqlite_runs
 from effective.runview import RunView, run_view
-from effective.sqlite import connect
 from effective.telemetry import Measurements
 
 

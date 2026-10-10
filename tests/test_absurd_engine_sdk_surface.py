@@ -18,10 +18,17 @@ _TREE = ast.parse(Path(inspect.getfile(engine)).read_text())
 
 
 def _own_attributes() -> set[str]:
-    """Attributes the module's own classes assign on `self`."""
+    """Attributes the module's own classes define as methods or assign on `self`."""
     owned: set[str] = set()
     for node in ast.walk(_TREE):
         match node:
+            case ast.ClassDef(body=body):
+                for item in body:
+                    match item:
+                        case ast.FunctionDef(name=name):
+                            owned.add(name)
+                        case _:
+                            pass
             case ast.Assign(targets=targets):
                 owned |= {attr for target in targets if (attr := _on_self(target))}
             case ast.AnnAssign(target=target) if attr := _on_self(target):
@@ -39,16 +46,28 @@ def _on_self(target: ast.expr) -> str | None:
             return None
 
 
-def _private_attributes() -> set[str]:
-    """Single-underscore attributes read or written on an SDK object."""
+def _private_attributes(*, on_app: bool) -> set[str]:
+    """Single-underscore attributes read or written on an SDK object: the driver's SDK app
+    (`self.app`) when `on_app`, else a task context."""
     used: set[str] = set()
     for node in ast.walk(_TREE):
         match node:
-            case ast.Attribute(attr=attr) if attr.startswith("_") and not attr.startswith("__"):
-                used.add(attr)
+            case ast.Attribute(attr=attr, value=receiver) if attr.startswith(
+                "_"
+            ) and not attr.startswith("__"):
+                if _is_app(receiver) == on_app:
+                    used.add(attr)
             case _:
                 pass
     return used - _own_attributes()
+
+
+def _is_app(receiver: ast.expr) -> bool:
+    match receiver:
+        case ast.Attribute(value=ast.Name(id="self"), attr="app"):
+            return True
+        case _:
+            return False
 
 
 def _claim_keys() -> set[str]:
@@ -79,15 +98,23 @@ def _private_imports() -> set[str]:
 
 def test_the_scan_finds_the_private_surface() -> None:
     """Guards the tests below against passing over an empty scan."""
-    assert {"_lookup_checkpoint", "_persist_checkpoint", "_task"} <= _private_attributes()
+    assert {"_lookup_checkpoint", "_persist_checkpoint", "_task"} <= _private_attributes(
+        on_app=False
+    )
+    assert {"_execute_task"} <= _private_attributes(on_app=True)
     assert {"task_id", "run_id", "attempt"} <= _claim_keys()
     assert "_CHECKPOINT_NOT_FOUND" in _private_imports()
 
 
-@pytest.mark.parametrize("name", sorted(_private_attributes()))
+@pytest.mark.parametrize("name", sorted(_private_attributes(on_app=False)))
 def test_each_private_attribute_exists_on_the_sdk_task_context(name: str) -> None:
     sdk_ctx = absurd_sdk.TaskContext
     assert callable(getattr(sdk_ctx, name, None)) or name in sdk_ctx.__annotations__
+
+
+@pytest.mark.parametrize("name", sorted(_private_attributes(on_app=True)))
+def test_each_private_method_the_driver_calls_exists_on_the_sdk_app(name: str) -> None:
+    assert callable(getattr(absurd_sdk.Absurd, name, None))
 
 
 @pytest.mark.parametrize("key", sorted(_claim_keys()))

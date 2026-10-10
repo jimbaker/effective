@@ -5,7 +5,7 @@ different places, which is the point worth reading before adding a third:
 
 1. **Suppress the canonical commit.** On the DURABLE path this seam already exists and is not a
    layer: `DurableHandler(ledger=None)` checkpoints an `AppendLedgerRow` and appends nothing
-   (`handlers/absurd.py::_record_ledger`). An op-layer would be wrong there: a layer that
+   (`handlers/durable.py::_record_ledger`). An op-layer would be wrong there: a layer that
    answers `AppendLedgerRow`/`StoreArtifact` without forwarding collapses the
    checkpoint sequence from `['tool:a', 'ledger:…', 'artifact:…']` to `['tool:a']`, destroying the
    parity a fork's diff depends on and un-persisting the artifact (pre-CAS the checkpoint IS the

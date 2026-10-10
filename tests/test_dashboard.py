@@ -31,14 +31,14 @@ from fastapi.testclient import TestClient
 from effective.api import append_ledger, await_event, call_tool, gather
 from effective.dashboard import dashboard
 from effective.domain import CallTool, DomainOp
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphlayout import elkjs
 from effective.graphlayout import elkjs as elk_engine
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.layers import compose_domain
 from effective.ops import LedgerRow
 from effective.parked import read_sqlite_parked_conn
-from effective.sqlite import SqliteApp, SqliteLedger
 from effective.telemetry import otlp_jsonl_sink, traced
 
 
@@ -242,12 +242,12 @@ def test_the_run_page_reports_when_the_tape_and_the_record_disagree():
     says so and NAMES the writers, because a reader's next move is to look those keys up. The
     detector that finds them is pinned over real keys in `test_graphview.py`."""
     from effective.dashboard import run_page
+    from effective.engines import TaskSnapshot, TaskState
     from effective.graphview import Collision
-    from effective.sqlite import TaskSnapshot
 
     page = run_page(
         uuid7(),
-        TaskSnapshot(state="completed", result=None, failure=None),
+        TaskSnapshot(state=TaskState.COMPLETED, result=None, failure=None),
         None,
         None,
         (Collision("r1:done", ("gather:0,0;ledger;r1:done", "gather:0,1;ledger;r1:done")),),

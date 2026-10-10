@@ -394,10 +394,10 @@ def collecting_layer(seen: list[TraceEntry]) -> Callable[[Any], Generator[Any, A
 
     **It must be an OP layer, and the reason is the whole point of pointing this at a banked
     tape.** The obvious reading — probe the DOMAIN — collects nothing on replay: the domain call
-    sits inside the checkpoint thunk (`handlers/absurd.py`, `ctx.step(op_key(op), lambda: …
+    sits inside the checkpoint thunk (`handlers/durable.py`, `ctx.step(op_key(op), lambda: …
     self.domain.run(inner))`) and `SqliteTaskContext.step` returns the committed row *without
     running the thunk* on a hit. The op seam is the one that "re-fires per op on replay"
-    (`handlers/absurd.py`'s own comment), and the drive loop enters `placement_scope` AROUND the
+    (`handlers/durable.py`'s own comment), and the drive loop enters `placement_scope` AROUND the
     layer stack, so a probe here can read `current_placement()` and emit exactly a `TraceEntry`.
 
     That asymmetry is also why this is useful at all: replay re-runs the deterministic loop, so the

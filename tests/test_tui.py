@@ -29,13 +29,13 @@ from textual.widgets import Input, Static, Tree
 from effective import runread
 from effective.api import await_event, compose_key
 from effective.cost import MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.base import op_key
+from effective.handlers.durable import DurableHandler
 from effective.keys import Name
 from effective.ops import StoreArtifact
 from effective.runs import RunState
 from effective.runview import to_markdown
-from effective.sqlite import SqliteApp, SqliteLedger
 from tui.app import RunViewApp, _summary
 
 pytestmark = pytest.mark.journey

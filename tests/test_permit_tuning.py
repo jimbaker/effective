@@ -17,7 +17,7 @@ from agent.permit_tuning import (
     tune_permits,
 )
 from effective.cost import CostBudget, MeteredInterpreter
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.improve import Scored
 from effective.permission import PermitPolicy
 

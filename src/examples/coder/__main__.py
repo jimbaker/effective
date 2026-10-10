@@ -26,14 +26,14 @@ from effective.checkpoints import read_sqlite_conn
 from effective.coding.tier import tree_paths
 from effective.combinators import hoisted
 from effective.cost import Contract, MeteredInterpreter
+from effective.engines.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 from effective.govern import govern
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import ResponsesTurnCaller, profile_for
 from effective.interpreters.tool_catalog import strict_function_tools
 from effective.keys.grammar import parse
 from effective.machine.trampoline import changed_paths
 from effective.skills import SkillRegistry
-from effective.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 from effective.telemetry import otlp_jsonl_sink, render_message, traced
 from examples.coder.machine import coder
 from examples.coder.prompt import system_prompt

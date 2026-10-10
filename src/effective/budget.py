@@ -388,7 +388,7 @@ class MeasuredBudget:
 #
 # The classification a driver acts on, in the shared domain module so both interpreters import
 # the one definition: the in-process `measured_drive` (`effective.fork`) and the durable
-# `DurableHandler._enforce_measured` (`effective.handlers.absurd`). Formalized once in
+# `DurableHandler._enforce_measured` (`effective.handlers.durable`). Formalized once in
 # `formal/lean/Effective/EnforceMeasured.lean` and conformance-pinned in
 # `tests/test_enforce_measured_conformance.py` (both interpreters vs the machine-derived rows).
 

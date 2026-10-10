@@ -185,7 +185,7 @@ def test_a_metered_only_domain_under_V0_is_rejected_at_ASSEMBLY():
     the non-metered arm, so a serve stack cannot work for ANY workflow — a fact known at
     construction. Refuse there, not after the first step has committed."""
     from effective.cost import Contract, serve
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     served = serve(retry_domain(1), base=FlakyDomain(fail_times=0))
     with pytest.raises(TypeError, match="metered-only"):
@@ -201,7 +201,7 @@ def test_a_metered_only_domain_under_V1_is_allowed_to_assemble():
     all-AskLLM run is fine, one CallTool is not), which assembly cannot know. That case keeps
     the runtime `.run` fence — legible, but late."""
     from effective.cost import Contract, serve
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     served = serve(retry_domain(1), base=FlakyDomain(fail_times=0))
     # (statically invalid for the same reason; the runtime path is what is under test)
@@ -210,7 +210,7 @@ def test_a_metered_only_domain_under_V1_is_allowed_to_assemble():
 
 def test_an_ordinary_domain_is_unaffected_under_either_contract():
     from effective.cost import Contract
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     for contract in (Contract.V0, Contract.V1):
         DurableHandler(ctx=_NullCtx(), domain=_PlainDomain(fail_times=0), contract=contract)

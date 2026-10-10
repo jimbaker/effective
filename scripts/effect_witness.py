@@ -462,7 +462,7 @@ class Witness:
         self._install_recording()
 
     def _install_op_stream(self, sites: YieldSites) -> None:
-        from effective.handlers import absurd, recording
+        from effective.handlers import durable, recording
 
         def driving(original: Callable[..., Any]) -> Callable[..., Any]:
             def drive_through(op_layers, op, base, **options):
@@ -483,11 +483,11 @@ class Witness:
 
             return drive_through
 
-        for module in (recording, absurd):
+        for module in (recording, durable):
             self._patch(module, "drive_through", driving(vars(module)["drive_through"]))
 
     def _install_checkpoint(self) -> None:
-        from effective.sqlite import SqliteTaskContext
+        from effective.engines.sqlite import SqliteTaskContext
 
         witness = self
         original_step = SqliteTaskContext.step
@@ -513,13 +513,13 @@ class Witness:
 
     def _install_ledger(self) -> None:
         from effective.counterfactual import ForkLedger
-        from effective.handlers import absurd
-        from effective.sqlite import SqliteLedger
+        from effective.engines.sqlite import SqliteLedger
+        from effective.handlers import durable
 
         witness = self
         original_sqlite = SqliteLedger.append
         original_fork = ForkLedger.append
-        original_record = absurd.DurableHandler._record_ledger
+        original_record = durable.DurableHandler._record_ledger
 
         def delegating(original: Callable[..., Any]) -> Callable[..., Any]:
             """A writer above the store: the store beneath it, if SQLite, fills in the rest."""
@@ -544,7 +544,7 @@ class Witness:
 
         self._patch(SqliteLedger, "append", self._store_sensor(original_sqlite))
         self._patch(ForkLedger, "append", delegating(original_fork))
-        self._patch(absurd.DurableHandler, "_record_ledger", durable_record_ledger)
+        self._patch(durable.DurableHandler, "_record_ledger", durable_record_ledger)
 
     def _store_sensor(self, original_sqlite: Callable[..., Any]) -> Callable[..., Any]:
         """The SQLite ledger: it tells the write in progress what was stored, and whether."""

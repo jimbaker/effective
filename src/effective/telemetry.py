@@ -1253,7 +1253,7 @@ def traced(
     def run(op: DomainOp[Any]) -> Generator[DomainOp[Any], Any, Any]:
         iteration = turn[0]
         # One read, BEFORE the yield. The handler publishes the placement around the whole
-        # dispatch (`handlers/absurd.py`, one drive loop for both durable engines), and
+        # dispatch (`handlers/durable.py`, one drive loop for both durable engines), and
         # `tests/test_placement_visible_to_domain_layer.py` measures that it is non-`None`
         # going in AND coming out and equal across the yield — so reading here is immune to
         # any question about teardown at the inner dispatch's exit, including on the error

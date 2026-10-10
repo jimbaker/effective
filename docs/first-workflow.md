@@ -49,10 +49,10 @@ from effective import (
 from effective.channels import Gated, Repair, render
 from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
+from effective.handlers.durable import DurableHandler
 from effective.layers import OpLayer
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 ```
 
 <!-- source: examples/first_workflow.py -->
@@ -196,8 +196,8 @@ a changed program; [`wiki/concepts/testing.md`](../wiki/concepts/testing.md) say
 | `ChannelMismatchError` | `effective.channels` | what `render` raises when the channels and the fields of `output=` disagree |
 | `LedgerRow` | `effective.ops` | the typed shape of a ledger append |
 | `AskLLM`, `Judge`, `CallTool` | `effective.domain` | what a step carries; `ask_llm`, `judge` and `call_tool` build them for you |
-| `DurableHandler` | `effective.handlers.absurd` | the handler that runs each op as a checkpointed step, on either engine |
-| `SqliteApp`, `SqliteLedger`, `TaskSnapshot` | `effective.sqlite` | the embedded engine: one file, no service; its ledger; a task's ending |
+| `DurableHandler` | `effective.handlers.durable` | the handler that runs each op as a checkpointed step, on either engine |
+| `SqliteApp`, `SqliteLedger`, `TaskSnapshot` | `effective.engines.sqlite` | the embedded engine: one file, no service; its ledger; a task's ending |
 | `keys`, `read_sqlite_task` | `effective.checkpoints` | a task's checkpoints, read back in commit order |
 | `OpLayer` | `effective.layers` | the type of a layer, the hooks of [`examples/hooks_as_layers.py`](../examples/hooks_as_layers.py) |
 

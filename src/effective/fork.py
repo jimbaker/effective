@@ -41,7 +41,7 @@ from effective.budget import (
 )
 from effective.budget import Grant as Grant  # explicit re-export (pinned: test_measured_fork)
 from effective.budget import TripOutcome as TripOutcome  # explicit re-export (same pin)
-from effective.cancel import cancelled_or
+from effective.cancel import Cancelled, cancelled_or
 from effective.checkpoints import Checkpoint
 from effective.cost import Contract, Usage
 from effective.counterfactual import (
@@ -54,7 +54,17 @@ from effective.counterfactual import (
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp, Spawned
 from effective.engines.absurd import _adapt_ctx
 from effective.govern import BudgetRefused, Refused
-from effective.handlers.absurd import (
+from effective.handlers.base import (
+    TaskContext,
+    TraceEntry,
+    keyed_call,
+    op_key,
+    placed_await_name,
+    placed_key,
+    placing,
+    walk_run,
+)
+from effective.handlers.durable import (
     DurableHandler,
     LedgerWriter,
     Live,
@@ -65,16 +75,6 @@ from effective.handlers.absurd import (
     _decode_usage_envelope,
     fork_event_name,
     metered_call,
-)
-from effective.handlers.base import (
-    TaskContext,
-    TraceEntry,
-    keyed_call,
-    op_key,
-    placed_await_name,
-    placed_key,
-    placing,
-    walk_run,
 )
 from effective.handlers.replay import ReplayMismatch
 from effective.keys import FramePosition, Key, Segment, compose_key, frame_path
@@ -848,16 +848,8 @@ def run_fork(
     # JSON): `Segment` refuses a `:`-bearing lineage id, and everything downstream is typed to
     # require the guarantee rather than re-checking it.
     child = Segment(child_run_id)
-    # `_adapt_ctx` at the INNERMOST position, next to the foreign object — not left to
-    # `DurableHandler`, which cannot reach it from outside our own wrappers. The handler adapts
-    # the ctx it is HANDED; here it is handed
-    # a `SeedingCtx`, which is not an SDK ctx, so the `isinstance` check passes it through and
-    # `SdkCtx` is never installed. The stack then delegates our one-arg `sleep_until(when)` and
-    # our `Key` step names straight into the SDK, which wants `sleep_until(step_name, wake_at)`
-    # and does f-string work on the name. Measured on the deployed engine: an already-elapsed
-    # PREFIX sleep died with `TypeError: ... missing 1 required positional argument: 'wake_at'`
-    # and retried to death (`tests/test_fork_durable_absurd.py`). A wrapper stack can only be
-    # adapted where it is BUILT.
+    # The SDK ctx is adapted where the stack is built; the handler's own `_adapt_ctx` descends
+    # the stack too, so the two agree (`tests/test_fork_durable_absurd.py`).
     fork_ctx = SeedingCtx(
         RenamedAwaitCtx(_adapt_ctx(ctx), child),
         seed,
@@ -974,11 +966,13 @@ class ForkOutcome(BaseModel):
     the fork family refuses loudly by design (a tail sleep, a prefix await, a seed that crossed
     the boundary, a world mutation under `DryRun`), and a refusal that only raised would leave the
     parent parked on a join forever. A crash propagates and the engine retries it; a child that
-    fails for good is answered `Failed` by its worker. `join_fork` builds this from its handle and
-    the answer, so a sweep keeps every child's answer, refusals and failures included."""
+    fails for good is answered `Failed` by its worker, and one its engine cancels, `Cancelled`,
+    which only the engine's cancel sends.
+    `join_fork` builds this from its handle and the answer, so a sweep keeps every child's
+    ending, refusals, failures and cancels included."""
 
     child_run_id: str
-    answer: Annotated[Returned | Refusal | Failed, Field(discriminator="kind")]
+    answer: Annotated[Returned | Refusal | Failed | Cancelled, Field(discriminator="kind")]
 
 
 REFUSALS: tuple[type[Exception], ...] = (
@@ -1189,6 +1183,7 @@ def run_fork_as_task(
     leaves of either, at any depth, so the classification does not depend on whether the
     counterfactual happened to fan out; and it is all or nothing, so an error that is not a refusal
     reaches the worker with every leaf beside it."""
+    ctx = _adapt_ctx(ctx)  # the delta's delivery below reaches the SDK too, and it speaks text
     child_run_id = str(params["child_run_id"])
     forked_from = str(params["forked_from"])
     # `Key.parse` — params arrive as JSON, so this is the read side of the identity axis.

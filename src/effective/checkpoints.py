@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from effective.engines.sqlite import connect
 from effective.handlers.base import TraceEntry
 from effective.keys import Key, unframed
 from effective.keys.grammar import TAG_SEPARATOR, TERM_SEPARATOR, split_occurrence
 from effective.sql import bind
-from effective.sqlite import connect
 
 # --- what a recorded run looks like, whatever engine wrote it ----------------------------
 
@@ -79,7 +79,7 @@ which is the only engine that has any: the SDK freezes a delivered payload as `$
 (and `$awaitTaskResult:{id}`), and every `sleep_until` writes a wake-time checkpoint under the name
 its caller passes — `sleep:{n}` for a real `SleepUntil` (the ordinal the handler's walk assigns,
 `keys.FramePosition`), and a `gather:…;wake-race:…` name for a `repark`, whose two shapes are
-composed by `handlers.absurd.wake_race_on_event` / `wake_race_at_time` and are stated THERE, so
+composed by `handlers.durable.wake_race_on_event` / `wake_race_at_time` and are stated THERE, so
 a marker list here cannot drift apart from the producer it describes (see `is_engine_internal`).
 **SQLite has none of these by construction**: its awaits live in `tasks.waiting_event` + the
 `events` table, and its `sleep_until`/`repark` write nothing at all.

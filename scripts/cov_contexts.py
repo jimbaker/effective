@@ -13,7 +13,7 @@ percentage cannot, and two of them have bitten this repo:
 Usage::
 
     just cov-contexts                       # writes .coverage-contexts
-    uv run python scripts/cov_contexts.py handlers/absurd.py 341 400
+    uv run python scripts/cov_contexts.py handlers/durable.py 341 400
     uv run python scripts/cov_contexts.py effective/keys.py            # whole file
 
 `--db` points at a different coverage file. Exits non-zero if the region has no contexts at all,
@@ -33,7 +33,7 @@ DEFAULT_DB = ".coverage-contexts"
 def contexts_for(db_path: Path, path_suffix: str, lo: int, hi: int) -> dict[str, list[int]]:
     """`{test id: sorted lines it executed in the region}` for files matching `path_suffix`.
 
-    Matched by suffix rather than exact path so a caller can say `handlers/absurd.py` without
+    Matched by suffix rather than exact path so a caller can say `handlers/durable.py` without
     knowing the checkout root. A suffix matching several files merges them, which is wanted: the
     question is "which tests reach this code", not "which file object".
     """
@@ -82,7 +82,7 @@ def overlap_for(db_path: Path, path_suffix: str, lo: int, hi: int, floor: int) -
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("path", help="source path suffix, e.g. handlers/absurd.py")
+    parser.add_argument("path", help="source path suffix, e.g. handlers/durable.py")
     parser.add_argument("lo", nargs="?", type=int, default=1, help="first line (default: 1)")
     parser.add_argument("hi", nargs="?", type=int, default=10**9, help="last line")
     parser.add_argument("--db", default=DEFAULT_DB, type=Path)

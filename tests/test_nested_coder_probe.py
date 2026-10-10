@@ -78,7 +78,7 @@ def test_two_runs_in_one_task_under_one_run_id_are_refused(backend):
     snap = run_nested(backend, "")
 
     assert snap.state == "failed", snap
-    assert "PlacedWriterCollision" in repr(snap.failure)
+    assert "PlacedWriterCollision" in str(snap.failure)
 
 
 def test_a_coder_inside_a_coder_composes_when_the_inner_run_is_named(backend):

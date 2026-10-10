@@ -16,7 +16,7 @@ from effective import Effect
 from effective.api import qualified_event_name
 from effective.combinators import Chain, Level
 from effective.domain import ASK_TOOL, SPAWN_TOOL, Answers, AskLLM, CallTool, DomainOp, Judge
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import spawn_tool
 from effective.keys import Index, Run, compose_key

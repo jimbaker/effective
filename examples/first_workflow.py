@@ -23,10 +23,10 @@ from effective import (
 from effective.channels import Gated, Repair, render
 from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
+from effective.handlers.durable import DurableHandler
 from effective.layers import OpLayer
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 
 
 class Setpoint(BaseModel):

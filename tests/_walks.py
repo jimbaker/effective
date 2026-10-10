@@ -32,18 +32,18 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from _durable import DSN, absurd, pg_ready, run_until_result
+from _durable import DSN, absurd, pg_ready
 
 from effective.bridge_sqlite import park_name
 from effective.budget import MeasuredBudget
 from effective.cost import Usage
 from effective.domain import DomainOp
+from effective.engines.sqlite import SqliteApp
 from effective.fork import live_drive, measured_drive
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key
-from effective.sqlite import SqliteApp
 
 type Program = Callable[[], Any]
 
@@ -235,7 +235,7 @@ class AbsurdWalk:
         for name, value in answers.items():
             app.emit_event(name.stored(), value)
         app.work_batch()
-        snapshot = run_until_result(app, task_id, max_batches=6)
+        snapshot = app.run_until_result(task_id, max_batches=6)
         if snapshot is not None and snapshot.state == "completed":
             return Ran(self.name, Returned(snapshot.result))
         # A park is a WAIT ROW, not a task state — `sleeping` is what the scheduler calls it, and

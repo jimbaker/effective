@@ -24,7 +24,7 @@ from effective.api import ask_llm, await_event, call_tool, gather
 from effective.budget import MeasuredBudget
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Run, compose_key
@@ -492,7 +492,8 @@ def test_a_run_whose_lease_expired_cannot_spend_its_successors_attempts():
     tasks = f"t_{queue}"
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("SELECT absurd.create_queue(%s)", (queue,))
-    # Any, as `_durable.absurd` is: the dict-shaped IMMEDIATE_RETRY is the test convention.
+    # Any: the SDK types `retry_strategy` strictly, and the dict-shaped IMMEDIATE_RETRY is the test
+    # convention.
     first: Any = absurd_worker(DSN, queue_name=queue)
     second: Any = absurd_worker(DSN, queue_name=queue)
     a_running, b_running = threading.Event(), threading.Event()

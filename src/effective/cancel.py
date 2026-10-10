@@ -18,24 +18,27 @@ after the Esc reads the same answer until the next user turn begins.
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from effective.ops import CompositionRefused
+from effective.ops import CompositionRefused, Unretryable
 
 CANCELLED = "__cancelled__"
 """The checkpoint key a cancelled result is stored under, reserved like the substrate's params."""
 
 
 class Cancelled(BaseModel):
-    """What an interpreter answers for an op it stopped: the output the op produced first."""
+    """Work stopped from outside before it finished: an op an interpreter stopped, with the output
+    it produced first, or a spawned task its engine cancelled, as its parent receives it."""
 
+    kind: Literal["cancelled"] = "cancelled"
     partial: str = ""
 
 
-class OpCancelled(Exception):
-    """The step named `name` was cancelled while it ran."""
+class OpCancelled(Unretryable):
+    """The step named `name` was cancelled while it ran. A retry replays the recorded cancel and
+    raises it again, so an uncaught one fails its task on the attempt that raised it."""
 
     def __init__(self, name: str, partial: str) -> None:
         super().__init__("a step was cancelled while it ran", name)

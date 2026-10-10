@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 from agent.code_quality import check_code, make_code_quality, ty_checker
 from agent.debug import DebugResult, TestReport, Workspace, debug_loop, make_debug_interpreter
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 
 # --- UNIT: the rubric scores a candidate and reports ruff's message as ASI ---
 

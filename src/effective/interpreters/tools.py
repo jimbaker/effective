@@ -22,7 +22,8 @@ from typing import Any, Protocol
 from effective.contexts import LocalCtx
 from effective.cost import LLMCall, MeteredInterpreter, ToolRunner, Usage
 from effective.domain import SPAWN_TOOL, CallTool, SpawnArgs, SpawnResult
-from effective.handlers.absurd import DurableHandler
+from effective.engines.absurd import _adapt_ctx
+from effective.handlers.durable import DurableHandler
 from effective.react import ToolResult, Trajectory, run_agent
 from effective.spawning import answer_parent
 from effective.telemetry import Sink, traced
@@ -146,6 +147,7 @@ def run_subagent_as_task(
 
     Register it with the app, e.g. ``app.register_task(name)(partial(run_subagent_as_task,
     domain=...))``; the parent's `spawn_subagent_task` passes ``task`` and ``done_event``."""
+    ctx = _adapt_ctx(ctx)  # the answer below reaches the SDK too, and it speaks text
     raw = DurableHandler(ctx, domain, params=params).run(
         lambda: run_agent(params["task"], max_iters=max_iters)
     )

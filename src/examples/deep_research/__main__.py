@@ -27,7 +27,8 @@ from typesafe_sdk import TypeSafeClient
 from effective.cache import Cache, FileStore
 from effective.cost import Contract, MeteredInterpreter
 from effective.domain import AskLLM, CallTool, Judge
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, TaskSnapshot
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.cli import ClaudePrint
 from effective.interpreters.jev import Jev
 from effective.interpreters.web import (
@@ -41,7 +42,6 @@ from effective.interpreters.web import (
 from effective.keys import Key
 from effective.markdown import table
 from effective.spend import TokenBudget
-from effective.sqlite import SqliteApp, TaskSnapshot
 from effective.telemetry import otlp_jsonl_sink, sidecar_spans, traced
 from examples.deep_research.research import research
 

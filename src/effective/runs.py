@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from effective.sqlite import connect
+from effective.engines.sqlite import connect
 
 
 class RunState(StrEnum):

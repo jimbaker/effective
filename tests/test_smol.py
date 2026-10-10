@@ -12,7 +12,7 @@ from effective.api import qualified_event_name
 from effective.cancel import Cancelled
 from effective.combinators import Chain
 from effective.domain import INTERRUPT_TOOL, SPAWN_TOOL, AskLLM, CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, Phase, tool_interrupt
 from effective.keys import Index, Run, compose_key

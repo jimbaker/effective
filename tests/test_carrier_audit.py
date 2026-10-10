@@ -5,7 +5,7 @@ question is answerable without respawn: spawn two tasks with one run id and look
 carried. That is what this file does.
 
 Everything a `DurableHandler` bookkeeps is per-task and re-derived from *this task's*
-checkpoints: `self._meter`, `self._grants`, `self._trips` (`handlers/absurd.py:790-800`), the
+checkpoints: `self._meter`, `self._grants`, `self._trips` (`handlers/durable.py:790-800`), the
 per-attempt `run_scope()` dict (`layers.py:142`), the checkpoint history itself. Each therefore
 needs a chain-level answer, and one of them has no owner anywhere:
 

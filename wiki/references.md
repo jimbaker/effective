@@ -11,7 +11,7 @@ Each carries its license in the tree, and the file named here is the record.
 
 | what | used in | source | license | record |
 |---|---|---|---|---|
-| Absurd, the Postgres durable-execution schema and its migration | `infra/absurd/`, `effective.handlers.absurd` | Armin Ronacher and Earendil, *Absurd*, https://github.com/earendil-works/absurd, tag 0.5.0 | Apache-2.0 | [`infra/absurd/PIN.txt`](../infra/absurd/PIN.txt) |
+| Absurd, the Postgres durable-execution schema and its migration | `infra/absurd/`, `effective.engines.absurd`, `effective.absurd_worker` | Armin Ronacher and Earendil, *Absurd*, https://github.com/earendil-works/absurd, tag 0.5.0 | Apache-2.0 | [`infra/absurd/PIN.txt`](../infra/absurd/PIN.txt) |
 | tdom, the t-string HTML templating engine, with one patch | `infra/tdom/`, `effective.graphlayout.svg` | Dave Peck, Ian Wilson, Andrea Giammarchi and Paul Everitt, *tdom*, https://github.com/t-strings/tdom, 0.1.17 | MIT | [`infra/tdom/PIN.txt`](../infra/tdom/PIN.txt) |
 | Pi's coding-agent tool tests, translated from TypeScript | `tests/conformance/pi/`, `examples.coder` | Mario Zechner, *pi*, https://github.com/earendil-works/pi | MIT | [`tests/conformance/pi/SOURCE.md`](../tests/conformance/pi/SOURCE.md) |
 | The GSM8K sample | [`src/agent/data/gsm8k_sample.jsonl`](../src/agent/data/gsm8k_sample.jsonl), `agent.gsm8k` | Cobbe et al., "Training Verifiers to Solve Math Word Problems", 2021, arXiv:2110.14168, https://github.com/openai/grade-school-math | MIT | [`src/agent/data/README.md`](../src/agent/data/README.md) |

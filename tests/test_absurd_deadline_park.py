@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from effective.api import await_until
 from effective.engines import absurd as absurd_engine
 from effective.engines.absurd import ConcurrentAbsurdCtx
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 
 # The park is held by patching `sdk_pin_the_park` in the module that DEFINES it, since its caller
 # looks it up there; a patch on any module that merely imports it would hold nothing.
@@ -77,7 +77,7 @@ def test_a_parked_bounded_wait_registers_the_deadline_it_was_given(conn):
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     app.work_batch()
 
     parked = conn.execute(
@@ -118,7 +118,7 @@ def test_the_fake_clock_reaches_a_bounded_wait_and_expires_it(conn):
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     with clock_at(app, base + timedelta(hours=1)):  # the engine is an hour on, the wait is not due
         app.work_batch()
         parked = conn.execute(
@@ -190,7 +190,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
         # JOINED BY THE CALLER: one transaction and the emit is waiting on this one to commit,
         # which cannot happen until this returns.
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     with monkeypatch.context() as patched:
         patched.setattr(absurd_engine, "sdk_pin_the_park", held)
         app.work_batch()
@@ -244,7 +244,7 @@ def test_two_waits_on_one_event_each_keep_their_own_deadline(conn):
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     app.work_batch()  # the first ask parks, on the real clock, half an hour out
     with clock_at(app, first + timedelta(seconds=1)):
         app.work_batch()  # the clock ends it, and the second ask parks
@@ -270,7 +270,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
     different door.
     """
     app, other = absurd(), absurd()
-    other._conn.execute("SET statement_timeout = '20s'")
+    other.app._conn.execute("SET statement_timeout = '20s'")
     name = f"stale-{uuid.uuid4().hex[:8]}"
     event = f"shared:{name}"
     first = datetime.now().astimezone() + timedelta(seconds=A_BREATH)
@@ -309,7 +309,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
         settled(sdk, key, at)
 
     claimed_before_the_commit: list[int] = []
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     with monkeypatch.context() as patched:
         patched.setattr(absurd_engine, "sdk_pin_the_park", held)
         app.work_batch()
@@ -351,7 +351,7 @@ def test_an_event_at_the_deadline_is_late_to_the_microsecond(offset: int, answer
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
-    task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
+    task_id = app.spawn(name, {"run_id": "r1"})
     app.work_batch()  # the wait parks, on the deadline itself
     with clock_at(emitter, deadline + timedelta(microseconds=offset)):
         emitter.emit_event(event, {"ok": True})

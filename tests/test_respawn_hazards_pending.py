@@ -10,7 +10,7 @@ namespace separates two generations of one run, is
 import uuid
 
 import pytest
-from _durable import absurd, pg_ready, run_until_result
+from _durable import absurd, pg_ready
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 
@@ -22,7 +22,7 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
     NULL->payload transition per name, ever (`infra/absurd/absurd.sql:1832-1841`), and a
     *fresh* await is answered instantly from the cached payload. The substrate's own
     authority names embed the run id plus a counter that restarts whenever a new handler is
-    constructed (`DurableHandler._trips = 0`, `handlers/absurd.py:758`; composed at
+    constructed (`DurableHandler._trips = 0`, `handlers/durable.py:758`; composed at
     `budget.py:220`).
 
     A respawn chain keeps `workflow_run_id` STABLE across generations by design, so a name
@@ -56,12 +56,13 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
     generation_0 = spawn(0)
     app.work_batch()  # runs, then parks on `name`
     app.emit_event(name, {"add_dollars": 25.0})  # the human answers GENERATION 0
-    result_0 = run_until_result(app, generation_0)
+    result_0 = app.run_until_result(generation_0)
+    assert result_0 is not None
     assert result_0.state == "completed"
     assert result_0.result["granted"] == {"add_dollars": 25.0}
 
     # Generation 1: a DIFFERENT task, composing the same name — nobody grants it anything.
-    result_1 = run_until_result(app, spawn(1), max_batches=3)
+    result_1 = app.run_until_result(spawn(1), max_batches=3)
 
     assert result_1 is not None, "generation 1 produced no result at all"
     assert result_1.state == "completed", (

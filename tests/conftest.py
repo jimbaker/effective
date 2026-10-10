@@ -41,8 +41,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
-# Before `effective.sqlite` is imported by anything, so every connection this session opens is
-# accounted for. `connect` reads it per call, but setting it late would still miss the
+# Before `effective.engines.sqlite` is imported by anything, so every connection this session
+# opens is accounted for. `connect` reads it per call, but setting it late would still miss the
 # import-time opens some modules do.
 #
 # Plain assignment, NOT `setdefault`: `connect` gates on `== "1"`, so an inherited
@@ -51,8 +51,8 @@ import pytest
 # always tracks; the env var is for production, which does not run this file.
 os.environ["EFFECTIVE_TRACK_CONNECTIONS"] = "1"
 
+from effective.engines.sqlite import SqliteApp, unclosed_connections
 from effective.lint import configured
-from effective.sqlite import SqliteApp, unclosed_connections
 
 _DEFAULT_DSN = "postgresql://effective:effective@localhost:5432/effective"
 
@@ -566,12 +566,12 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     session or an in-process re-run does not hold it for the rest of the day.
 
     The connections: `EFFECTIVE_TRACK_CONNECTIONS` (set at import, above) makes
-    `effective.sqlite.connect` record a creation site per connection and drop it on an explicit
-    `close()`, so what survives is exactly the set nobody closed — with a file and a line, which
-    is the part the `ResourceWarning` cannot give you. That warning fires whenever the garbage
-    collector happens to reach the object, so it lands on an unrelated test and names the
-    collection site rather than the leak; 68 of them rode in the output for weeks for that
-    reason. Counted instead, it is one number, and the number is enforceable.
+    `effective.engines.sqlite.connect` record a creation site per connection and drop it on an
+    explicit `close()`, so what survives is exactly the set nobody closed, with a file and a line,
+    which is the part the `ResourceWarning` cannot give you. That warning fires whenever the
+    garbage collector happens to reach the object, so it lands on an unrelated test and names the
+    collection site rather than the leak; 68 of them rode in the output for weeks for that reason.
+    Counted instead, it is one number, and the number is enforceable.
 
     Under xdist a worker hands its sites to the controller rather than failing (see
     `pytest_testnodedown`); only the controller can fail the run.

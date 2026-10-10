@@ -18,17 +18,17 @@ from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import LLMCall, MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, AskLLM, SpawnArgs, SpawnResult
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import ForkOutcome, join_fork, run_fork_as_task, spawn_fork
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import make_tool_runner, run_subagent_as_task, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ops import ACCRUAL_PARAM, CARRY_PARAM, GENERATION_PARAM, AppendLedgerRow, LedgerRow
 from effective.react import AssistantTurn, ToolRequest
 from effective.spawning import Returned
-from effective.sqlite import SqliteApp, SqliteLedger
 
 pytestmark = pytest.mark.adversarial
 

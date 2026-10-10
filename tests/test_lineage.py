@@ -224,7 +224,7 @@ def test_read_sqlite_task_returns_decoded_python_values(tmp_path, sqlite_app):
     """Parity with Absurd's jsonb reader and `from_trace`: `Checkpoint.state` is a Python VALUE,
     not the raw JSON string — so the stage-3 seed reader can re-commit it through `ctx.step`
     without double-encoding, as Absurd's reader does."""
-    from effective.sqlite import SqliteTaskContext
+    from effective.engines.sqlite import SqliteTaskContext
 
     db = tmp_path / "task.db"
     app = sqlite_app(str(db))
@@ -252,7 +252,7 @@ def _two_lineages_in_one_store(tmp_path, sqlite_app):
     """One store, two tasks, the SAME step name in each: the shape a mixed read makes ambiguous."""
     from effective.api import ask_llm
     from effective.cost import Usage
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     class _Tagged:
         def __init__(self, tag: int) -> None:

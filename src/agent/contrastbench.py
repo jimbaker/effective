@@ -43,8 +43,9 @@ from effective.combinators import route
 from effective.compose import code_act
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.envelope import Envelope, JsonEnvelope
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import (
     GPT5_NANO,  # noqa: F401 — re-exported; `tests/test_contrastbench.py` imports it from here
     Price,
@@ -55,7 +56,6 @@ from effective.interpreters.openai import (
 )
 from effective.monty import MontyEngine, execute_tool
 from effective.react import AssistantTurn, ToolRequest, Trajectory, run_agent
-from effective.sqlite import SqliteApp, SqliteTaskContext
 
 ARMS = ("stuff", "repl", "structured", "structured-text", "combinator")
 SIZES: Mapping[str, int] = {"S": 150, "L": 4000}

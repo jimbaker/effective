@@ -21,7 +21,7 @@ import pytest
 from effective.code import EXECUTE_TOOL, ActionCall, CodeOutcome, run_code
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Exceeded
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.layers import op_layer
 from effective.monty import CodeEngineError, MontyEngine, execute_tool
@@ -531,9 +531,9 @@ from pydantic import BaseModel
 
 from effective.code import EXECUTE_TOOL, run_code
 from effective.domain import CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.monty import MontyEngine, execute_tool
-from effective.sqlite import SqliteApp, SqliteLedger
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 
 
 class Tags(BaseModel):
@@ -654,9 +654,9 @@ from _conformance import Fault, FaultCtx
 
 from effective.code import EXECUTE_TOOL, run_code
 from effective.domain import CallTool
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.monty import MontyEngine, execute_tool
-from effective.sqlite import SqliteApp, SqliteLedger
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 
 
 BODY = (

@@ -24,6 +24,7 @@ from typing import Annotated, Any, Literal, Protocol, assert_never
 from pydantic import BaseModel, Field
 
 from effective.api import Effect, await_event, step
+from effective.cancel import Cancelled, OpCancelled
 from effective.domain import SpawnArgs, Spawned
 from effective.govern import REFUSALS, ChildRefused
 from effective.handlers.base import Continued, Finished
@@ -119,7 +120,7 @@ class ChildAnswer(BaseModel):
     """What a spawned child answers its parent with, its arm naming how the child's task ended.
     One model, since an await takes one schema."""
 
-    answer: Annotated[Returned | Refusal | Failed, Field(discriminator="kind")]
+    answer: Annotated[Returned | Refusal | Failed | Cancelled, Field(discriminator="kind")]
 
 
 class ChildFailed(Unretryable):
@@ -142,6 +143,12 @@ def failure_answer(leaf: BaseException, raised: BaseException) -> Any:
     other leaf of `raised` as a note. The worker that fails the task sends it."""
     notes = [described(other) for other in leaves(raised) if other is not leaf]
     return ChildAnswer(answer=Failed(error=described(leaf), notes=notes)).model_dump(mode="json")
+
+
+def cancelled_payload() -> Any:
+    """What a cancelled task's done event carries, as plain JSON. The engine that cancels the
+    task sends it, since a parked task has no run to send it from."""
+    return ChildAnswer(answer=Cancelled()).model_dump(mode="json")
 
 
 @dataclass(frozen=True)
@@ -220,8 +227,8 @@ def run_child(
 
 
 def join_answer(spawned: Spawned) -> Effect[Any]:
-    """Wait for a spawned child's answer: its value as plain JSON, `ChildRefused`, or
-    `ChildFailed`."""
+    """Wait for a spawned child's answer: its value as plain JSON, `ChildRefused`, `ChildFailed`,
+    or `OpCancelled` for a child that was cancelled, as a cancelled step raises."""
     reply = yield from join_child(spawned, ChildAnswer)
     match reply.answer:
         case Returned(value=value):
@@ -233,5 +240,7 @@ def join_answer(spawned: Spawned) -> Effect[Any]:
                 f"child task {spawned.task_id} failed of {kind}: {message}",
                 [f"{noted_kind}: {noted_message}" for noted_kind, noted_message in notes],
             )
+        case Cancelled(partial=partial):
+            raise OpCancelled(spawned.done_event.stored(), partial)
         case unreachable:
             assert_never(unreachable)

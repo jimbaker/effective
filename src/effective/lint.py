@@ -724,6 +724,22 @@ LAZY_IMPORT_ALLOWED: dict[tuple[str, str], str] = {
         "effective/lint.py",
         "absurd_sdk",
     ): "the coding machine imports the lint; the SDK loads only when the SDK-edge rule runs",
+    (
+        "effective/engines/__init__.py",
+        "effective",
+    ): "`open` imports each driver in its own arm, so a SQLite process loads no Absurd driver",
+    (
+        "effective/engines/absurd.py",
+        "effective",
+    ): "the driver builds its app through the worker, which imports the SDK at module level",
+    (
+        "effective/engines/absurd.py",
+        "psycopg",
+    ): "the driver's parked reader connects; the handler imports this module without psycopg",
+    (
+        "effective/engines/sqlite.py",
+        "effective",
+    ): "the parked reader imports the SQLite engine, which offers it as a verb",
 }
 LAZY_IMPORT_ALLOWED |= {
     (entry["path"], entry["module"]): entry["reason"]
@@ -2475,7 +2491,7 @@ def check_forged_joins(paths: Iterable[str | Path]) -> list[Violation]:
 
     **What it does NOT scan, because a gate's domain is its grammar.** An f-string that interleaves
     a rendered term with the separator by hand (`f"{head.render()}{TERM_SEPARATOR}"`, live in
-    `counterfactual.py` and `handlers/absurd.py`) is the same shape and is invisible here. Both
+    `counterfactual.py` and `handlers/durable.py`) is the same shape and is invisible here. Both
     are safe by CONSTRUCTION: each renders the first term of a key our own composer minted, which
     can never be a wrapping foreign term. The same spelling over a term
     SEQUENCE would re-create the defect, and nothing would see it."""

@@ -49,22 +49,22 @@ from typing import Any
 
 import psycopg
 import pytest
-from _durable import DSN, absurd, pg_ready, run_until_result
+from _durable import DSN, absurd, pg_ready
 
 from effective.api import await_event, qualified_event_name
 from effective.budget import BUDGET_GRANT, Grant, MeasuredBudget, depth_grant_name
 from effective.cost import Usage
 from effective.domain import DomainOp
+from effective.engines.sqlite import SqliteApp
 from effective.fork import live_drive, measured_drive
 from effective.govern import GOVERN
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import placed_await_name, placing
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import FramePosition, Key, Scope, Segment, Tag, compose_key
 from effective.ops import AwaitEvent
 from effective.parked import read_sqlite_parked_conn
-from effective.sqlite import SqliteApp
 
 pytestmark = pytest.mark.adversarial
 
@@ -220,7 +220,7 @@ def test_absurd_is_the_ONE_walk_that_already_has_the_coordinate():
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
     app.emit_event(name.stored(), ANSWER)
-    run_until_result(app, task_id)
+    app.run_until_result(task_id)
 
     with psycopg.connect(DSN) as conn:
         names = [
@@ -394,7 +394,7 @@ def test_absurds_own_duplicate_name_rule_does_not_fire():
     app.work_batch()
     app.emit_event(grant.stored(), GRANT_ANSWER)
     app.emit_event(grant.occurrence(2).stored(), GRANT_ANSWER)
-    run_until_result(app, task_id)
+    app.run_until_result(task_id)
 
     with psycopg.connect(DSN) as conn:
         names = [
@@ -445,7 +445,7 @@ def _one_answer_leaves_it_parked(app: Any) -> bool:
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
     app.emit_event(grant.stored(), GRANT_ANSWER)  # ONE answer
-    snapshot = run_until_result(app, task_id, max_batches=4)
+    snapshot = app.run_until_result(task_id, max_batches=4)
     return snapshot is None or snapshot.state != "completed"
 
 

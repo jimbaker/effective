@@ -21,6 +21,7 @@ from effective.checkpoints import keys, read_sqlite_conn
 from effective.combinators import Answered, Deeper, descend, recurse
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphview import (
     PARKED,
     STATE_PRIORITY,
@@ -40,13 +41,12 @@ from effective.graphview import (
     to_mermaid,
     to_text,
 )
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Index, Key, Segment, compose_key
 from effective.ops import AwaitEvent, LedgerRow, Step
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked_conn
-from effective.sqlite import SqliteApp, SqliteLedger
 
 # A hand-built `ParkedTask` for the bridge tests — no engine involved, so the id is a
 # placeholder. It read `"t1"` until the task id became a `UUID` on both engines.
@@ -1147,7 +1147,7 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
     un-forkable: neither contains an `await`, so neither has a fork point to cut at. That is a
     property of the shapes, and no naming change reaches it."""
     from effective.fork import fork_seed, run_fork
-    from effective.handlers.absurd import fork_event_name
+    from effective.handlers.durable import fork_event_name
 
     app = sqlite_app(str(tmp_path / "forkable.db"))
     message_id = "m-fork"

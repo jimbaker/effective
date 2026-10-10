@@ -38,14 +38,14 @@ import uuid
 from typing import Any
 
 import pytest
-from _durable import absurd, pg_ready, run_until_result
+from _durable import absurd, pg_ready
 
 from effective.api import step
 from effective.budget import Grant, depth_grant_name
 from effective.combinators import Answered, Deeper, descend, grant_cascade, human_grant
 from effective.domain import CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
-from effective.sqlite import SqliteApp
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.adversarial
 
@@ -197,11 +197,12 @@ def test_two_generations_share_one_grant_across_tasks():
     app.emit_event(
         depth_grant_name(run, depth=1, generation=0).stored(), Grant(add_depth=2).model_dump()
     )
-    result_0 = run_until_result(app, generation_0)
+    result_0 = app.run_until_result(generation_0)
+    assert result_0 is not None
     assert result_0.state == "completed"
     generation_0_levels = list(levels)
 
-    result_1 = run_until_result(app, spawn(1))
+    result_1 = app.run_until_result(spawn(1))
     generation_1_levels = levels[len(generation_0_levels) :]
 
     assert result_1 is not None, "generation 1 produced no result at all"

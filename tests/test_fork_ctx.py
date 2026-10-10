@@ -14,7 +14,7 @@ actually driven.
 
 from datetime import datetime
 
-from effective.handlers.absurd import RenamedAwaitCtx, _supports_peek
+from effective.handlers.durable import RenamedAwaitCtx, _supports_peek
 from effective.keys import Key
 
 

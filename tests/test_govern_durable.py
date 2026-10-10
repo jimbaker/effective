@@ -26,11 +26,9 @@ import pytest
 from _approval_domain import CannedDomain, process_refund
 from _durable import (
     DSN,
-    IMMEDIATE_RETRY,
     absurd,
     ledger_kinds,
     pg_ready,
-    run_until_result,
 )
 from _gate import at_spend
 
@@ -38,7 +36,7 @@ from effective import permission
 from effective.budget import Grant, MeasuredBudget
 from effective.budget import as_policy as budget_policy
 from effective.govern import GateState, Resolution, govern
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.ledger import PostgresLedger
 from effective.ops import Step, WorkflowOp
@@ -104,10 +102,10 @@ def test_two_policies_park_ONCE_and_one_resolution_settles_both():
         domain = CannedDomain(amount="42.00")
         _register(app, f"t-{mid}", mid, domain, _policies(mid))
 
-        spawned = app.spawn(f"t-{mid}", {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
+        spawned = app.spawn(f"t-{mid}", {"request_id": mid})
         app.work_batch()  # runs to the gate and suspends
 
-        snap = app.fetch_task_result(spawned["task_id"])
+        snap = app.fetch_task_result(spawned)
         assert snap is not None
         assert snap.state != "completed"  # parked
         assert domain.calls == ["fetch_request"], domain.calls  # the gated op did NOT run
@@ -115,7 +113,7 @@ def test_two_policies_park_ONCE_and_one_resolution_settles_both():
 
         # ONE event name, carrying BOTH answers — the whole point of merged-park.
         app.emit_event(
-            _park_name(mid),
+            _park_name(mid).stored(),
             Resolution(
                 answers={
                     "budget": Grant(add_dollars=0.010).model_dump(),
@@ -123,7 +121,7 @@ def test_two_policies_park_ONCE_and_one_resolution_settles_both():
                 }
             ).model_dump(),
         )
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
@@ -143,8 +141,8 @@ def test_a_merged_park_survives_worker_death_and_resumes_on_a_fresh_worker():
     app1 = absurd()
     domain1 = CannedDomain(amount="42.00")
     _register(app1, name, mid, domain1, _policies(mid))
-    spawned = app1.spawn(name, {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
-    task_id = spawned["task_id"]
+    spawned = app1.spawn(name, {"request_id": mid})
+    task_id = spawned
     app1.work_batch()  # parks at the merged gate
     assert domain1.calls == ["fetch_request"]
     app1.close()  # worker 1 is gone; the park lives in Postgres
@@ -153,7 +151,7 @@ def test_a_merged_park_survives_worker_death_and_resumes_on_a_fresh_worker():
     domain2 = CannedDomain(amount="42.00")
     _register(app2, name, mid, domain2, _policies(mid))
     app2.emit_event(
-        _park_name(mid),
+        _park_name(mid).stored(),
         Resolution(
             answers={
                 "budget": Grant(add_dollars=0.010).model_dump(),
@@ -161,7 +159,7 @@ def test_a_merged_park_survives_worker_death_and_resumes_on_a_fresh_worker():
             }
         ).model_dump(),
     )
-    snap = run_until_result(app2, task_id)
+    snap = app2.run_until_result(task_id)
     try:
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
@@ -188,7 +186,7 @@ def test_a_refusing_policy_blocks_even_though_the_other_would_have_parked():
         _register(app, f"t-{mid}", mid, domain, policies, max_attempts=1)
 
         spawned = app.spawn(f"t-{mid}", {"request_id": mid}, max_attempts=1)
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "failed"  # the gate refused; the op never forwarded
@@ -212,8 +210,8 @@ def test_an_unobjecting_gate_is_transparent():
         ]
         _register(app, f"t-{mid}", mid, domain, policies)
 
-        spawned = app.spawn(f"t-{mid}", {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
-        snap = run_until_result(app, spawned["task_id"])
+        spawned = app.spawn(f"t-{mid}", {"request_id": mid})
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"

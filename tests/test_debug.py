@@ -24,7 +24,7 @@ from agent.debug import (
     make_debug_interpreter,
 )
 from effective import RecordingHandler, ReplayHandler
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.precise_edit import Edit
 
 BUGGY = "def add(a, b):\n    return a - b\n"

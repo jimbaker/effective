@@ -168,7 +168,7 @@ step of a task, and a wait is the engine's own await. The engine holds the tape:
 | engine | for |
 |---|---|
 | [Absurd](https://github.com/earendil-works/absurd) on Postgres | many workers over one queue (vendored and pinned in `infra/absurd`) |
-| embedded SQLite (`effective.sqlite`) | one process and one file, with no service to run |
+| embedded SQLite (`effective.engines.sqlite`) | one process and one file, with no service to run |
 
 The two engines run one conformance suite through the same handler ([`tests/_conformance.py`](tests/_conformance.py)), and
 the durable tests crash a run at every op and resume it. Testing a workflow needs neither: two

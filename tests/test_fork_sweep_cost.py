@@ -42,12 +42,12 @@ from test_fork_sweep import new_message_id
 
 from effective.api import append_ledger, ask_llm, await_event
 from effective.checkpoints import read_sqlite_conn
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import fork_seed, run_fork
-from effective.handlers.absurd import DurableHandler, fork_event_name
+from effective.handlers.durable import DurableHandler, fork_event_name
 from effective.keys import Key, Segment, compose_key
 from effective.ops import LedgerRow
 from effective.sql import bind
-from effective.sqlite import SqliteApp, SqliteLedger
 
 PAYLOAD = "x" * 512  # a stand-in for a real extraction result, so bytes mean something
 

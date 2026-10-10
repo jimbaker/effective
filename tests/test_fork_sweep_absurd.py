@@ -35,8 +35,8 @@ from effective.domain import SPAWN_TOOL, SpawnArgs, SpawnResult
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ledger import PostgresLedger
@@ -71,15 +71,6 @@ def _rows(conn, run_id: str) -> list[tuple[str, str, bool]]:
     )
 
 
-def _run_until(app, task_id: str, max_batches: int = 64):
-    for _ in range(max_batches):
-        snap = app.fetch_task_result(task_id)
-        if snap is not None and snap.state in ("completed", "failed", "cancelled"):
-            return snap
-        app.work_batch()
-    return app.fetch_task_result(task_id)
-
-
 def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
     app, spawner_app = absurd(), absurd()
     base_rid = f"b{uuid.uuid4().hex[:8]}"
@@ -100,16 +91,15 @@ def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
         base_id = app.spawn(
             f"base-{base_rid}",
             {"run_id": base_rid, "message_id": message_id},
-            retry_strategy=IMMEDIATE_RETRY,
-        )["task_id"]
-        _run_until(app, base_id)
+        )
+        app.run_until_result(base_id)
         # It PARKED. Without this assertion the base is green whenever the
         # queue happens to hold an answer for its await name, which on this engine is forever.
         assert [
             p.wake_event for p in read_absurd_parked(conn) if p.task_name == f"base-{base_rid}"
         ] == [f"review:{message_id}"]
         app.emit_event(f"review:{message_id}", {"decision": "reject"})
-        snap = _run_until(app, base_id)
+        snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap
         assert snap.result == "reject"
@@ -155,10 +145,8 @@ def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
             )
             return DurableHandler(ConcurrentAbsurdCtx(ctx), domain).run(sweep)
 
-        sweep_id = app.spawn(
-            f"sweep-{base_rid}", {"run_id": f"s{base_rid}"}, retry_strategy=IMMEDIATE_RETRY
-        )["task_id"]
-        snap = _run_until(app, sweep_id, max_batches=128)
+        sweep_id = app.spawn(f"sweep-{base_rid}", {"run_id": f"s{base_rid}"})
+        snap = app.run_until_result(sweep_id, max_batches=128)
 
         assert snap is not None
         assert snap.state == "completed", snap
@@ -226,10 +214,8 @@ def test_an_answer_is_forever_so_a_fresh_run_needs_a_fresh_message_id(conn):
                 ledger.close()
 
         def spawn_and_drain(run_id: str, message_id: str):
-            task_id = app.spawn(
-                name, {"run_id": run_id, "message_id": message_id}, retry_strategy=IMMEDIATE_RETRY
-            )["task_id"]
-            _run_until(app, task_id)
+            task_id = app.spawn(name, {"run_id": run_id, "message_id": message_id})
+            app.run_until_result(task_id)
             parked = [p.wake_event for p in read_absurd_parked(conn) if p.task_id == task_id]
             return task_id, parked
 
@@ -238,7 +224,7 @@ def test_an_answer_is_forever_so_a_fresh_run_needs_a_fresh_message_id(conn):
         task_1, parked_1 = spawn_and_drain(f"{tag}-1", first)
         assert parked_1 == [f"review:{first}"]
         app.emit_event(f"review:{first}", {"decision": "reject"})
-        snap = _run_until(app, task_1)
+        snap = app.run_until_result(task_1)
         assert snap is not None
         assert (snap.state, snap.result) == ("completed", "reject")
 
@@ -255,7 +241,7 @@ def test_an_answer_is_forever_so_a_fresh_run_needs_a_fresh_message_id(conn):
         task_3, parked_3 = spawn_and_drain(f"{tag}-3", second)
         assert parked_3 == [f"review:{second}"]
         app.emit_event(f"review:{second}", {"decision": "approve"})
-        snap = _run_until(app, task_3)  # drained to terminal: the shared queue is left clean
+        snap = app.run_until_result(task_3)  # drained to terminal: the shared queue is left clean
         assert snap is not None
         assert (snap.state, snap.result) == ("completed", "approve")
     finally:
@@ -292,7 +278,9 @@ def test_one_idempotency_key_enqueues_one_task_on_the_deployed_engine(conn):
             t"SELECT count(*) FROM absurd.t_default WHERE task_id = {first}::uuid"
         ).fetchall()
         assert rows == [(1,)]
-        _run_until(app, first)  # drain it so the queue is left clean for the next test
+        app.run_until_result(
+            uuid.UUID(first)
+        )  # drain it so the queue is left clean for the next test
     finally:
         app.close()
         spawner_app.close()
@@ -331,11 +319,10 @@ def test_a_refused_child_answers_its_parent_on_the_DEPLOYED_engine(conn):
         base_id = app.spawn(
             f"base-{base_rid}",
             {"run_id": base_rid, "message_id": message_id},
-            retry_strategy=IMMEDIATE_RETRY,
-        )["task_id"]
-        _run_until(app, base_id)
+        )
+        app.run_until_result(base_id)
         app.emit_event(f"review:{message_id}", {"decision": "reject"})
-        snap = _run_until(app, base_id)
+        snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap
 
@@ -374,10 +361,8 @@ def test_a_refused_child_answers_its_parent_on_the_DEPLOYED_engine(conn):
             )
             return DurableHandler(ConcurrentAbsurdCtx(ctx), domain).run(sweep)
 
-        sweep_id = app.spawn(
-            f"bad-sweep-{base_rid}", {"run_id": f"s{base_rid}"}, retry_strategy=IMMEDIATE_RETRY
-        )["task_id"]
-        snap = _run_until(app, sweep_id, max_batches=128)
+        sweep_id = app.spawn(f"bad-sweep-{base_rid}", {"run_id": f"s{base_rid}"})
+        snap = app.run_until_result(sweep_id, max_batches=128)
 
         assert snap is not None
         assert snap.state == "completed", snap  # the PARENT completed — no hang
@@ -444,12 +429,10 @@ def test_a_fork_of_a_base_whose_spawn_was_refused_replays_the_refusal_on_the_dep
             finally:
                 ledger.close()
 
-        base_id = app.spawn(
-            f"base-{rid}", {BUDGET_DEPTH_PARAM: 0}, retry_strategy=IMMEDIATE_RETRY
-        )["task_id"]
-        _run_until(app, base_id)
+        base_id = app.spawn(f"base-{rid}", {BUDGET_DEPTH_PARAM: 0})
+        app.run_until_result(base_id)
         app.emit_event(review.stored(), {"decision": "approve"})
-        snap = _run_until(app, base_id)
+        snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap
 
@@ -482,8 +465,8 @@ def test_a_fork_of_a_base_whose_spawn_was_refused_replays_the_refusal_on_the_dep
 
             return DurableHandler(ConcurrentAbsurdCtx(ctx), spawning()).run(sweep)
 
-        sweep_id = app.spawn(f"sweep-{rid}", {}, retry_strategy=IMMEDIATE_RETRY)["task_id"]
-        snap = _run_until(app, sweep_id, max_batches=128)
+        sweep_id = app.spawn(f"sweep-{rid}", {})
+        snap = app.run_until_result(sweep_id, max_batches=128)
 
         assert snap is not None
         assert snap.state == "completed", snap

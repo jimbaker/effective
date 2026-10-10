@@ -25,7 +25,8 @@ from effective.coding.specs import coding_bind, coding_read
 from effective.coding.states import DraftVerdict, FinalizeVerdict, ReviewVerdict, State
 from effective.coding.transition import transition
 from effective.domain import AskLLM, CallTool, DomainOp, ToolRefused
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.keys import Run
 from effective.machine.evidence import CommandRun
 from effective.machine.outcomes import ParkReason
@@ -33,7 +34,6 @@ from effective.machine.spec import Ctx, Evidence
 from effective.machine.specs import agent_worker, build_specs
 from effective.machine.trampoline import run_machine
 from effective.react import AssistantTurn, Tool, ToolLog, ToolRequest
-from effective.sqlite import SqliteApp, SqliteLedger
 
 pytestmark = pytest.mark.journey
 
@@ -257,7 +257,7 @@ def test_an_unsafe_seed_is_never_committed(app):
 
     assert snap is not None
     assert snap.state == "failed"
-    assert "UnsafeTreePath" in (snap.failure or "")
+    assert "UnsafeTreePath" in str(snap.failure or "")
     assert executions == 1
     assert rows == []
 

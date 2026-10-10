@@ -55,7 +55,8 @@ from effective.domain import (
     CallTool,
     Judge,
 )
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.shell import Shelled, run_shell
 from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, tool_interrupt
@@ -68,7 +69,6 @@ from effective.react import (
     ToolResult,
 )
 from effective.smol import Conversation, smol
-from effective.sqlite import SqliteApp
 
 TASK = "smol-chat"
 ESC = b"\x1b"

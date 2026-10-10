@@ -22,11 +22,11 @@ from effective.domain import (
     WireNoul,
     WireScore,
 )
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.handlers.durable import DurableHandler
 from effective.judgment import NO_MATCH, Choice, Noul, Score, TemplateError, Unasked, battery
 from effective.ops import Step
 from effective.sandbox import DryRun
-from effective.sqlite import SqliteApp, SqliteTaskContext
 from effective.telemetry import Span, traced
 
 _TASK = UUID("019fa000-0000-7000-8000-000000000a01")

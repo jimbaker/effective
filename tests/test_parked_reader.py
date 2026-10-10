@@ -26,7 +26,7 @@ from uuid import UUID
 import psycopg
 import pytest
 from _authority import AUTHORITY_PARKS, approve_park
-from _durable import DSN, absurd, pg_ready, run_until_result
+from _durable import DSN, absurd, pg_ready
 
 from effective.api import await_event, call_tool, gather, sleep_until
 from effective.bridge_absurd import read_absurd_task
@@ -34,8 +34,9 @@ from effective.budget import budget_grant_name
 from effective.checkpoints import keys
 from effective.domain import CallTool, DomainOp
 from effective.engines.absurd import ConcurrentAbsurdCtx
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphview import PARKED, fold_cycles, from_keys, to_mermaid
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Index, Key, Scope
 from effective.parked import (
     ParkedTask,
@@ -44,7 +45,6 @@ from effective.parked import (
     read_sqlite_parked,
     read_sqlite_parked_conn,
 )
-from effective.sqlite import SqliteApp, SqliteLedger
 
 PG = pg_ready()
 
@@ -271,7 +271,7 @@ def _absurd_run(app, conn, name: str, factory, run_id: str) -> UUID:
     # No `str(...)`: the SDK returns `row["task_id"]` off a `uuid` column, so psycopg has
     # already handed back a `UUID` — the annotation on its `SpawnResult` TypedDict says `str`
     # and validates nothing. Stringifying here was throwing away the type the driver produced.
-    task_id = app.spawn(name, {"run_id": run_id})["task_id"]
+    task_id = app.spawn(name, {"run_id": run_id})
     _drain_until_sleeping(app, conn, task_id)
     return task_id
 
@@ -371,8 +371,8 @@ def test_the_pending_node_on_a_real_absurd_park_and_what_resume_does(conn):
     assert fold_cycles(graph, drop=(Index,)).nodes[-1].state == PARKED
 
     # --- the resume transition ---------------------------------------------------------------
-    app.emit_event(event, {"ok": True})  # Absurd events are by name
-    snap = run_until_result(app, task_id)
+    app.emit_event(event.stored(), {"ok": True})  # Absurd events are by name
+    snap = app.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
 

@@ -15,8 +15,8 @@ from effective.budget import as_policy as budget_policy
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import DomainOp
 from effective.govern import GateState, Policy, Proceed, Resolution, govern
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import _walk_run, walk_run
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Run, compose_key
 from effective.layers import current_meter

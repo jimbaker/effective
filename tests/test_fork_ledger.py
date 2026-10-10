@@ -24,11 +24,11 @@ from effective.counterfactual import (
     fork_sealed_name,
     fork_unscoped,
 )
+from effective.engines.sqlite import SqliteLedger
 from effective.keys import Key, Segment, compose_key
 from effective.keys.grammar import KeySyntaxError
 from effective.lineage import marginal
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteLedger
 
 
 def _reviewed(event_id: str, decision: str) -> LedgerRow:
@@ -175,8 +175,8 @@ def test_a_colon_bearing_child_run_id_is_refused_at_every_minting_site():
     from typing import cast
 
     from effective.counterfactual import ForkLedger
-    from effective.handlers.absurd import RenamedAwaitCtx
     from effective.handlers.base import TaskContext
+    from effective.handlers.durable import RenamedAwaitCtx
 
     # A construction-site TYPE carries this guarantee: `Segment` refuses a `:`-bearing lineage id
     # once, where the value is created.
@@ -260,7 +260,7 @@ def _seal_scenario(
     from effective.checkpoints import read_sqlite_task
     from effective.cost import Usage
     from effective.fork import fork_seed, run_fork
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
 
     mid = "m1"
 

@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from effective.api import call_tool
 from effective.budget import Budget
 from effective.combinators import Again, Chain, Done, Turn, respawn
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 

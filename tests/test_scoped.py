@@ -28,8 +28,8 @@ from effective.api import append_ledger, await_event, call_tool, gather, scoped
 from effective.checkpoints import ENGINE_INTERNAL
 from effective.cost import Usage
 from effective.domain import DomainOp
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, ScopedSuspended
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key, compose_key

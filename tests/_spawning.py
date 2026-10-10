@@ -7,8 +7,9 @@ the worker's connection.
 
 from typing import Any
 
+from effective.engines.absurd import AbsurdEngine
+from effective.engines.sqlite import SqliteApp
 from effective.interpreters.tools import Spawner
-from effective.sqlite import SqliteApp
 
 
 def sqlite_spawner(app: SqliteApp) -> Spawner:
@@ -32,8 +33,11 @@ def sqlite_spawner(app: SqliteApp) -> Spawner:
     return spawn
 
 
-def absurd_spawner(app: Any, retry_strategy: Any, seen: list[str] | None = None) -> Spawner:
-    """Enqueue on `app`, an Absurd app of its own; record each child's id in `seen` if given."""
+def absurd_spawner(
+    engine: AbsurdEngine, retry_strategy: Any, seen: list[str] | None = None
+) -> Spawner:
+    """Enqueue on `engine`'s SDK app, an engine of its own, routing to the spawn's queue; record
+    each child's id in `seen` if given."""
 
     def spawn(
         task_name: str,
@@ -43,7 +47,7 @@ def absurd_spawner(app: Any, retry_strategy: Any, seen: list[str] | None = None)
         *,
         max_attempts: int | None = None,
     ) -> str:
-        result = app.spawn(
+        result = engine.app.spawn(
             task_name,
             params,
             queue=queue,

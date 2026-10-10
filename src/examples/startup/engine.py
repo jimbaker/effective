@@ -20,9 +20,9 @@ from effective import Contract, MeteredInterpreter, Usage
 from effective.api import Effect
 from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool, Judge
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.parked import pending_key, read_sqlite_parked_conn
-from effective.sqlite import SqliteApp
 
 ENDED = frozenset({"completed", "failed", "cancelled"})
 

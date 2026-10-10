@@ -14,7 +14,7 @@ traced interpreter. Two properties hold:
 from effective.contexts import LocalCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, subagent_runner
 from effective.react import AssistantTurn, ToolRequest, Trajectory, run_agent
 

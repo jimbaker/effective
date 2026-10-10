@@ -9,10 +9,10 @@ from uuid import uuid4
 import pytest
 from _conformance import private
 
-from effective import sqlite
-from effective.handlers.absurd import SeedingCtx, _PrefixedCtx
+from effective.engines import sqlite
+from effective.engines.sqlite import ClaimLost, SqliteApp
+from effective.handlers.durable import SeedingCtx, _PrefixedCtx
 from effective.keys import Key, gather_prefix, race_choice
-from effective.sqlite import ClaimLost, SqliteApp
 from effective.steering import SteeringCtx
 
 CHOICE = race_choice(0)

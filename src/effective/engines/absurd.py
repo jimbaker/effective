@@ -1,7 +1,8 @@
-"""The Absurd engine: the durable ctx `DurableHandler` drives on Absurd and Postgres.
+"""The Absurd engine: its driver, and the durable ctx `DurableHandler` drives on Postgres.
 
-`SdkCtx` adapts the Absurd SDK's `TaskContext` to the handler's ctx protocol, and
-`ConcurrentAbsurdCtx` lets gather branches run concurrently over one task connection. This is the
+`AbsurdEngine` is the driver. `SdkCtx` adapts the Absurd SDK's `TaskContext` to the handler's ctx
+protocol, and `ConcurrentAbsurdCtx` lets gather branches run concurrently over one task
+connection. This is the
 one module that reaches past the SDK's public surface. The public surface cannot read or write a
 checkpoint without advancing the SDK's per-name step counter, so the sites below use the private
 read and write, the claimed task row, and the queue's tables, at the version pinned in
@@ -17,13 +18,20 @@ import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
-import psycopg
+from pydantic_core import to_jsonable_python
 
+from effective.engines import Failure, TaskFn, TaskSnapshot, TaskState, drain
 from effective.handlers.base import Attempt
 from effective.keys import Key
-from effective.ops import WaitOutcome, settled_wait
+from effective.ops import DONE_EVENT_PARAM, WaitOutcome, settled_wait
+from effective.parked import ParkedTask, read_absurd_parked
+from effective.spawning import cancelled_payload
+
+if TYPE_CHECKING:
+    import psycopg
 
 
 def queue_table(kind: str, queue: str) -> str:
@@ -325,6 +333,9 @@ class SdkCtx:
     def attempt(self) -> Attempt:
         return sdk_attempt(self._ctx)
 
+    def emit_event(self, name: Key, payload: Any, /) -> None:
+        return self._ctx.emit_event(name.stored(), payload)
+
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
 
@@ -491,7 +502,7 @@ class ConcurrentAbsurdCtx:
             cursor = self._ctx._conn.cursor()
             cursor.execute(
                 t"SELECT payload FROM absurd.{e_tbl:i} "
-                t"WHERE event_name = {name} AND payload IS NOT NULL"
+                t"WHERE event_name = {name.stored()} AND payload IS NOT NULL"
             )
             row = cursor.fetchone()
             if row is None:
@@ -518,7 +529,7 @@ class ConcurrentAbsurdCtx:
     def attempt(self) -> Attempt:
         return sdk_attempt(self._ctx)
 
-    def emit_event(self, name: str, payload: Any, /) -> None:
+    def emit_event(self, name: Key, payload: Any, /) -> None:
         """Emit an event from inside a running task, under the write lock like every other
         write on this connection (a child answering its parent while its own gather branches
         commit must not race them).
@@ -528,7 +539,7 @@ class ConcurrentAbsurdCtx:
         SQLite test cannot assert an isolation the deployed engine lacks, and
         `effective.spawning.deliver` is a single call rather than a branch."""
         with self.write_lock:
-            self._ctx.emit_event(name, payload)
+            self._ctx.emit_event(name.stored(), payload)
 
     def repark(self, name: str, /) -> None:
         """Park so the task re-queues ~immediately, burning no attempt (the
@@ -563,3 +574,153 @@ class ConcurrentAbsurdCtx:
 # 250ms outlives that latency on a localhost and a managed Postgres, at a sub-second delay on a
 # rare path.
 _REPARK_EPSILON = 0.25
+
+
+CLAIM_TIMEOUT_SECONDS = 120
+"""How long a claim holds a task before another worker may take it, the SDK's default."""
+
+
+class AbsurdEngine:
+    """The Absurd driver: an engine on Postgres that this process can also drive batch by batch.
+
+    Built on `absurd_worker`, so a task failed for good is reported and delivered to its parent as
+    on SQLite. Ids are `UUID`s and snapshots are `TaskSnapshot`s, as SQLite's are. The SDK loads
+    in the constructor, so a process importing this module, as the handler does, loads none."""
+
+    def __init__(self, dsn: str, *, queue: str = "default", default_max_attempts: int = 5) -> None:
+        from effective.absurd_worker import absurd_worker
+
+        self.app = absurd_worker(dsn, queue_name=queue, default_max_attempts=default_max_attempts)
+        self.dsn = dsn
+        self.queue = queue
+        self._reader: psycopg.Connection[Any] | None = None
+        self._closed = False
+
+    def _reads(self) -> psycopg.Connection[Any]:
+        """The connection the driver reads the queue's tables on, opened on first use."""
+        import psycopg
+
+        if self._closed:
+            raise RuntimeError("the engine is closed")
+        if self._reader is None:
+            self._reader = psycopg.connect(self.dsn, autocommit=True)
+        return self._reader
+
+    def register_task(
+        self, name: str, *, default_max_attempts: int | None = None
+    ) -> Callable[[TaskFn], TaskFn]:
+        """Register the body of the task `name`. Its result reaches the SDK as plain JSON, through
+        the substrate's one serde policy, inside the attempt."""
+        register = self.app.register_task(name, default_max_attempts=default_max_attempts)
+
+        def deco(fn: TaskFn) -> TaskFn:
+            register(lambda params, ctx: to_jsonable_python(fn(params, ctx)))
+            return fn
+
+        return deco
+
+    def spawn(
+        self,
+        name: str,
+        params: dict[str, Any],
+        max_attempts: int | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> UUID:
+        """Enqueue a task on this engine's queue, which another process may be the one to run."""
+        if max_attempts is not None and max_attempts < 1:
+            raise ValueError(f"a task runs at least once; max_attempts was {max_attempts}")
+        spawned = self.app.spawn(
+            name,
+            to_jsonable_python(params),
+            max_attempts=max_attempts,
+            idempotency_key=idempotency_key,
+            queue=self.queue,
+        )
+        return UUID(str(spawned["task_id"]))
+
+    def emit_event(self, name: str, payload: Any) -> None:
+        self.app.emit_event(name, to_jsonable_python(payload))
+
+    def cancel(self, task_id: UUID) -> None:
+        """Cancel a task that has not finished, and deliver `Cancelled` to the parent that spawned
+        it. A running attempt's next write raises the SDK's cancel; an event the attempt emitted
+        first stands."""
+        tasks = queue_table("t", self.queue)
+        reads = self._reads()
+        if (
+            reads.execute(t"SELECT 1 FROM absurd.{tasks:i} WHERE task_id = {task_id}").fetchone()
+            is None
+        ):
+            raise LookupError(f"no task {task_id}")
+        self.app.cancel_task(str(task_id))
+        row = reads.execute(
+            t"SELECT params FROM absurd.{tasks:i} "
+            t"WHERE task_id = {task_id} AND state = 'cancelled'"
+        ).fetchone()
+        if row is not None and DONE_EVENT_PARAM in row[0]:
+            self.app.emit_event(row[0][DONE_EVENT_PARAM], cancelled_payload())
+
+    def fetch_task_result(self, task_id: UUID) -> TaskSnapshot | None:
+        """The task's snapshot. Absurd calls a task parked on an event `sleeping`, as it does one
+        sleeping until a time; its latest run's wake event tells them apart, as on SQLite."""
+        match self.app.fetch_task_result(str(task_id)):
+            case None:
+                return None
+            case snapshot:
+                state = TaskState(snapshot.state)
+                if state is TaskState.SLEEPING and self._awaits_an_event(task_id):
+                    state = TaskState.WAITING
+                return TaskSnapshot(state, snapshot.result, sdk_failure(snapshot.failure))
+
+    def _awaits_an_event(self, task_id: UUID) -> bool:
+        runs, tasks = queue_table("r", self.queue), queue_table("t", self.queue)
+        return (
+            self._reads()
+            .execute(
+                t"SELECT 1 FROM absurd.{runs:i} r "
+                t"JOIN absurd.{tasks:i} t ON t.last_attempt_run = r.run_id "
+                t"WHERE t.task_id = {task_id} AND r.state = 'sleeping' "
+                t"AND r.wake_event IS NOT NULL"
+            )
+            .fetchone()
+            is not None
+        )
+
+    def parked(self) -> tuple[ParkedTask, ...]:
+        return read_absurd_parked(self._reads(), queue=self.queue)
+
+    def work_batch(self) -> bool:
+        """Claim and run one task. Returns False when nothing is claimable."""
+        claimed = self.app.claim_tasks(batch_size=1, claim_timeout=CLAIM_TIMEOUT_SECONDS)
+        for task in claimed:
+            self.app._execute_task(task, CLAIM_TIMEOUT_SECONDS)
+        return bool(claimed)
+
+    def run_until_result(self, task_id: UUID, max_batches: int = 64) -> TaskSnapshot | None:
+        return drain(self.fetch_task_result, self.work_batch, task_id, max_batches)
+
+    def close(self) -> None:
+        self._closed = True
+        if self._reader is not None:
+            self._reader.close()
+        self.app.close()
+
+
+def sdk_failure(record: Any) -> Failure | None:
+    """The SDK's failure record as a `Failure`: its error's name, and the traceback the SDK
+    rendered, which names the type and the notes beside it, else its message. A name the engine
+    wrote itself, as `$ClaimTimeout` for a lease that ran out, names no type."""
+    match record:
+        case None:
+            return None
+        case {"name": str(kind), "message": str(text)} if kind.startswith("$"):
+            return Failure(None, text)
+        case {"name": str(kind), "traceback": str(rendered)}:
+            return Failure(kind, rendered)
+        case {"name": str(kind), "message": str(text)}:
+            return Failure(kind, text)
+        case {"message": str(text)}:
+            return Failure(None, text)
+        case _:
+            return Failure(None, json.dumps(record))

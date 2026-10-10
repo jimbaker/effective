@@ -23,14 +23,12 @@ import pytest
 from _approval_domain import ApprovalEvent, CannedDomain, committed_id, process_refund
 from _durable import (
     DSN,
-    IMMEDIATE_RETRY,
     absurd,
     ledger_kinds,
     pg_ready,
-    run_until_result,
 )
 
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Segment, compose_key
 from effective.layers import op_layer
 from effective.ledger import PostgresLedger
@@ -82,10 +80,10 @@ def test_injected_await_suspends_then_resumes_on_approve():
         name = f"t-{mid}"
         _register(app, name, mid, domain, [_gate(ev)])
 
-        spawned = app.spawn(name, {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
+        spawned = app.spawn(name, {"request_id": mid})
         app.work_batch()  # runs to the INJECTED await and suspends
 
-        snap = app.fetch_task_result(spawned["task_id"])
+        snap = app.fetch_task_result(spawned)
         assert snap is not None
         assert snap.state != "completed"  # parked at the injected gate
         # The gated op (assess) has NOT run: the layer blocked it before forwarding:
@@ -95,7 +93,7 @@ def test_injected_await_suspends_then_resumes_on_approve():
         app.emit_event(
             ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"}
         )
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
@@ -122,7 +120,7 @@ def test_injected_await_refuses_on_deny():
         app.emit_event(
             ev.stored(), {"decision": "reject", "actor": "approver", "rationale": "nope"}
         )
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "failed"  # the gate refused; the op never forwarded
@@ -145,8 +143,8 @@ def test_parked_permission_survives_worker_death_resumes_on_fresh_worker():
     app1 = absurd()
     domain1 = CannedDomain(amount="42.00")
     _register(app1, name, mid, domain1, [_gate(ev)])
-    spawned = app1.spawn(name, {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
-    task_id = spawned["task_id"]
+    spawned = app1.spawn(name, {"request_id": mid})
+    task_id = spawned
     app1.work_batch()  # suspends at the injected await
     assert domain1.calls == ["fetch_request"]
     app1.close()  # worker 1 is gone — the task is durably parked in Postgres
@@ -156,7 +154,7 @@ def test_parked_permission_survives_worker_death_resumes_on_fresh_worker():
     domain2 = CannedDomain(amount="42.00")
     _register(app2, name, mid, domain2, [_gate(ev)])
     app2.emit_event(ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"})
-    snap = run_until_result(app2, task_id)
+    snap = app2.run_until_result(task_id)
 
     try:
         assert snap is not None
@@ -197,10 +195,10 @@ def test_cascade_escalates_commit_to_human_then_commits():
         layers = [cascade([rules(_gate_commit), human(ApprovalEvent)])]
         _register(app, name, mid, domain, layers)
 
-        spawned = app.spawn(name, {"request_id": mid}, retry_strategy=IMMEDIATE_RETRY)
+        spawned = app.spawn(name, {"request_id": mid})
         app.work_batch()  # runs to the commit; cascade escalates -> human await -> suspends
 
-        snap = app.fetch_task_result(spawned["task_id"])
+        snap = app.fetch_task_result(spawned)
         assert snap is not None
         assert snap.state != "completed"  # parked at the cascade's human tier
         assert domain.calls == ["fetch_request", "assess_request"]  # pre-commit ops allowed + ran
@@ -209,7 +207,7 @@ def test_cascade_escalates_commit_to_human_then_commits():
         app.emit_event(
             ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"}
         )
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
         assert snap is not None
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
         assert snap.result["status"] == "committed"
@@ -236,7 +234,7 @@ def test_cascade_rules_deny_blocks_the_commit_without_a_human():
         _register(app, name, mid, domain, layers, max_attempts=1)
 
         spawned = app.spawn(name, {"request_id": mid}, max_attempts=1)
-        snap = run_until_result(app, spawned["task_id"])
+        snap = app.run_until_result(spawned)
         assert snap is not None
         assert snap.state == "failed"  # Refused at the commit
         assert ledger_kinds(mid) == ["assessment"]  # assessment allowed; commitment blocked

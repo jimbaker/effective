@@ -27,8 +27,8 @@ from effective.budget import as_policy as budget_policy
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import Usage
 from effective.govern import GateState, Proceed, govern
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import step_key
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.ops import Step
 

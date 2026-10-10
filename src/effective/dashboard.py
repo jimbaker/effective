@@ -46,11 +46,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from tdom import Markup, html
 
 from effective.checkpoints import keys, read_sqlite_conn
+from effective.engines.sqlite import SqliteApp, TaskSnapshot
 from effective.graphlayout import GRAPH_CSS, elkjs, prepare, to_svg
 from effective.graphview import Collision, branch_path, from_keys, ledger_collisions
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked_conn
 from effective.parked import answer as answer_park
-from effective.sqlite import SqliteApp, TaskSnapshot
 from effective.telemetry import MixedSessions, NotASpanFile, sidecar_measurements
 
 PAGE_CSS = """
@@ -363,7 +363,7 @@ def dashboard(engine: SqliteApp, spans: Path | None = None) -> FastAPI:
         #
         # **Off the event-loop thread**, for correctness. A workflow is
         # colorless and the sync/async color lives in the HANDLER: `DurableHandler` runs a
-        # concurrent `gather` through `asyncio.run` (`handlers/absurd.py`), which is illegal on a
+        # concurrent `gather` through `asyncio.run` (`handlers/durable.py`), which is illegal on a
         # thread that already has a running loop. Draining directly inside this `async def` fails
         # every gather-bearing run with "asyncio.run() cannot be called from a running event
         # loop", silently to the caller, because `work_batch` catches it

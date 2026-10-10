@@ -86,8 +86,8 @@ from effective.cost import Contract, Usage, serve
 from effective.domain import CallTool, DomainOp
 from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
-from effective.handlers.absurd import DurableHandler, SeedingCtx, fork_event_name
 from effective.handlers.base import op_key, step_key
+from effective.handlers.durable import DurableHandler, SeedingCtx, fork_event_name
 from effective.keys import Key, Segment, compose_key, frame_path
 from effective.layers import retry, retry_domain
 from effective.machine.spec import Ctx
@@ -2875,7 +2875,7 @@ def _writer(task: str, placement: str) -> Writer:
 
 
 def test_the_same_event_id_from_a_DIFFERENT_task_is_allowed_silently(backend):
-    """Cross-generation idempotency is the FEATURE (`handlers/absurd.py`): one message triaged in
+    """Cross-generation idempotency is the FEATURE (`handlers/durable.py`): one message triaged in
     generation 0 and again in 3 is ONE row, and generations share a run id — so only the task
     tells them apart. The second append must be a silent no-op, not a refusal."""
     run_id = f"r-{uuid4().hex[:8]}"

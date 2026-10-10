@@ -20,7 +20,7 @@ from effective.cancel import (
 from effective.cost import Usage
 from effective.domain import CallTool
 from effective.fork import MeteredEntry, decode_checkpoint
-from effective.handlers.absurd import DurableHandler, _dump, _load_step
+from effective.handlers.durable import DurableHandler, _dump, _load_step
 from effective.keys import Key, Run, compose_key
 from effective.react import ESCAPED, AssistantTurn, Ran, ToolRequest, ToolResult, run_turns
 
@@ -84,6 +84,10 @@ def test_a_step_result_round_trips_a_cancel_past_any_schema():
     stored = _dump(Cancelled(partial="half"))
     assert stored == dump_cancelled(Cancelled(partial="half"))
     assert _load_step(ToolResult, stored) == Cancelled(partial="half")
+
+
+def test_a_cancel_recorded_before_the_kind_field_still_loads():
+    assert load_cancelled({"__cancelled__": {"partial": "half"}}) == Cancelled(partial="half")
 
 
 LS = AssistantTurn(thought="look", tool=ToolRequest(name="ls"))

@@ -32,7 +32,7 @@ from agent.scoring import Scorer, boolean_scorer
 from agent.tasks import Task
 from effective.contexts import RecordingCtx, ReplayCtx
 from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key
 from effective.pareto import Objective, label_frontier

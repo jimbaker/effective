@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from effective.api import append_ledger, await_event, call_tool, gather
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key

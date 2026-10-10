@@ -17,14 +17,14 @@ import pytest
 
 from effective.api import call_tool
 from effective.domain import CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.keys import Run
 from effective.machine.evidence import CommandRun, Predicate
 from effective.machine.outcomes import Advance, Exhausted, Finish, Outcome, Park, ParkReason
 from effective.machine.spec import Ctx, Evidence
 from effective.machine.specs import build_specs
 from effective.machine.trampoline import run_machine
-from effective.sqlite import SqliteApp
 
 pytestmark = pytest.mark.conformance
 

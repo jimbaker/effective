@@ -25,7 +25,8 @@ from effective.api import append_ledger, call_tool
 from effective.coding.states import ReviewVerdict, State
 from effective.coding.transition import transition
 from effective.domain import DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.keys import Name, Run, compose_key
 from effective.machine.evidence import CommandRun
 from effective.machine.spec import Ctx, Evidence
@@ -39,7 +40,6 @@ from effective.machine.trampoline import (
     running_under,
 )
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteApp, SqliteLedger
 
 pytestmark = pytest.mark.journey
 
@@ -231,8 +231,8 @@ def test_an_inner_run_THAT_SAYS_NOTHING_is_REFUSED_rather_than_silently_dropped(
     snap = drive(app, nowhere)
     assert snap is not None
     assert snap.state == "failed"
-    assert "PlacedWriterCollision" in (snap.failure or "")
-    assert "machine:outer-1;commit" in (snap.failure or "")
+    assert "PlacedWriterCollision" in str(snap.failure or "")
+    assert "machine:outer-1;commit" in str(snap.failure or "")
 
     # The inner machine's rows landed under the OUTER's address; the outer's own never did.
     assert ledger(app) == OUTER_ROWS

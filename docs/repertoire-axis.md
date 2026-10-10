@@ -154,7 +154,7 @@ states a property of the runtime rather than a theorem of the semantics.
 
 **Derived, not carried:** the measured meter. Within a generation it is a left fold over $C$ (the
 v1 `AskLLM` checkpoint value *is* `{result, usage}`: `_encode_usage_envelope`,
-`handlers/absurd.py:1005`); a grant arrives through $E$; the cross-generation residue rides
+`handlers/durable.py:1005`); a grant arrives through $E$; the cross-generation residue rides
 `ACCRUAL_PARAM` on spawn params, absorbed into $W$ at `Task-Start`; canonical spend is a ledger
 question. A separate component is a design the measured-spend accrual **rejected**, for crash-atomicity: a second
 row is *"broken by a crash between the two commits."*
@@ -278,7 +278,7 @@ thunk execution, $\operatorname{dom}(C)$ must already be exhausted*, which catch
 yield at the frontier and a removed one at the end. It needs no new query: the SDK materializes the
 whole checkpoint domain into `ctx._checkpoint_cache` before the first step. It must **not** reach
 through the ctx wrappers: their hand-maintained `isinstance` tuple warns that *forgetting* to extend
-it when a wrapper is added is the recurring bug (`handlers/absurd.py:336-342`), an obligation a
+it when a wrapper is added is the recurring bug (`handlers/durable.py:336-342`), an obligation a
 second consumer inherits. **And the property is unsound as stated under a concurrent `gather`**:
 branches interleave, so one branch's first live thunk can precede another's replayed tail. Rule the
 frame scope and enrol it in [`tests/_conformance.py`](../tests/_conformance.py) over both engines before building it.

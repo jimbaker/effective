@@ -315,7 +315,7 @@ class ParsedKey:
         **`registry._wrapped_payload` is the one consumer**, reached through
         `_peel`. Everywhere else the prefix is spelled
         as text: `graphview.KINDS`, `checkpoints.ENGINE_INTERNAL` and `checkpoints.NON_STEP` hold
-        it in three tables, and `handlers/absurd.py` reproduces it a fourth time as a LOOKUP key,
+        it in three tables, and `engines/absurd.py` reproduces it a fourth time as a LOOKUP key,
         which is the consequential one: that site re-creates the SDK's own mint, so a drift there
         is a checkpoint miss rather than a mislabel. `bridge_absurd` reaches the tables through
         `is_engine_internal`, and `parked` works on the raw name. One referent spelled once per

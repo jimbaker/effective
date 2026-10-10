@@ -29,10 +29,10 @@ from pathlib import Path
 
 from effective.api import append_ledger, await_event, call_tool, gather, scoped
 from effective.cost import MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.keys import Index, Name, Run, compose_key
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteApp, SqliteLedger
 
 STATES = ("test", "draft", "review")
 """The states the demo machine visits, in order — one `state:` frame each.

@@ -64,6 +64,7 @@ from effective.code import _action_key, _segment_key
 from effective.domain import CallTool
 from effective.govern import GateState
 from effective.handlers.base import op_key, step_key
+from effective.handlers.durable import fork_event_name
 from effective.keys import Key, Segment, Tag, compose_key
 from effective.keys.grammar import (
     METACHARACTERS,
@@ -356,7 +357,7 @@ def test_a_key_decodes_back_into_its_named_fields_and_producing_line():
     # from the template's source EXPRESSIONS, so moving a composer changes what a key says about
     # itself.
     assert forked.bindings == {"child_run_id": "r-fork", "name": "review:m1"}
-    assert forked.site.endswith("absurd.py:219") or "absurd.py" in forked.site
+    assert f"{fork_event_name.__module__.rsplit('.', 1)[1]}.py" in forked.site
 
     # the terminal hole keeps its delimiters — readable AND decodable, the §2 dependency
     assert keymap.explain("hyp:cf-a;reviewed:m1").bindings["event_id"] == "reviewed:m1"
@@ -804,7 +805,7 @@ def test_an_author_cannot_forge_a_frame_on_the_await_axis():
     **The ctx-level composition is ambiguous if handed such a name**, as the assertion below
     shows, and closing THAT means typing `AwaitEvent.name` through both engines. What this test
     pins is the reachable half: no workflow can mint one."""
-    from effective.handlers.absurd import _PrefixedCtx
+    from effective.handlers.durable import _PrefixedCtx
     from effective.keys import scope_prefix
 
     class Sink:
@@ -1521,7 +1522,7 @@ def test_a_composed_key_retains_the_reach_its_leading_tag_declared():
     mistake is silent: a plain-static namespace and a parsed key must report `None`, and `None`
     must not be read as an opt-out."""
     from effective.budget import budget_grant_name, chain_grant_name, depth_grant_name
-    from effective.handlers.absurd import fork_event_name
+    from effective.handlers.durable import fork_event_name
     from effective.keys import Key, Scope, compose_key
 
     assert depth_grant_name("r1", depth=1, generation=0).scope is Scope.SETTLEMENT
@@ -1596,7 +1597,7 @@ def test_fork_event_prefix_is_the_prefix_fork_event_name_composes():
     """The RELATIONAL pin `hyp:`'s twin already has (`test_fork_ledger.py`, and
     `counterfactual.py:278` states why): two spellings of one namespace drift SILENTLY, so pin
     them against each other rather than against a literal."""
-    from effective.handlers.absurd import fork_event_name, fork_event_prefix
+    from effective.handlers.durable import fork_event_name, fork_event_prefix
 
     for child in ("c1", "r-fork", "cf-a"):
         name = fork_event_name(child, compose_key(t"review:{Segment('m1')}"))

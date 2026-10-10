@@ -24,7 +24,7 @@ from _durable import DSN, pg_ready
 from effective.api import call_tool
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnResult
-from effective.handlers.absurd import DurableHandler, spawn_done_name
+from effective.handlers.durable import DurableHandler, spawn_done_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, Writer
@@ -116,7 +116,7 @@ WORKER = textwrap.dedent(
     def body(params, ctx):
         os.kill(os.getpid(), signal.SIGKILL)
     if engine == "sqlite":
-        import effective.sqlite as sqlite
+        import effective.engines.sqlite as sqlite
         sqlite.CLAIM_LEASE_SECONDS = 0.0  # the lease is spent the moment it is taken
         app = sqlite.SqliteApp(where)
         app.register_task(task)(body)
@@ -151,7 +151,7 @@ def die_in(engine: str, task: str, where: str, tmp_path) -> None:
 
 
 def sqlite_death(tmp_path, limit: int, params: dict[str, Any] | None = None) -> Died:
-    from effective.sqlite import SqliteApp
+    from effective.engines.sqlite import SqliteApp
 
     where, task = str(tmp_path / "death.db"), private("dies")
     app = SqliteApp(where)

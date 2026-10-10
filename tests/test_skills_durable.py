@@ -19,20 +19,18 @@ from uuid import uuid4
 import pytest
 from _durable import (
     DSN,
-    IMMEDIATE_RETRY,
     Fault,
     FaultCtx,
     absurd,
     ledger_kinds,
     pg_ready,
-    run_until_result,
 )
 from pydantic import BaseModel
 
 from effective.api import append_ledger, ask_llm, await_event
 from effective.channels import Field, render, skill
 from effective.domain import AskLLM, CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow
@@ -129,8 +127,8 @@ def _run_one(app: Any, rid: str, crash_at: int | None) -> tuple[Any, SkillDomain
         finally:
             ledger.close()
 
-    spawned = app.spawn(name, {"run_id": rid}, retry_strategy=IMMEDIATE_RETRY)
-    snap = run_until_result(app, spawned["task_id"])
+    spawned = app.spawn(name, {"run_id": rid})
+    snap = app.run_until_result(spawned)
     return snap, domain, fault
 
 
@@ -193,8 +191,8 @@ def test_a_duplicate_activation_is_a_fresh_pin_event_on_the_durable_path():
         def task(params, ctx, _domain=domain):
             return DurableHandler(ctx, _domain).run(wf)
 
-        spawned = app.spawn(name, {"run_id": rid}, retry_strategy=IMMEDIATE_RETRY)
-        snap = run_until_result(app, spawned["task_id"])
+        spawned = app.spawn(name, {"run_id": rid})
+        snap = app.run_until_result(spawned)
         assert snap is not None
         assert snap.state == "completed", f"{snap.state}: {snap.failure}"
         # the duplicate saw the moved tree — a fresh disclose, not the first pin:
@@ -229,10 +227,10 @@ def test_parked_run_resumes_on_recorded_pins_after_worker_death():
     try:
         domain1 = SkillDomain(version="V1", bump_to=None)
         register(app1, domain1)
-        spawned = app1.spawn(name, {"run_id": rid}, retry_strategy=IMMEDIATE_RETRY)
+        spawned = app1.spawn(name, {"run_id": rid})
         app1.work_batch()  # activate (pins V1), use:1, park at the await
 
-        snap = app1.fetch_task_result(spawned["task_id"])
+        snap = app1.fetch_task_result(spawned)
         assert snap is not None
         assert snap.state != "completed"  # parked
         assert domain1.calls == ["disclose:activate", "ask"]
@@ -242,7 +240,7 @@ def test_parked_run_resumes_on_recorded_pins_after_worker_death():
         domain2 = SkillDomain(version="V3", bump_to=None)
         register(app2, domain2)
         app2.emit_event(f"resume:{rid}", {"actor": "approver"})
-        snap = run_until_result(app2, spawned["task_id"])
+        snap = app2.run_until_result(spawned)
 
         assert snap is not None
         assert snap.state == "completed", f"{snap.state}: {snap.failure}"

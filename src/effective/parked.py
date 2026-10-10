@@ -33,15 +33,15 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-import psycopg
-
-import effective.pgkeys  # noqa: F401  (registers the `Key` psycopg dumper)
+from effective.engines.sqlite import SqliteApp, connect
 from effective.graphview import PARKED
 from effective.keys import Key, compose_key
-from effective.sqlite import SqliteApp, connect
+
+if TYPE_CHECKING:
+    import psycopg
 
 # ── the shared record ────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ class ParkedTask:
 
     - `task_id`: a `UUID` on both, because both engines MINT one. Absurd's `t_{queue}.task_id` is
       a `uuid` column psycopg hydrates directly; `SqliteApp.spawn` mints `uuid7` and the driver
-      parses it back (`effective.sqlite.connect`). Normalizing down to `str` would cost the
+      parses it back (`effective.engines.sqlite.connect`). Normalizing down to `str` would cost the
       validating parse (`UUID(text)` refuses a malformed id where a `str` accepts anything) and the
       time-ordering. A caller round-tripping this through a URL still does not have to know which
       engine answered: FastAPI coerces a `UUID` path parameter natively and 422s a malformed one.
@@ -79,11 +79,11 @@ class ParkedTask:
       consumes directly (`from_keys(states=…)`, `Node.state`), so a caller never translates, and
       because the vocabulary has room the moment the relation widens: a timed park (an open
       decision) is a second word here, not a second meaning for this one.
-    - `parked_since`: **`None` on SQLite, which has no such column.** `effective.sqlite`'s `tasks`
-      table records no park timestamp at all, so the honest answer is absence. On Absurd it is the
-      current run's `started_at`.
-      That is when the attempt *started*, an upper bound on when it parked; `w_{queue}.created_at`
-      is the exact instant if a consumer ever needs it, at the cost of a third join.
+    - `parked_since`: **`None` on SQLite, which has no such column.** `effective.engines.sqlite`'s
+      `tasks` table records no park timestamp at all, so the honest answer is absence. On Absurd it
+      is the current run's `started_at`. That is when the attempt *started*, an upper bound on when
+      it parked; `w_{queue}.created_at` is the exact instant if a consumer ever needs it, at the
+      cost of a third join.
     """
 
     task_id: UUID
@@ -297,10 +297,11 @@ class BroadcastEmitter(Protocol):
     annotation evaluation, so the two read in the order they matter rather than in dependency
     order.
 
-    A Protocol rather than the concrete class, for the reason `TaskContext` is one: `effective`
-    does not import `absurd_sdk` at module level (only `handlers/absurd.py` does, at its one use,
-    with a recorded reason in the lazy-import allowlist). Stating the shape we depend on is a
-    smaller claim than importing a vendor and is checkable at the call site either way."""
+    A Protocol rather than the concrete class, for the reason `TaskContext` is one. No SQLite-side
+    module imports `absurd_sdk`; the Absurd worker imports it, and `engines/absurd.py` imports it
+    lazily at each SDK touch, with a recorded reason in the lazy-import allowlist. Stating the
+    shape we depend on is a smaller claim than importing a vendor and is checkable at the call site
+    either way."""
 
     def emit_event(self, event_name: str, payload: Any = ..., /) -> None: ...
 

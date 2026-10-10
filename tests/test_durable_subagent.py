@@ -18,7 +18,7 @@ from effective import call_tool
 from effective.compose import spawn_subagent
 from effective.contexts import RecordingCtx, ResumeCtx
 from effective.cost import MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key

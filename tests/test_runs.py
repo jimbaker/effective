@@ -12,10 +12,10 @@ import pytest
 
 from effective.api import await_event, call_tool, compose_key
 from effective.cost import MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp
+from effective.handlers.durable import DurableHandler
 from effective.keys import Segment
 from effective.runs import RunState, read_sqlite_runs, read_sqlite_runs_conn
-from effective.sqlite import SqliteApp
 
 
 def _ok(_run_id: str):

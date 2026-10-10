@@ -13,8 +13,8 @@ import pytest
 from effective.api import ask_llm, gather
 from effective.budget import MeasuredBudget
 from effective.cost import Contract, MeteredInterpreter, Usage
-from effective.handlers.absurd import DurableHandler
-from effective.sqlite import SqliteApp, SqliteTaskContext
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.handlers.durable import DurableHandler
 
 # These tests build a ctx directly rather than spawning, so the task id is a FIXTURE.
 # A fixed literal, not `uuid7()`: the id keys every checkpoint row these tests write, and a
@@ -219,7 +219,7 @@ def test_measured_trip_fail_fast_raises_without_parking(app):
     snap = app.run_until_result(tid)
     assert snap is not None
     assert snap.state == "failed"
-    assert "budget exceeded" in (snap.failure or "").lower()
+    assert "budget exceeded" in str(snap.failure or "").lower()
 
 
 def test_measured_trip_stop_grant_refuses_the_over_budget_ask(app):
@@ -230,4 +230,4 @@ def test_measured_trip_stop_grant_refuses_the_over_budget_ask(app):
     snap = app.run_until_result(tid)
     assert snap is not None
     assert snap.state == "failed"
-    assert "budget exceeded" in (snap.failure or "").lower()
+    assert "budget exceeded" in str(snap.failure or "").lower()

@@ -12,7 +12,7 @@ from effective.contexts import LocalCtx, RecordingCtx, ReplayCtx, ResumeCtx
 from effective.cost import Usage
 from effective.domain import AskLLM, CallTool, DomainOp, SpawnArgs
 from effective.fork import live_drive, measured_drive
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Run, compose_key
 from effective.layers import op_layer

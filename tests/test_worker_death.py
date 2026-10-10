@@ -66,7 +66,7 @@ def appended(names: Any) -> list[str]:
 
 
 def sqlite_death(tmp_path: Path, scenario: str) -> Death:
-    from effective.sqlite import SqliteApp, SqliteLedger
+    from effective.engines.sqlite import SqliteApp, SqliteLedger
 
     program, handler = SCENARIOS[scenario]
     where, task, run_id = str(tmp_path / "death.db"), private("dies"), str(uuid4())

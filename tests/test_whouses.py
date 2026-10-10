@@ -180,9 +180,9 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # expression shapes, `react.default_decide` dispatches on which role its turn carries,
     # `KeyMap.project` matches on whether it was handed a key or a projection of one,
     # `DurableHandler._run_step` picks the spawn tool out of its `CallTool` arm,
-    # `spawning.join_answer` reads a child's value or its refusals, `DurableHandler.run` and
-    # `spawning.run_child` read a walk that finished or continued, and `react.default_act` reads
-    # the tool and diagnostic of a refusal the deployment answered with.
+    # `spawning.join_answer` reads a child's value, its refusals or what a cancel left,
+    # `DurableHandler.run` and `spawning.run_child` read a walk that finished or continued, and
+    # `react.default_act` reads the tool and diagnostic of a refusal the deployment answered with.
     # `trampoline.machine_frames` reads a `d:` term and the `state:` term after it.
     # `budget.refuse_two_drivers` reads the name of a budget policy it refuses.
     # `choice.stored_endings` reads a refusal's reason and an error's text, and
@@ -204,7 +204,7 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `lint.check_sdk_private_source` reads an attribute's receiver and name, and an import's
     # module and names.
     # `DurableHandler._keyed` reads a tool call's name and args.
-    assert reached == 254, f"the corpus this fix was measured on held 254; found {reached}"
+    assert reached == 255, f"the corpus this fix was measured on held 255; found {reached}"
 
     seen = {
         (str(p), line + 1)

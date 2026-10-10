@@ -7,11 +7,11 @@ import psycopg
 import pytest
 from _durable import DSN, pg_ready
 
+from effective.engines.sqlite import SqliteLedger
 from effective.keys import Segment, compose_key
 from effective.ledger import PostgresLedger
 from effective.ledgerread import pg_payloads, sqlite_payloads
 from effective.ops import LedgerRow
-from effective.sqlite import SqliteLedger
 
 
 def _row(kind: str, run_id: str) -> LedgerRow:

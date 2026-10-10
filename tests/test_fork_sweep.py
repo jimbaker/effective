@@ -27,14 +27,14 @@ from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, respawn
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnResult
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ops import LedgerRow
 from effective.parked import read_sqlite_parked_conn
 from effective.spawning import Failed, Returned
-from effective.sqlite import SqliteApp, SqliteLedger
 
 
 class ChainCarry(BaseModel):
@@ -353,7 +353,7 @@ def test_ask_leaves_the_fork_point_open_for_a_human(tmp_path, sqlite_app):
     is a `TypeError` instead, which is why the last assertion is part of the test."""
 
     from effective.fork import Ask
-    from effective.handlers.absurd import fork_event_name
+    from effective.handlers.durable import fork_event_name
 
     app = sqlite_app(str(tmp_path / "ask.db"))
     message_id = new_message_id()

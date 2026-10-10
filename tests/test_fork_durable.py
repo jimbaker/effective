@@ -20,13 +20,15 @@ from effective.api import append_ledger, ask_llm, await_event, call_tool, gather
 from effective.checkpoints import read_sqlite_task
 from effective.counterfactual import fork_scoped
 from effective.domain import SPAWN_TOOL, SpawnResult
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import (
     fork_seed,
     join_fork,
     run_fork,
     spawn_fork,
 )
-from effective.handlers.absurd import (
+from effective.handlers.base import step_key
+from effective.handlers.durable import (
     DurableHandler,
     RenamedAwaitCtx,
     SeedingCtx,
@@ -34,11 +36,9 @@ from effective.handlers.absurd import (
     fork_event_name,
     spawn_done_name,
 )
-from effective.handlers.base import step_key
 from effective.keys import Key, Run, Segment, compose_key
 from effective.ops import Addressing, LedgerRow, Writer
 from effective.sandbox import WorldMutation
-from effective.sqlite import SqliteApp, SqliteLedger
 
 # A ctx that is constructed and never touched (the refusal under test precedes every use of it),
 # so its task id is a placeholder. The id is a `UUID`, so the name says what it is for.
@@ -938,7 +938,7 @@ def test_a_fork_point_inside_a_gather_region_is_refused(tmp_path, sqlite_app):
     base_id = _run_base(app, str(db), _decision_wf)
     seed = fork_seed(read_sqlite_task(str(db), base_id), through=LEDGER_EXTRACTED.stored())
 
-    from effective.sqlite import SqliteTaskContext
+    from effective.engines.sqlite import SqliteTaskContext
 
     with pytest.raises(ForkPointInGather) as caught:
         run_fork(

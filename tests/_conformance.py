@@ -44,8 +44,11 @@ from effective.coding.verdicts import mechanical_judges
 from effective.combinators import Answered, Deeper, descend, recurse
 from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
+from effective.engines import TaskSnapshot, open
+from effective.engines.absurd import AbsurdEngine
+from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.fork import ForkOutcome
-from effective.handlers.absurd import DurableHandler
+from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Run, Segment, compose_key, scope_prefix
 from effective.layers import TransientError
 from effective.ledgerread import pg_payloads, sqlite_payloads
@@ -63,7 +66,6 @@ from effective.machine.specs import build_specs, fuse
 from effective.machine.trampoline import run_machine, stop_record
 from effective.ops import Addressing, LedgerRow, Writer
 from effective.spawning import Refusal, run_child
-from effective.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 
 PG_DSN = os.environ.get(
     "DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective"
@@ -1598,14 +1600,29 @@ class RaceOnEveryFirstPeek:
 
 
 # ── backend adapters ─────────────────────────────────────────────────────────
+def drained(snapshot: TaskSnapshot | None) -> TaskSnapshot:
+    """A drained task's snapshot: every task the harness drains was spawned on its engine."""
+    assert snapshot is not None, "the drained task is not on this engine"
+    return snapshot
+
+
+def failure_kind(snapshot: TaskSnapshot) -> str | None:
+    """The type name of the error a failed task was reported as."""
+    return None if snapshot.failure is None else snapshot.failure.kind
+
+
 class SqliteBackend:
-    """The embedded SQLite engine (0↔1). Always available, infra-free."""
+    """The embedded SQLite engine (0↔1), opened by URL. Always available, infra-free.
+
+    Every task registers at three attempts, as the Absurd backend's do."""
 
     name = "sqlite"
     mutation_error: type[Exception] = sqlite3.DatabaseError
 
     def __init__(self) -> None:
-        self.app = SqliteApp(":memory:")
+        opened = open("sqlite://")
+        assert isinstance(opened, SqliteApp)
+        self.engine = self.app = opened
 
     def register(
         self,
@@ -1622,7 +1639,7 @@ class SqliteBackend:
     ) -> None:
         app = self.app
 
-        @app.register_task(name)
+        @app.register_task(name, default_max_attempts=3)
         def task(params, ctx):
             rid = params["run_id"]
             # The accrual contract is read from the immutable spawn params (the real
@@ -1669,12 +1686,11 @@ class SqliteBackend:
         ).fetchone()
         return row[0]
 
-    def run_until_result(self, task_id: UUID) -> Any:
-        return self.app.run_until_result(task_id)
+    def run_until_result(self, task_id: UUID) -> TaskSnapshot:
+        return drained(self.engine.run_until_result(task_id))
 
-    def failure_kind(self, snapshot: Any) -> str:
-        """The type name of the error a failed task was reported as: its `repr` leads the row."""
-        return str(snapshot.failure).split("(", 1)[0]
+    def failure_kind(self, snapshot: TaskSnapshot) -> str | None:
+        return failure_kind(snapshot)
 
     def emit_event(self, task_id: UUID, event: str, payload: Any) -> None:
         self.app.emit_event(event, payload)
@@ -1738,7 +1754,7 @@ class SqliteBackend:
     def register_body(self, name: str, body, *, deployed: bool = False) -> None:
         """A task whose body is `(params, ctx)`, over this engine's own ctx, which is also the
         ctx the engine ships, so `deployed` changes nothing here."""
-        self.app.register_task(name)(body)
+        self.app.register_task(name, default_max_attempts=3)(body)
 
     def register_child(
         self, name: str, run_id: str, factory, domain, fault: Fault, fault_for=None
@@ -1747,7 +1763,7 @@ class SqliteBackend:
         handler holding the task's own params, writing the ledger of `run_id`. `fault_for(params,
         ctx)`, when given, chooses each task's fault in place of `fault`."""
 
-        @self.app.register_task(name)
+        @self.app.register_task(name, default_max_attempts=3)
         def task(params, ctx):
             chosen = fault if fault_for is None else fault_for(params, ctx)
             faulted = FaultCtx(ctx, chosen)
@@ -1784,16 +1800,17 @@ class SqliteBackend:
 
 
 class AbsurdBackend:
-    """Absurd/Postgres (0↔N). Imports psycopg/absurd_sdk lazily (PG-gated)."""
+    """Absurd/Postgres (0↔N), opened by URL; `app` is the driver's SDK app (PG-gated)."""
 
     name = "postgres"
 
     def __init__(self) -> None:
-        from effective.absurd_worker import absurd_worker
-
-        # Any, mirroring tests/_durable.py: the SDK types retry_strategy/spawn strictly,
-        # but the dict-shaped IMMEDIATE_RETRY is the established test convention.
-        self.app: Any = absurd_worker(PG_DSN)
+        opened = open(PG_DSN)
+        assert isinstance(opened, AbsurdEngine)
+        self.engine = opened
+        # Any: the SDK types retry_strategy/spawn strictly, and the dict-shaped IMMEDIATE_RETRY
+        # is the established test convention.
+        self.app: Any = opened.app
         self._spawner_app: Any = None
 
     @property
@@ -1818,7 +1835,7 @@ class AbsurdBackend:
         from effective.engines.absurd import ConcurrentAbsurdCtx
         from effective.ledger import PostgresLedger
 
-        @self.app.register_task(name, default_max_attempts=3)
+        @self.engine.register_task(name, default_max_attempts=3)
         def task(params, ctx):
             rid = params["run_id"]
             contract = Contract.from_params(params)  # the real migration seam
@@ -1854,12 +1871,7 @@ class AbsurdBackend:
         max_attempts: int | None = None,
         contract: Contract = Contract.V0,
     ) -> UUID:
-        return self.app.spawn(
-            name,
-            _spawn_params(run_id, contract),
-            retry_strategy=IMMEDIATE_RETRY,
-            max_attempts=max_attempts,
-        )["task_id"]
+        return self.engine.spawn(name, _spawn_params(run_id, contract), max_attempts)
 
     def task_attempts(self, task_id: UUID) -> int:
         import psycopg
@@ -1871,20 +1883,14 @@ class AbsurdBackend:
         assert row is not None
         return row[0]
 
-    def failure_kind(self, snapshot: Any) -> str:
-        """The type name of the error a failed task was reported as."""
-        return snapshot.failure["name"]
+    def failure_kind(self, snapshot: TaskSnapshot) -> str | None:
+        return failure_kind(snapshot)
 
-    def run_until_result(self, task_id: UUID, max_batches: int = 24) -> Any:
-        for _ in range(max_batches):
-            snap = self.app.fetch_task_result(task_id)
-            if snap is not None and snap.state in ("completed", "failed", "cancelled"):
-                return snap
-            self.app.work_batch()
-        return self.app.fetch_task_result(task_id)
+    def run_until_result(self, task_id: UUID, max_batches: int = 24) -> TaskSnapshot:
+        return drained(self.engine.run_until_result(task_id, max_batches))
 
     def emit_event(self, task_id: UUID, event: str, payload: Any) -> None:
-        self.app.emit_event(event, payload)  # Absurd events are by name
+        self.engine.emit_event(event, payload)  # Absurd events are by name
 
     def checkpoint_keys(self, task_id: UUID) -> list[str]:
         import psycopg

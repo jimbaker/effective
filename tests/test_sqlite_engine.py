@@ -1,7 +1,7 @@
 """SQLite engine paths that don't fit the cross-backend conformance shape.
 
 Engine-specific durable behavior (the terminal-failure branch and the durable timer),
-exercised infra-free against `effective.sqlite`. The
+exercised infra-free against `effective.engines.sqlite`. The
 cross-backend *properties* live in `test_conformance.py`; these pin the SQLite engine's
 own control flow.
 """
@@ -22,11 +22,7 @@ import effective
 from effective.api import await_until as api_await_until
 from effective.api import sleep_until
 from effective.domain import CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
-from effective.keys import Key, compose_key
-from effective.ops import Arrived, Expired
-from effective.parked import read_sqlite_parked
-from effective.sqlite import (
+from effective.engines.sqlite import (
     ClaimLost,
     IncompatibleStore,
     SqliteApp,
@@ -34,6 +30,10 @@ from effective.sqlite import (
     _Suspend,
     enable_wal,
 )
+from effective.handlers.durable import DurableHandler
+from effective.keys import Key, compose_key
+from effective.ops import Arrived, Expired
+from effective.parked import read_sqlite_parked
 
 
 class _Tool:
@@ -56,7 +56,28 @@ def test_task_fails_after_max_attempts():
     snap = app.run_until_result(app.spawn("boom", {"run_id": "r"}, max_attempts=1))
     assert snap is not None
     assert snap.state == "failed"
-    assert "ValueError" in (snap.failure or "")
+    assert "ValueError" in str(snap.failure or "")
+    app.close()
+
+
+@pytest.mark.parametrize(
+    ("registered", "executions"), [(None, 5), (2, 2)], ids=["the engine's", "the registration's"]
+)
+def test_a_spawn_without_a_limit_takes_the_registrations_default_then_the_engines(
+    registered, executions
+):
+    app = SqliteApp()
+    ran = []
+
+    @app.register_task("boom", default_max_attempts=registered)
+    def task(params, ctx):
+        ran.append(1)
+        raise ValueError("kaboom")
+
+    snap = app.run_until_result(app.spawn("boom", {}))
+    assert snap is not None
+    assert snap.state == "failed"
+    assert len(ran) == executions
     app.close()
 
 
@@ -531,7 +552,7 @@ def test_enable_wal_converts_an_existing_store_when_asked(tmp_path, sqlite_app):
 _CRASHING_WRITER = """
 import os, sys
 sys.path.insert(0, sys.argv[2])
-from effective.sqlite import SqliteApp
+from effective.engines.sqlite import SqliteApp
 app = SqliteApp(sys.argv[1])
 print(app.spawn("w", {"n": 1}), flush=True)
 os._exit(9)                      # no close, no atexit, no flush: a real unclean exit
@@ -577,7 +598,7 @@ def test_a_store_that_refuses_WAL_is_an_error_not_a_silent_downgrade(tmp_path, m
     with no shared-memory support (NFS, some container mounts) would otherwise hand back a store
     that looks ordinary while quietly lacking the concurrent-reader property the observers rely
     on. Simulated by neutering the pragma, because this box's filesystems all accept WAL."""
-    monkeypatch.setattr("effective.sqlite.enable_wal", lambda conn: "delete")
+    monkeypatch.setattr("effective.engines.sqlite.enable_wal", lambda conn: "delete")
 
     with pytest.raises(RuntimeError) as caught:
         SqliteApp(str(tmp_path / "nfs.db"))
@@ -592,7 +613,7 @@ def test_require_wal_false_accepts_the_rollback_journal(tmp_path, monkeypatch, s
     journal. This engine is aimed at laptops, so refusing to CONSTRUCT there would be a hard
     regression; the flag keeps the rollback journal, with the mode visible on the instance
     rather than silently assumed."""
-    monkeypatch.setattr("effective.sqlite.enable_wal", lambda conn: "delete")
+    monkeypatch.setattr("effective.engines.sqlite.enable_wal", lambda conn: "delete")
 
     app = sqlite_app(str(tmp_path / "nfs.db"), require_wal=False)
     assert app.journal_mode == "delete"  # honest about what it got
@@ -932,7 +953,7 @@ def test_await_until_under_a_prefix_parks_on_the_prefixed_name(tmp_path: Path) -
     added without an arm keeps the engine's bare name. `_supports_peek`'s docstring already calls
     this the recurring bug rather than an instance of one.
     """
-    from effective.handlers.absurd import _PrefixedCtx
+    from effective.handlers.durable import _PrefixedCtx
 
     app = SqliteApp(str(tmp_path / "prefix.db"))
     try:

@@ -320,9 +320,9 @@ through the same handler against both engines.** A reimplementation that skips c
 conformance will ship an isolation its production engine cannot provide; that exact defect is what
 forced the discipline here.
 
-**A note on citations.** A bare basename below is under `src/effective/`, with the three handlers
-under `src/effective/handlers/`. `sqlite.py` is the exception: it sits at [`src/effective/sqlite.py`](../src/effective/sqlite.py),
-beside the handlers rather than among them.
+**A note on citations.** A bare basename below is under `src/effective/`, with the handlers under
+`src/effective/handlers/` and the two engines, `sqlite.py` and `absurd.py`, under
+[`src/effective/engines/`](../src/effective/engines/).
 
 ### 3.6 Concurrency as it stands
 
@@ -334,7 +334,7 @@ capability that is absent, or miss one that is already there.
 |---|---|---|
 | 1 | **Nothing chooses a schedule, and the seam to choose one is already there.** No enabled-set and no `advance(branch_i)` exist in `src/`, and branches run on OS threads via `asyncio.to_thread` under a `TaskGroup`, so CPython picks. An `op_layer` that blocks before its `yield op` picks instead, on both handlers and with no change to a drive loop, because one layer object is re-injected into every child | `recording.py:679-681`, `absurd.py:2001-2007`, `:1822`, `layers.py:329` |
 | 2 | **Concurrency is a property of the ctx**, whose wiring §3.3 states. What that account leaves out is the reach: every `ConcurrentAbsurdCtx` construction is in `tests/`, so the concurrent durable gather described anywhere below is the harness's | `absurd.py:1881-1888` |
-| 3 | **"Serialized writes" serializes access, not order.** The lock wraps `begin_step` and `complete_step`; the thunk, which is where a ledger append rides, runs lock-free | `absurd.py:931-939`, `:1528`, `effective/sqlite.py:461-483` |
+| 3 | **"Serialized writes" serializes access, not order.** The lock wraps `begin_step` and `complete_step`; the thunk, which is where a ledger append rides, runs lock-free | `absurd.py:931-939`, `:1528`, `effective/engines/sqlite.py:461-483` |
 | 4 | **An author's `await_event` inside a branch works**, given a ctx with `peek_event`, and parks the whole round. A *spawn done-event* await is refused, because it is `ABSOLUTE` and nothing may complete it. A branch **sleep** parks on the durable path and is a silent no-op on the recorder | `absurd.py:1704-1722`, `ops.py:666-697`, `recording.py:841-842` |
 
 **What fact 1's seam reaches, measured over a two-level nested gather.** Four arms arrive at the
@@ -574,7 +574,7 @@ engines.
 Registering each template's shape once turns a key from an opaque string into a decodable record:
 
 ```
-fork:r-fork;review:m1  ->  handlers/absurd.py:182
+fork:r-fork;review:m1  ->  handlers/durable.py:182
                            {'child_run_id': 'r-fork', 'name': 'review:m1'}
 ```
 

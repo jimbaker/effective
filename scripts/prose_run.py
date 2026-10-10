@@ -26,12 +26,12 @@ from pathlib import Path
 from typing import Any
 
 from effective.domain import CallTool, DomainOp
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.keys import Run
 from effective.machine.evidence import CommandRun, Predicate
 from effective.machine.trampoline import run_machine
 from effective.prose import CALLERS_TOOL, VERIFY_TOOL, State, build_prose_specs, transition
-from effective.sqlite import SqliteApp, SqliteLedger
 
 TASK = "prose"
 DEFAULT_DB = "build/prose.db"

@@ -7,10 +7,10 @@ import pytest
 from _conformance import CountingDomain, gather_await_wf
 
 from effective.api import await_event, call_tool, gather
-from effective.handlers.absurd import DurableHandler, GatherWakeRace
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.handlers.durable import DurableHandler, GatherWakeRace
 from effective.keys import Key
 from effective.ops import leaves
-from effective.sqlite import SqliteApp, SqliteTaskContext
 
 
 class _StubCtx:

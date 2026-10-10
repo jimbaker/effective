@@ -14,10 +14,10 @@ it. It acted in a **logging capacity**, and replay is not about logging.
 | **replay** — `ReplayHandler` | the key, compared to a recorded one | no — it can only abort |
 | **domain** — a `DomainLayer` | the tool's name and arguments | no — it never sees a key |
 
-`sqlite.py:414` is `SELECT state FROM checkpoints WHERE task_id={task_id} AND name={name}`: two
-keys colliding means the second step reads the first's state. `replay.py:98` is
-`expected = self.recorded[self._i]` followed by an equality check — the value comes from a
-*position*, so `ReplayHandler` is structurally incapable of letting a key select anything.
+`engines/sqlite.py:414` is `SELECT state FROM checkpoints WHERE task_id={task_id} AND name={name}`:
+two keys colliding means the second step reads the first's state. `replay.py:98` is `expected =
+self.recorded[self._i]` followed by an equality check — the value comes from a *position*, so
+`ReplayHandler` is structurally incapable of letting a key select anything.
 
 **So this probe attaches at the store seam, and it observes rather than mutates.** Per test it
 records three events:
@@ -39,10 +39,10 @@ and classifies each test by what its keys were allowed to do:
 - ``no-store``   — the test never reached the store at all.
 
 **WHERE IT ATTACHES, AND WHY THAT LINE.** `SqliteTaskContext.step` qualifies a repeated name to
-``name#N`` at `sqlite.py:411`, *before* the SELECT. A probe attached above that line sees one key
-where the store holds two rows, so the occurrence count is read back off the ctx and recorded
-beside the key. This is the same nominal-vs-structural trap the rest of the arc is about, one
-level down.
+``name#N`` at `engines/sqlite.py:411`, *before* the SELECT. A probe attached above that line sees
+one key where the store holds two rows, so the occurrence count is read back off the ctx and
+recorded beside the key. This is the same nominal-vs-structural trap the rest of the arc is about,
+one level down.
 
 **WHAT IT IS BLIND TO — a gate is bounded by what it SCANS.**
 
@@ -51,7 +51,7 @@ level down.
   "clean".
 - **Keys consumed above the store** — inside a layer, a projection, a dashboard read, or an
   assertion on a composed value — never cross this boundary and are invisible here.
-- **`sleep_until` is nameless on SQLite** (`sqlite.py:456`): the wake time lands on
+- **`sleep_until` is nameless on SQLite** (`engines/sqlite.py:456`): the wake time lands on
   `tasks.available_at` and no checkpoint row is written, so a sleep key cannot appear.
 - **A `write-only` verdict is a CANDIDATE, not a defect.** A single-pass run that never re-runs a
   task has no opportunity for a hit, and that can be exactly the right test. The verdict says the
@@ -191,11 +191,11 @@ class StoreProbe:
         lookup used a shifted one. A gate is bounded by what it SCANS, this one included, and
         the honest way to bound it is `inspect.signature` over the class rather than a list.
 
-        `sleep_until` is deliberately absent: a SQLite sleep is NAMELESS (`sqlite.py:456` — the
-        wake time lands on `tasks.available_at` and no row is keyed), so there is nothing to
+        `sleep_until` is deliberately absent: a SQLite sleep is NAMELESS (`engines/sqlite.py:456`:
+        the wake time lands on `tasks.available_at` and no row is keyed), so there is nothing to
         perturb. `register_task`/`spawn`'s `name` is a TASK name, a different namespace from a
         key, and is left alone."""
-        from effective.sqlite import SqliteApp, SqliteTaskContext
+        from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 
         probe = self
         shift = _shifter(self.perturb_keys)

@@ -60,7 +60,10 @@ The workflow never receives the `Cancelled` value. The step surface raises `OpCa
 place, whichever handler recorded it, so a workflow cannot mistake a cancel for a completion.
 
 A scoped body delivers a refusal to its parent and ends the run on any other exception, so
-`OpCancelled` is caught in the scope that yielded the step. The ReAct loop ([`src/effective/react.py`](../../src/effective/react.py))
+`OpCancelled` is caught in the scope that yielded the step. It is unretryable: a retry replays the
+recorded cancel and raises it again, so an uncaught one fails its task on the attempt that raised
+it. A parent waiting on a spawned child that its engine cancelled receives the same `Cancelled`,
+and the join raises it as `OpCancelled`. The ReAct loop ([`src/effective/react.py`](../../src/effective/react.py))
 catches it around the decide, the compaction and the act:
 
 | cancelled while it ran | the turn |

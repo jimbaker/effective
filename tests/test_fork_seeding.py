@@ -14,7 +14,7 @@ where `SeedingCtx` wraps a real engine ctx.
 import pytest
 
 from effective.counterfactual import ForkedPrefixAwait
-from effective.handlers.absurd import SeedBoundaryError, SeedingCtx
+from effective.handlers.durable import SeedBoundaryError, SeedingCtx
 from effective.keys import Key, Segment
 
 
@@ -191,7 +191,7 @@ def test_an_event_name_is_a_fact_not_a_queue_so_awaits_are_name_keyed(sqlite_app
 
     from effective.api import await_event, step
     from effective.domain import CallTool
-    from effective.handlers.absurd import DurableHandler
+    from effective.handlers.durable import DurableHandler
     from effective.keys import compose_key
 
     def twice():

@@ -20,8 +20,8 @@ from effective.combinators import Answered, Deeper, Level, descend
 from effective.cost import Usage
 from effective.domain import CallTool, DomainOp
 from effective.fork import OpIndex, fork_at, measured_drive, replay_prefix
-from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import TraceEntry, op_key
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Index, Key, Run, Segment, compose_key
 from effective.ops import LedgerRow, Step

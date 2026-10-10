@@ -7,11 +7,12 @@ Rows come in append order (`seq`), payloads decoded to dicts, so a reader such a
 
 import json
 import sqlite3
-from typing import Any
-
-import psycopg
+from typing import TYPE_CHECKING, Any
 
 from effective.sql import bind
+
+if TYPE_CHECKING:
+    import psycopg
 
 
 def sqlite_payloads(conn: sqlite3.Connection, run_id: str) -> tuple[dict[str, Any], ...]:

@@ -2,9 +2,9 @@
 
 - **Date:** 2026-06-19
 - **Status:** Accepted. Built: the `TaskContext` Protocol ([`src/effective/handlers/base.py`](../../src/effective/handlers/base.py)), the
-  generic `DurableHandler` that interprets ops onto it ([`src/effective/handlers/absurd.py`](../../src/effective/handlers/absurd.py)), and
+  generic `DurableHandler` that interprets ops onto it ([`src/effective/handlers/durable.py`](../../src/effective/handlers/durable.py)), and
   the embedded engine `SqliteApp`, `SqliteTaskContext` and `SqliteLedger`
-  ([`src/effective/sqlite.py`](../../src/effective/sqlite.py)). One conformance suite ([`tests/test_conformance.py`](../../tests/test_conformance.py) over
+  ([`src/effective/engines/sqlite.py`](../../src/effective/engines/sqlite.py)). One conformance suite ([`tests/test_conformance.py`](../../tests/test_conformance.py) over
   [`tests/_conformance.py`](../../tests/_conformance.py)) runs the same workflows and assertions on both engines. Unbuilt: a pull
   driver on a Cloudflare Durable Object, and a Turso or libSQL engine.
 - **Relates to:** [ADR-0002](0002-harness-layer-stack.md) (the handler stack `TaskContext` types the seam beneath), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md)
@@ -81,6 +81,14 @@ that Effective uses:
 
 The engine is not Absurd, so it is free of the `absurd.sql` and SDK co-version pin and must pass
 the conformance suite on every change. It adds no runtime dependency.
+
+Both engines open by URL through `effective.engines.open`, which imports a driver only in its own
+arm, so a SQLite process loads neither psycopg nor the SDK. `Engine` is what a consumer calls on
+either: register, spawn, emit, cancel, fetch a snapshot, list parked tasks, close. A spawn's
+idempotency key is the task's stable identity, and a repeat returns the task spawned under it.
+`Drives` adds the batch verbs a test or a command-line run uses, which a continuously running
+worker does not. The snapshot's state is one closed set over both engines, and the parent of a
+cancelled child receives `Cancelled`, which it raises as a cancelled step does.
 
 ### 4. Turso is a reserved seam
 

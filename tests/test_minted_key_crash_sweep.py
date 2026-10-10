@@ -13,7 +13,7 @@ from _conformance import Fault, FaultPosition, at_every_op
 from effective.api import gather, race, scoped, step
 from effective.choice import Chosen, Won
 from effective.domain import CallTool
-from effective.handlers.absurd import idempotency_key_for
+from effective.handlers.durable import idempotency_key_for
 from effective.keys import Key, compose_key
 from effective.layers import TransientError, op_layer, retry
 from effective.ops import Minted, Step, Writer

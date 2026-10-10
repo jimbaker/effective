@@ -30,11 +30,11 @@ from _conformance import (
     ruling_machine_wf,
 )
 
-from effective.handlers.absurd import DurableHandler
+from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.handlers.durable import DurableHandler
 from effective.keys import Segment
 from effective.machine.evidence import CommandRun
 from effective.machine.spec import Ctx, Evidence, Report
-from effective.sqlite import SqliteApp, SqliteLedger
 
 pytestmark = pytest.mark.conformance
 
