@@ -18,8 +18,9 @@ from effective.bridge_absurd import export_measured_prefix, park_name
 from effective.budget import Grant, MeasuredBudget
 from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
+from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import measured_drive
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.handlers.absurd import DurableHandler
 from effective.keys import Key, Segment, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow

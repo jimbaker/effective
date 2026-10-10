@@ -15,7 +15,8 @@ from _durable import DSN, absurd, pg_ready
 
 from effective.api import step
 from effective.domain import CallTool
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.engines.absurd import ConcurrentAbsurdCtx
+from effective.handlers.absurd import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (just pgt-up)")
 

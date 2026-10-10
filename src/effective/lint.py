@@ -36,6 +36,7 @@ import typing
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
+from functools import cache
 from pathlib import Path
 from typing import Any, TypeAliasType, TypedDict, assert_never, get_args, get_origin
 
@@ -714,8 +715,15 @@ LAZY_IMPORT_ALLOWED: dict[tuple[str, str], str] = {
         "openai",
     ): "heavy optional SDK; only the model-caller paths need it",
     ("agent/skillsbench.py", "yaml"): "dev-group dep; bench tooling only",
-    # 3. An SDK name kept private to its one use.
-    ("effective/handlers/absurd.py", "absurd_sdk"): "a PRIVATE SDK name; kept at its one use",
+    # 3. The Absurd engine, which a SQLite-only process imports without loading the SDK.
+    (
+        "effective/engines/absurd.py",
+        "absurd_sdk",
+    ): "the handler imports this module, and a SQLite-only process never loads the SDK",
+    (
+        "effective/lint.py",
+        "absurd_sdk",
+    ): "the coding machine imports the lint; the SDK loads only when the SDK-edge rule runs",
 }
 LAZY_IMPORT_ALLOWED |= {
     (entry["path"], entry["module"]): entry["reason"]
@@ -727,7 +735,7 @@ LAZY_IMPORT_ALLOWED |= {
 |--------------------------|-------------------------------------------------|
 | circular-import break    | the module needed already imports this one      |
 | optional or dev-only SDK | outside the runtime's lean dependency set       |
-| SDK name kept to one use | an SDK-internal name stays at the site using it |
+| an engine kept lazy      | a SQLite-only process never loads the SDK       |
 """
 
 
@@ -778,6 +786,91 @@ def _path_below_src(path: Path) -> str:
 def check_lazy_imports_file(path: str | Path) -> list[Violation]:
     path = Path(path)
     return check_lazy_imports_source(path.read_text(), str(path))
+
+
+# --- the SDK-edge rule (`--sdk-private`) ------------------------------------------------
+#
+# The Absurd SDK's public surface cannot read or write a checkpoint without advancing its per-name
+# step counter, so the Absurd engine reaches its private surface. One module does. The private
+# names come from the installed SDK, so the rule's domain moves with the pin.
+#
+# | the form                                 | refused when                                  |
+# |------------------------------------------|-----------------------------------------------|
+# | `absurd_sdk._name`                       | the name is single-underscore                 |
+# | `<receiver>._name`, receiver not `self`  | `TaskContext` declares or defines the name    |
+# | `from absurd_sdk import _name`           | the name is single-underscore                 |
+#
+# A `self` receiver is the enclosing class's own attribute. The module is matched by the name
+# `absurd_sdk`, so an aliased import and a `getattr` with a string are outside the rule.
+SDK_EDGE = "effective/engines/absurd.py"
+_SDK_PRIVATE_ATTRIBUTE = (
+    "a private Absurd SDK attribute outside the Absurd engine module; add a named function there "
+    "and call it"
+)
+_SDK_PRIVATE_IMPORT = "a private Absurd SDK name outside the Absurd engine module"
+
+
+def _single_underscore(name: str) -> bool:
+    return name.startswith("_") and not name.startswith("__")
+
+
+@cache
+def _sdk_context_privates() -> frozenset[str]:
+    """The single-underscore names the SDK's `TaskContext` declares or defines."""
+    import absurd_sdk
+
+    context = absurd_sdk.TaskContext
+    declared = {name for name in context.__annotations__ if _single_underscore(name)}
+    return frozenset(declared | {name for name in vars(context) if _single_underscore(name)})
+
+
+def check_sdk_private_source(source: str, filename: str = "<module>") -> list[Violation]:
+    if _path_below_src(Path(filename)) == SDK_EDGE:
+        return []
+    names = _sdk_context_privates()
+    found: list[Violation] = []
+    for node in ast.walk(ast.parse(source)):
+        match node:
+            case ast.Attribute(value=ast.Name(id="absurd_sdk"), attr=attr) if _single_underscore(
+                attr
+            ):
+                found.append(
+                    Violation(
+                        "sdk-private",
+                        _SDK_PRIVATE_IMPORT,
+                        node.lineno,
+                        ast.unparse(node),
+                        filename,
+                    )
+                )
+            case ast.Attribute(value=ast.Name(id="self")):
+                pass
+            case ast.Attribute(attr=attr) if attr in names:
+                found.append(
+                    Violation(
+                        "sdk-private",
+                        _SDK_PRIVATE_ATTRIBUTE,
+                        node.lineno,
+                        ast.unparse(node),
+                        filename,
+                    )
+                )
+            case ast.ImportFrom(module="absurd_sdk", names=aliases):
+                found.extend(
+                    Violation(
+                        "sdk-private", _SDK_PRIVATE_IMPORT, node.lineno, alias.name, filename
+                    )
+                    for alias in aliases
+                    if _single_underscore(alias.name)
+                )
+            case _:
+                pass
+    return found
+
+
+def check_sdk_private_file(path: str | Path) -> list[Violation]:
+    path = Path(path)
+    return check_sdk_private_source(path.read_text(), str(path))
 
 
 # --- the canonical-read rule (`--ledger-reads`) -----------------------------------------
@@ -3910,6 +4003,7 @@ _PER_FILE = {
     "--ledger-reads": check_ledger_reads_file,
     "--sql-templates": check_sql_templates_file,
     "--lazy-imports": check_lazy_imports_file,
+    "--sdk-private": check_sdk_private_file,
     "--working-notes": check_working_notes_file,
     "--key-composition": check_key_composition_file,
     "--terminal-holes": check_terminal_holes_file,
@@ -4160,6 +4254,7 @@ def main(argv: list[str] | None = None) -> int:
             "--forged-join": "forged-join (a key rebuilt by joining rendered terms)",
             "--key-literals": "key-literal (a spelled key production could not mint)",
             "--lazy-imports": "lazy-import (function-body import)",
+            "--sdk-private": "sdk-private (the Absurd SDK's private surface outside its engine)",
             "--working-notes": "working-note (transient in a commit)",
             "--role-coverage": "role-coverage (a workflow the determinism gate never sees)",
             "--layer-coverage": "layer-coverage (a layer the authority gate never sees)",

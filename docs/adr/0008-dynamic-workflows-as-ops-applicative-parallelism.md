@@ -116,7 +116,7 @@ live branches belongs in the handler. No cap is built.
 
 A durable gather holds one `write_lock` around the connection I/O and runs each step's thunk (the
 tool or model call) outside it. The SQLite engine shares the lock between ctx and ledger
-([`src/effective/sqlite.py`](../../src/effective/sqlite.py)); `ConcurrentAbsurdCtx` ([`src/effective/handlers/absurd.py`](../../src/effective/handlers/absurd.py)) does the
+([`src/effective/sqlite.py`](../../src/effective/sqlite.py)); `ConcurrentAbsurdCtx` ([`src/effective/engines/absurd.py`](../../src/effective/engines/absurd.py)) does the
 same over the Absurd SDK's public `begin_step`/`complete_step` split, so branch tools overlap
 while commits serialize on the one task connection. `ConcurrentAbsurdCtx` is constructed only in
 tests; a worker passing the raw SDK ctx runs branches in index order.

@@ -52,6 +52,7 @@ from effective.counterfactual import (
     sealed_row,
 )
 from effective.domain import DomainOp, Spawned
+from effective.engines.absurd import _adapt_ctx
 from effective.govern import BudgetRefused
 from effective.handlers.absurd import (
     DurableHandler,
@@ -61,7 +62,6 @@ from effective.handlers.absurd import (
     SeedBoundaryError,
     Seeding,
     SeedingCtx,
-    _adapt_ctx,
     _decode_usage_envelope,
     fork_event_name,
     metered_call,

@@ -33,8 +33,9 @@ from effective.bridge_absurd import read_absurd_task
 from effective.budget import budget_grant_name
 from effective.checkpoints import keys
 from effective.domain import CallTool, DomainOp
+from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.graphview import PARKED, fold_cycles, from_keys, to_mermaid
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.handlers.absurd import DurableHandler
 from effective.keys import Index, Key, Scope
 from effective.parked import (
     ParkedTask,

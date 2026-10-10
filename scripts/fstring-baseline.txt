@@ -181,8 +181,8 @@ src/effective/graphview.py :: 'ms' :: key -> compose_key
 src/effective/graphview.py :: 'n' :: key -> compose_key
 src/effective/graphview.py :: 'x' :: key -> compose_key
 src/effective/handlers/absurd.py :: '' :: text
-src/effective/handlers/absurd.py :: '$awaitEvent:' :: text
-src/effective/handlers/absurd.py :: '_' :: text
+src/effective/engines/absurd.py :: '$awaitEvent:' :: text
+src/effective/engines/absurd.py :: '_' :: text
 src/effective/handlers/absurd.py :: 'epoch-' :: key -> compose_key
 src/effective/handlers/base.py :: 'sha256-' :: key -> compose_key
 src/effective/handlers/recording.py :: '' :: text

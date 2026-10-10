@@ -22,8 +22,12 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from effective.api import await_until
-from effective.handlers import absurd as absurd_handler
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.engines import absurd as absurd_engine
+from effective.engines.absurd import ConcurrentAbsurdCtx
+from effective.handlers.absurd import DurableHandler
+
+# The park is held by patching `sdk_pin_the_park` in the module that DEFINES it, since its caller
+# looks it up there; a patch on any module that merely imports it would hold nothing.
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (just pgt-up)")
 
@@ -163,7 +167,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
     def task(params, ctx):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
-    settled = absurd_handler.sdk_pin_the_park
+    settled = absurd_engine.sdk_pin_the_park
 
     def emit_once_the_deadline_has_passed() -> None:
         while time.time() <= deadline.timestamp():
@@ -188,7 +192,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
 
     task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
     with monkeypatch.context() as patched:
-        patched.setattr(absurd_handler, "sdk_pin_the_park", held)
+        patched.setattr(absurd_engine, "sdk_pin_the_park", held)
         app.work_batch()
     racer.join(timeout=20)
 
@@ -271,7 +275,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
     event = f"shared:{name}"
     first = datetime.now().astimezone() + timedelta(seconds=A_BREATH)
     later = first + timedelta(hours=1)
-    settled = absurd_handler.sdk_pin_the_park
+    settled = absurd_engine.sdk_pin_the_park
     claims: list[str] = []
     seen: list[int] = []
     racers: list[threading.Thread] = []
@@ -307,7 +311,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
     claimed_before_the_commit: list[int] = []
     task_id = app.spawn(name, {"run_id": "r1"})["task_id"]
     with monkeypatch.context() as patched:
-        patched.setattr(absurd_handler, "sdk_pin_the_park", held)
+        patched.setattr(absurd_engine, "sdk_pin_the_park", held)
         app.work_batch()
     for racer in racers:
         racer.join(timeout=30)

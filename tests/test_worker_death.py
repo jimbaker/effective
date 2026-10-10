@@ -106,7 +106,7 @@ def sqlite_death(tmp_path: Path, scenario: str) -> Death:
 
 def absurd_death(_tmp_path: Path, scenario: str) -> Death:
     from effective.absurd_worker import absurd_worker
-    from effective.handlers.absurd import ConcurrentAbsurdCtx
+    from effective.engines.absurd import ConcurrentAbsurdCtx
     from effective.ledger import PostgresLedger
 
     program, handler = SCENARIOS[scenario]

@@ -31,8 +31,9 @@ from effective.bridge_absurd import (
 from effective.checkpoints import keys
 from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
 from effective.domain import AskLLM
+from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import fork_seed
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.handlers.absurd import DurableHandler
 from effective.keys import Key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow

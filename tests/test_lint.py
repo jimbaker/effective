@@ -1834,3 +1834,47 @@ def test_a_nearer_pyproject_without_the_table_does_not_hide_the_roots(tmp_path, 
     (root / "member" / "pyproject.toml").write_text('[project]\nname = "member"\n')
     monkeypatch.chdir(root / "member")
     assert configured("extra_paths") == ["priv"]
+
+
+@pytest.mark.parametrize(
+    ("source", "filename", "hits"),
+    [
+        (
+            "x = ctx._lookup_checkpoint(name)\n",
+            "src/effective/fork.py",
+            ["ctx._lookup_checkpoint"],
+        ),
+        ("row = sdk._task['run_id']\n", "src/effective/fork.py", ["sdk._task"]),
+        (
+            "from absurd_sdk import _CHECKPOINT_NOT_FOUND\n",
+            "src/effective/fork.py",
+            ["_CHECKPOINT_NOT_FOUND"],
+        ),
+        ("x = ctx._lookup_checkpoint(name)\n", "src/effective/engines/absurd.py", []),
+        ("from absurd_sdk import TaskContext\n", "src/effective/fork.py", []),
+        ("x = self._conn\n", "src/effective/fork.py", []),
+        (
+            "import absurd_sdk\nx = absurd_sdk._CHECKPOINT_NOT_FOUND\n",
+            "src/effective/fork.py",
+            ["absurd_sdk._CHECKPOINT_NOT_FOUND"],
+        ),
+    ],
+    ids=[
+        "private-method",
+        "private-attribute",
+        "private-import",
+        "inside-the-engine",
+        "public-import",
+        "own-attribute",
+        "module-private-attribute",
+    ],
+)
+def test_the_sdk_private_rule_refuses_the_private_surface_outside_the_engine(
+    source: str, filename: str, hits: list[str]
+) -> None:
+    pytest.importorskip("absurd_sdk")
+    from effective.lint import check_sdk_private_source as check
+
+    found = check(source, filename)
+    assert [v.text for v in found] == hits
+    assert {v.rule for v in found} <= {"sdk-private"}

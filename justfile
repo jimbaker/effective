@@ -67,6 +67,9 @@ lint:
     # a record nothing produces, so the record can only shrink.
     uv run python scripts/fstring_sweep.py --gate src
     uv run python -m effective.lint --lazy-imports src/effective src/agent src/tui src/examples
+    # Only the Absurd engine module reaches the SDK's private surface. Tests are unscanned, since
+    # their fixtures reach the SDK directly: `python -m effective.lint --sdk-private tests` lists them.
+    uv run python -m effective.lint --sdk-private src/effective src/agent src/tui src/examples examples scripts
     uv run python -m effective.lint --working-notes src/effective src/agent src/tui src/examples tests scripts examples
     uv run python -m effective.lint --public-prose src/effective src/agent
     uv run python -m effective.lint --role-coverage src examples scripts

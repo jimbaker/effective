@@ -32,9 +32,10 @@ from effective.bridge_absurd import read_absurd_task
 from effective.budget import BUDGET_DEPTH_PARAM
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, SpawnResult
+from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.govern import Refused
-from effective.handlers.absurd import ConcurrentAbsurdCtx, DurableHandler
+from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import op_key
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key

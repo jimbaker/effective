@@ -130,7 +130,7 @@ def test_a_stack_of_wrappers_is_STILL_adapted() -> None:
     object alone would leave a wrapper stack unadapted and hand the SDK `Key`s. Asserted here with
     a fake SDK ctx, so the property is pinned even where Postgres is absent.
     """
-    from effective.handlers import absurd as A
+    from effective.engines import absurd as A
 
     sdk = pytest.importorskip("absurd_sdk")
 

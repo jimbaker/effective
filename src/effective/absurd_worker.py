@@ -12,7 +12,8 @@ from typing import Any
 from absurd_sdk import Absurd, CancelledTask, FailedTask, SuspendTask
 
 from effective.bridge_absurd import end_attempts_at_this_run
-from effective.handlers.base import Attempt, failing_leaf
+from effective.engines.absurd import sdk_claim
+from effective.handlers.base import failing_leaf
 from effective.ops import DONE_EVENT_PARAM, noted
 from effective.spawning import failure_answer
 
@@ -22,22 +23,20 @@ def fail_terminally(ctx: Any, execute: Callable[[], Any]) -> Any:
     remaining attempts and answer its parent. Only while this run is still the task's latest, so a
     run whose lease expired speaks for nobody. A lease that expires after that check lets the claim
     sweep fail the run first: the task row then reads `$ClaimTimeout` while the parent heard this
-    error. Reads the SDK's claim from its private `_task` and connection from `_conn`, at the
-    pinned version (`infra/absurd`)."""
+    error."""
     try:
         return execute()
     except SuspendTask, CancelledTask, FailedTask:
         raise
     except Exception as raised:
-        claimed = ctx._task
-        attempt = Attempt(number=claimed["attempt"], limit=claimed["max_attempts"])
-        if (leaf := failing_leaf(raised, attempt)) is None:
+        claim = sdk_claim(ctx)
+        if (leaf := failing_leaf(raised, claim.attempt)) is None:
             raise
         latest = end_attempts_at_this_run(
-            ctx._conn, claimed["task_id"], claimed["run_id"], queue=ctx._queue_name
+            claim.conn, claim.task_id, claim.run_id, queue=claim.queue
         )
-        if latest and DONE_EVENT_PARAM in claimed["params"]:
-            ctx.emit_event(claimed["params"][DONE_EVENT_PARAM], failure_answer(leaf, raised))
+        if latest and DONE_EVENT_PARAM in claim.params:
+            ctx.emit_event(claim.params[DONE_EVENT_PARAM], failure_answer(leaf, raised))
         raise noted(leaf, raised) from None
 
 

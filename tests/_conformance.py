@@ -1832,7 +1832,7 @@ class AbsurdBackend:
         on_exhaust: OnExhaust = "park",
         fresh: Callable[[], Any] | None = None,
     ) -> None:
-        from effective.handlers.absurd import ConcurrentAbsurdCtx
+        from effective.engines.absurd import ConcurrentAbsurdCtx
         from effective.ledger import PostgresLedger
 
         @self.app.register_task(name, default_max_attempts=3)
@@ -2050,7 +2050,7 @@ class AbsurdBackend:
     def register_body(self, name: str, body, *, deployed: bool = False) -> None:
         """A task whose body is `(params, ctx)`, over the concurrent-gather ctx `register` uses,
         or with `deployed` over the adapted SDK ctx a production worker hands its handler."""
-        from effective.handlers.absurd import ConcurrentAbsurdCtx, _adapt_ctx
+        from effective.engines.absurd import ConcurrentAbsurdCtx, _adapt_ctx
 
         wrap = _adapt_ctx if deployed else ConcurrentAbsurdCtx
         self.app.register_task(name, default_max_attempts=3)(
@@ -2063,7 +2063,7 @@ class AbsurdBackend:
         """A spawned task answering its parent through `run_child`: `factory(params)` runs under a
         handler holding the task's own params, writing the ledger of `run_id`. `fault_for(params,
         ctx)`, when given, chooses each task's fault in place of `fault`."""
-        from effective.handlers.absurd import ConcurrentAbsurdCtx
+        from effective.engines.absurd import ConcurrentAbsurdCtx
         from effective.ledger import PostgresLedger
 
         @self.app.register_task(name, default_max_attempts=3)

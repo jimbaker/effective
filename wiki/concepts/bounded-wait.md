@@ -6,7 +6,7 @@ engines answered differently, in a cell nobody had written down. This page write
 
 **Absurd is the reference and SQLite conforms**, so every row below is one answer, not two, and
 the cross-engine pin is what says so. `ops.WaitOutcome` is the union; `SqliteTaskContext.await_until`
-and `handlers.absurd.sdk_await_until` are the two implementations.
+and `engines.absurd.sdk_await_until` are the two implementations.
 
 ## The decision, in order
 
@@ -92,7 +92,7 @@ Two readers take that instant for the deadline, and each turns the rounding into
 | `absurd.emit_event` | which waits it deletes as late, and which it WAKES |
 | `absurd.claim_task` | when the run becomes claimable again |
 
-So `handlers.absurd.sdk_pin_the_park` writes the deadline over both columns as an absolute
+So `engines.absurd.sdk_pin_the_park` writes the deadline over both columns as an absolute
 `timestamptz`, on the `SuspendTask` the park raises. A correction that is merely LATE is not
 harmless, which is why it is not allowed to be late: see the transaction below.
 
