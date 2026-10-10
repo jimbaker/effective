@@ -55,6 +55,7 @@ it, so a test declares a role only when its pass proves more than one seam.
 | `journey` | a realistic path works end to end |
 | `adversarial` | an attack failed; the test owes a mutation check |
 | `conformance` | interpreters agree on one model; overlap across them is the design |
+| `property` | a law holds over a generated domain; overlap with tests of the same function is expected, and the test names the corners its seeds reach |
 
 [concepts/tapes](tapes.md) says what a checkpoint holds and why replay can serve it;
 [concepts/forced-schedules](forced-schedules.md) covers what a schedule instrument can decide;

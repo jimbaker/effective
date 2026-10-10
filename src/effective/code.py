@@ -65,6 +65,7 @@ from effective.keys import (
     carries_structure,
     compose_key,
 )
+from effective.ops import Minted
 from effective.permission import Refused
 
 
@@ -250,15 +251,9 @@ def run_code[T](
     committed checkpoint**: a crash after the tool fires but before its
     checkpoint commits re-runs it (standard step-thunk semantics — the crash
     window shrinks from RLM's whole-exec to the one call, it does not vanish).
-    The op args carry the deterministic ``idempotency_key``; an action tool that
-    dedupes on it achieves true exactly-once — **except inside a `gather`, where it
-    is not yet unique**. The token is composed here, in the workflow, from (this
-    ``name``, the action index, the tool), and the ``gather:{g},{i};`` frame is
-    handler-side and invisible at this point. So two branches requesting the same
-    action hand the tool ONE token while committing under two correctly disjoint
-    checkpoints, and a deduping tool collapses them. Pinned as a strict xfail
-    (`test_two_gather_branches_hand_an_action_tool_distinct_idempotency_keys`),
-    which carries why the fix is a substrate change rather than a local one.
+    Each action asks the handler for an ``idempotency_key`` (`Minted`), minted from the
+    task and the action's placement, gather frames included; an action tool whose
+    receiver dedupes on it performs the action once across a crash.
     The final expression's value is validated to ``schema``.
 
     ``name`` must be unique per ``run_code`` call within the workflow (it keys
@@ -275,9 +270,9 @@ def run_code[T](
     ``scoped(compose_key(t"rec:{i}"), lambda: run_code(...))``. The handler applies a
     namespace, in the same position, for both scopes and the structural
     ``gather:{g},{i};`` prefix, so no call site decides a delimiter.
-    (On the real Absurd SDK a duplicate name occurrence-suffixes to ``name#2`` —
-    a safety net, not a license: suffixes bind by yield *order*, so an edit that
-    inserts an earlier same-named call shifts every later binding.)
+    (The durable handler places a duplicate name as ``name#2``: a safety net, not a
+    license, since occurrences bind by yield *order*, so an edit that inserts an
+    earlier same-named call shifts every later binding.)
     """
     if "/" in name:
         raise ValueError(
@@ -338,13 +333,10 @@ def run_code[T](
                     action_key,
                     CallTool(
                         name=request.name,
-                        args={
-                            "args": request.args,
-                            "kwargs": request.kwargs,
-                            "idempotency_key": action_key,
-                        },
+                        args={"args": request.args, "kwargs": request.kwargs},
                         result_schema=object,
                     ),
+                    idempotency_key=Minted(),
                 )
                 _validate(action_schemas[request.name], raw)
                 action_results = [*action_results, {"return_value": canonical(raw)}]

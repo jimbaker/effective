@@ -64,10 +64,6 @@ class FaultCtx:
         self._tick()
         return self._ctx.step(name, fn)
 
-    def step_resolved(self, name, fn):
-        self._tick()
-        return self._ctx.step_resolved(name, fn)
-
     def await_event(self, name):
         self._tick()
         return self._ctx.await_event(name)

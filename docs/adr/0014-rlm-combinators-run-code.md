@@ -79,12 +79,10 @@ only durability mechanism (§4).
 The args digest makes a re-bind that lands on the wrong call site a loud `CodeEngineError`, never
 a silent misbinding. An action is **exactly-once per committed checkpoint**: a crash after the
 tool fires and before its checkpoint commits re-runs it, which is standard step semantics with
-the crash window shrunk from a whole `exec` to one call. The op args carry a deterministic
-`idempotency_key`, so a tool that dedupes on it reaches true exactly-once outside a `gather`.
-Inside a `gather` two branches requesting the same action hand the tool the same token, because
-the branch frame is applied by the handler below the point where the token is composed; that gap
-is pinned as a strict xfail,
-`test_two_gather_branches_hand_an_action_tool_distinct_idempotency_keys`.
+the crash window shrunk from a whole `exec` to one call. Each action asks the handler for its
+`idempotency_key`, which the handler mints from the task and the action's placement, gather frames
+included, so a tool whose receiver dedupes on it performs the action once across a crash
+(`test_two_gather_branches_hand_an_action_tool_distinct_idempotency_keys`).
 
 Cascade outcomes reach the code as ordinary Python: a denial re-enters the sandbox as
 `PermissionError`, which the code may catch and route around; an escalation parks the task
@@ -186,7 +184,6 @@ no scope with a tool name embedding that delimiter, giving two actions one addre
 | a second engine (Pyodide subprocess) and a cross-interpreter conformance suite | a workload Monty's subset cannot run |
 | prewarmed Monty image | sandbox init cost visible in the meter |
 | container or microVM tier | running untrusted third-party code |
-| distinct idempotency keys across `gather` branches | a deduping action tool inside a `gather` |
 | a measured RLM-versus-structured contrast | the evaluation track |
 
 Mid-run snapshot persistence is rejected, revisited only if replay-by-re-execution measurably

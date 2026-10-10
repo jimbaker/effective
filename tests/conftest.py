@@ -408,7 +408,7 @@ def _require_pg_if_asked() -> None:
         )
 
 
-ROLES = ("unit", "spine", "journey", "adversarial", "conformance")
+ROLES = ("unit", "spine", "journey", "adversarial", "conformance", "property")
 """The test roles. A marker outside them, a future `slow` say, says nothing about a pass."""
 
 

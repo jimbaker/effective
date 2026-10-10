@@ -280,8 +280,8 @@ class GateState:
 
         **Why `op_key` AND `occurrence`.** The op component alone is not enough, because `op_key`
         is not *occurrence*-injective: a `Step` carries the author's bare name, so an agent that
-        calls one tool twice yields two ops with the same key. The engines already know this and
-        suffix duplicate *checkpoints* `name#2` below the ctx (`sqlite.py`, the Absurd SDK).
+        calls one tool twice yields two ops with the same key. The walk already knows this and
+        places duplicate *checkpoints* `name#2` (`DurableHandler._place`).
         Without the same for **authority** names, one approval settles every later occurrence:
         a `$5` approval authorizes a `$5,000,000` charge of the same tool, on both engines.
         `occurrence` is the same discipline for the authority namespace: a per-`(gate, op_key)`

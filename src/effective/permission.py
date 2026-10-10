@@ -248,7 +248,7 @@ def human(
     def tier(op: WorkflowOp) -> Generator[WorkflowOp, Any, Verdict]:
         # The OCCURRENCE coordinate. `op_key` is not occurrence-injective: a `Step` carries the
         # author's bare name, so an agent that calls one tool twice yields two ops with one key.
-        # On the checkpoint axis the engines restore the missing coordinate by suffixing `name#k`;
+        # On the checkpoint axis the walk restores the missing coordinate by placing `name#k`;
         # on the AUTHORITY axis this counter does, so one approval cannot settle a later
         # occurrence (a `$5` approval authorizing a `$5,000,000` charge of the same tool).
         # `govern` does the same with `GateState.occurrence`.

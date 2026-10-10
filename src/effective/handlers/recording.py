@@ -34,6 +34,7 @@ from effective.handlers.base import (
     branch_slot,
     deadline_of,
     ending_of,
+    keyed_call,
     placed_await_name,
     placed_key,
     placing,
@@ -842,7 +843,10 @@ class RecordingHandler:
         if self._stop.racing and isinstance(op, CHECKPOINTED_OPS):
             self._stop_if_chosen()  # an op reaching the base after the choice, injected or not
         match op:
-            case Step(name=name):
+            case Step(name=name, op=inner):
+                # A key nobody but the handler may write refuses here as on the engines; a
+                # minted one needs no task, since a canned response calls no tool.
+                keyed_call(op, inner)
                 # The AUTHOR's name, not `op_key(op)`. The arm term makes a Step's key
                 # `step:{name}` / `step;{name}` — substrate bookkeeping the fixture author never
                 # wrote and should not have to, so the table stays keyed by what they typed.

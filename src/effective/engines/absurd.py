@@ -9,11 +9,13 @@ read and write, the claimed task row, and the queue's tables, at the version pin
 an upgrade that moves one fails by name.
 """
 
+import json
 import math
 import threading
 import time
+import weakref
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -200,17 +202,73 @@ def sdk_spend_wake(sdk: Any, name: Key) -> None:
     sdk._task["wake_event"] = None
 
 
+class ClaimSteps:
+    """The SDK's step handles for one claim, one per checkpoint name.
+
+    `begin_step` counts the names it is handed and checkpoints a repeat as `name#2`, so each name
+    is begun once per claim and its handle reused: a step forwarded again lands at the name it was
+    given. A handle is kept as completed because `complete_step` leaves `done` unset and
+    completing it again would overwrite the checkpoint.
+
+    A done handle's value is kept as JSON text, written before the value is persisted, and each
+    hit decodes it, as a read from the store would. So a value with no JSON form fails before
+    anything is written, and a caller that changes a value it was handed changes nothing a later
+    forward is served.
+
+    One per SDK ctx, which is one per claim, so every adapter over a claim shares it. It holds no
+    reference to the SDK ctx, which keys it weakly, so the entry ends with the claim."""
+
+    def __init__(self) -> None:
+        self._handles: dict[str, Any] = {}
+        self._values: dict[str, str] = {}
+
+    @classmethod
+    def of(cls, sdk: Any) -> ClaimSteps:
+        with _CLAIM_STEPS_LOCK:
+            if (steps := _CLAIM_STEPS.get(sdk)) is None:
+                steps = _CLAIM_STEPS[sdk] = cls()
+            return steps
+
+    def begin(self, sdk: Any, name: Key) -> Any:
+        stored = name.stored()
+        if (handle := self._handles.get(stored)) is None:
+            handle = sdk.begin_step(stored)
+            if handle.checkpoint_name != stored:
+                raise RuntimeError(
+                    f"the SDK checkpoints {stored!r} as {handle.checkpoint_name!r}: a step of "
+                    "this name began in this claim outside this ctx"
+                )
+            self._handles[stored] = handle
+            if handle.done:
+                self._values[stored] = json.dumps(handle.state)
+        return handle
+
+    def complete(self, sdk: Any, handle: Any, value: Any) -> Any:
+        text = json.dumps(value)
+        # The SDK caches what it persists, so it gets its own copy and the caller keeps theirs.
+        sdk.complete_step(handle, json.loads(text))
+        self._values[handle.checkpoint_name] = text
+        self._handles[handle.checkpoint_name] = replace(handle, done=True, state=None)
+        return value
+
+    def served(self, handle: Any) -> Any:
+        """A done handle's value, decoded afresh."""
+        return json.loads(self._values[handle.checkpoint_name])
+
+
+_CLAIM_STEPS: weakref.WeakKeyDictionary[Any, ClaimSteps] = weakref.WeakKeyDictionary()
+_CLAIM_STEPS_LOCK = threading.Lock()
+
+
 class SdkCtx:
     """The adapter over the Absurd SDK's own ctx: the one place a `Key` becomes a `str` on the
     durable path.
 
     `TaskContext` is a structural Protocol, and the SDK's ctx satisfies it by duck-typing. But the
-    SDK is a FOREIGN implementation that takes `str` and does string work on it: its
-    `_get_checkpoint_name` composes `f"{name}#{count}"` for a repeated step name. Hand it a `Key`
-    and the second occurrence is checkpointed as ``Key(_value='tool:a')#2`` (the conformance case
-    that pins duplicate-occurrence suffixes shows it on the deployed engine). A psycopg dumper
-    fixes the *binding* and cannot fix that, because the corruption happens in Python before any
-    parameter is bound.
+    SDK is a FOREIGN implementation that takes `str` and does string work on it: it composes
+    `f"{name}#{count}"` for a repeated step name and `$awaitEvent:{name}` for an await, so a `Key`
+    handed through renders its repr into a durable name. A psycopg dumper fixes the *binding* and
+    cannot fix that, because the corruption happens in Python before any parameter is bound.
 
     So the boundary is named. This is the per-engine adapter pattern the bridges and
     `spawning.deliver` already use: our protocol says what OUR ctxs promise, and one small class
@@ -234,17 +292,13 @@ class SdkCtx:
 
     def __init__(self, ctx: Any) -> None:
         self._ctx = ctx
+        self._steps = ClaimSteps.of(ctx)
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
-        return self._ctx.step(name.stored(), thunk)
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        """The SDK's own `step`, begin then complete, with the checkpoint name `begin_step`
-        resolved handed to the thunk."""
-        handle = self._ctx.begin_step(name.stored())
+        handle = self._steps.begin(self._ctx, name)
         if handle.done:
-            return handle.state
-        return self._ctx.complete_step(handle, thunk(Key.parse(handle.checkpoint_name)))
+            return self._steps.served(handle)
+        return self._steps.complete(self._ctx, handle, thunk())
 
     def await_event(self, name: Key, /) -> Any:
         # `.stored()` at the SDK boundary, as `step` does: below this line is the vendored SDK,
@@ -299,6 +353,16 @@ def sdk_claim(ctx: Any) -> SdkClaim:
         conn=ctx._conn,
         queue=ctx._queue_name,
     )
+
+
+def sdk_signals() -> tuple[type[Exception], ...]:
+    """The SDK's exceptions that end a walk: a park, a cancel, and a run already failed."""
+    try:
+        import absurd_sdk
+    except ImportError:  # pragma: no cover - the SDK is a declared dependency
+        return ()
+
+    return (absurd_sdk.SuspendTask, absurd_sdk.CancelledTask, absurd_sdk.FailedTask)
 
 
 def sdk_attempt(ctx: Any) -> Attempt:
@@ -386,27 +450,16 @@ class ConcurrentAbsurdCtx:
         self._ctx = ctx
         self.write_lock = write_lock or threading.Lock()
         self.concurrent_safe = True
+        self._steps = ClaimSteps.of(ctx)
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         with self.write_lock:
-            # `.stored()` at the SDK edge, for the reason `SdkCtx` documents: the SDK does
-            # string work on the name (`f"{name}#{count}"`), so a `Key` must not cross.
-            handle = self._ctx.begin_step(name.stored())
+            handle = self._steps.begin(self._ctx, name)
         if handle.done:
-            return handle.state
+            return self._steps.served(handle)
         rv = thunk()  # lock-free: tool work overlaps across branches
         with self.write_lock:
-            return self._ctx.complete_step(handle, rv)
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        """`step`, with the checkpoint name `begin_step` resolved handed to the thunk."""
-        with self.write_lock:
-            handle = self._ctx.begin_step(name.stored())
-        if handle.done:
-            return handle.state
-        rv = thunk(Key.parse(handle.checkpoint_name))
-        with self.write_lock:
-            return self._ctx.complete_step(handle, rv)
+            return self._steps.complete(self._ctx, handle, rv)
 
     def await_event(self, name: Key, /) -> Any:
         with self.write_lock:

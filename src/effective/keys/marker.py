@@ -500,7 +500,7 @@ def authored_key(name: str) -> Key:
         raise ValueError(
             f"the name {name!r} carries occurrence {parsed.occurrence}, and an occurrence is not "
             f"an author's to write — it is a use-index the RUNTIME assigns to a finished name, "
-            f"with exactly one producer. Writing one here would alias the engine's own count for "
+            f"with exactly one producer. Writing one here would alias the walk's own count for "
             f"that name and serve its committed value to a different op. Name the identity "
             f"({name.rsplit(OCCURRENCE_SIGIL, 1)[0]!r}) and let the substrate count it."
         )

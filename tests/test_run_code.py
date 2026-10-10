@@ -25,7 +25,7 @@ from effective.handlers.absurd import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.layers import op_layer
 from effective.monty import CodeEngineError, MontyEngine, execute_tool
-from effective.ops import Step
+from effective.ops import Minted, Step
 from effective.permission import Refused
 
 # ---------------------------------------------------------------- engine unit
@@ -286,11 +286,9 @@ def test_run_code_threads_state_through_deterministic_op_keys():
     assert isinstance(action_step, Step)
     assert isinstance(action_step.op, CallTool)
     assert action_step.op.name == "send_email"
-    assert action_step.op.args == {
-        "args": ["approver@example.com"],
-        "kwargs": {},
-        "idempotency_key": "code:action,0,audit;tool:send_email",
-    }
+    # the action asks the handler for its idempotency key rather than carrying one
+    assert action_step.op.args == {"args": ["approver@example.com"], "kwargs": {}}
+    assert action_step.idempotency_key == Minted()
     # segment 2's args carry the threaded state — no handler pin-state anywhere
     seg1 = handler.trace[2].op
     assert isinstance(seg1, Step)
@@ -429,6 +427,11 @@ class _CodeInterp:
 def test_run_code_end_to_end_action_runs_exactly_once():
     from effective.contexts import LocalCtx
 
+    class TaskCtx(LocalCtx):
+        """An in-process run with a task, which an action's idempotency key is minted from."""
+
+        task_id = "report-task"
+
     sent: list[dict] = []
 
     def send_email(args: dict) -> dict:
@@ -436,9 +439,7 @@ def test_run_code_end_to_end_action_runs_exactly_once():
         return {"id": f"msg-{len(sent)}"}
 
     engine = MontyEngine(functions={"llm_query": lambda p: f"summary of {p}"})
-    handler = DurableHandler(
-        ctx=LocalCtx(), domain=_CodeInterp(engine, {"send_email": send_email})
-    )
+    handler = DurableHandler(ctx=TaskCtx(), domain=_CodeInterp(engine, {"send_email": send_email}))
 
     def wf():
         out = yield from run_code(
@@ -465,7 +466,7 @@ def test_run_code_end_to_end_action_runs_exactly_once():
         {
             "args": ["approver@example.com", "summary of sales"],
             "kwargs": {},
-            "idempotency_key": "code:action,0,report;tool:send_email",
+            "idempotency_key": "idempotency:report-task;step;code:action,0,report;tool:send_email",
         }
     ]
 

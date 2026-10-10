@@ -76,7 +76,7 @@ cascade's `AwaitEvent`, [`src/effective/permission.py`](../src/effective/permiss
 
 | you call | you get | note |
 |---|---|---|
-| `step(name, op)` | the step's result, replayed on re-execution | the workhorse. `op` is an inert `DomainOp` **value**, not a callable, which is what makes it recordable. Optional `idempotency_key`. The name is an **identity**, so it must be deterministic. An op stopped while it ran raises `OpCancelled` here; catch it in the scope that yielded the step |
+| `step(name, op)` | the step's result, replayed on re-execution | the workhorse. `op` is an inert `DomainOp` **value**, not a callable, which is what makes it recordable. `idempotency_key=Minted()` asks the handler to mint the tool's key from the task and the step's placement. The name is an **identity**, so it must be deterministic. An op stopped while it ran raises `OpCancelled` here; catch it in the scope that yielded the step |
 | `ask_llm(name, messages, schema)` | the model's response, parsed to `schema` | the first argument is the step **name** (an identity), not the prompt; `messages` carries the channel template, the data axis |
 | `call_tool(name, args, schema)` | the tool's result | accrues no spend today: the cost layer meters only `AskLLM`, so a budget test asserting a carry must use `ask_llm` |
 | `store_artifact(value, content_type)` | an artifact reference | for anything too big or too binary to sit in a checkpoint |

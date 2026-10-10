@@ -103,9 +103,7 @@ def test_await_and_attributes_delegate_unchanged():
 
 
 def test_seeding_is_occurrence_aware():
-    """A repeated op name is suffixed `name#k` by the engines below this seam, so the seed keys
-    carry the suffix while the handler passes the bare name each time. SeedingCtx counts
-    occurrences the same way, so each occurrence replays ITS OWN base value; replaying every
+    """Each occurrence of a repeated op name replays ITS OWN base value; replaying every
     occurrence with the first's silently diverges an agent-loop fork's prefix."""
     spy = _SpyCtx()
     ctx = SeedingCtx(
@@ -114,7 +112,7 @@ def test_seeding_is_occurrence_aware():
         fork_point=Key.parse("review:m1"),
     )
     assert ctx.step(Key.parse("extract"), lambda: "LIVE") == "first"
-    assert ctx.step(Key.parse("extract"), lambda: "LIVE") == "second"  # the 2nd occurrence -> #2
+    assert ctx.step(Key.parse("extract#2"), lambda: "LIVE") == "second"
     assert ctx.unconsumed() == frozenset()  # both occurrences consumed
 
 

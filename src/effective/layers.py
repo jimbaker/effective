@@ -236,10 +236,8 @@ def op_name_scope(name: Key) -> Iterator[None]:
     driver does, and it is re-entrant per layer, so a counter there would advance once per layer
     rather than once per op.
 
-    Minted ABOVE the stack, deliberately. The occurrence counter (`Key.occurrence`) is burned
-    BELOW it, at `ctx.step`, once per re-forward — which is why op-seam `retry` is unsound on the
-    durable engines. An ordinal minted here does not advance on a re-forward, because the
-    workflow yielded once."""
+    Minted ABOVE the stack, deliberately: an ordinal minted here does not advance on a re-forward,
+    because the workflow yielded once."""
     token = _OP_NAME.set(name)
     try:
         yield
@@ -265,13 +263,9 @@ def placement_scope(placement: Key) -> Iterator[None]:
     of `op_key`. This answers *which placed op is executing right now* — the frames, the op's own
     key, and the occurrence, together — and nothing substitutes it for anything.
 
-    **The substrate knew this and never said it**, which is the gap this closes. Frames are
-    applied by the handler (`_PrefixedCtx`, the one place), and the engine's `#N` is minted below
-    `ctx.step`, so a gather branch's full address existed only in the checkpoint store's key
-    column. Every consumer that needs *per-node* rather than *per-op* had to reconstruct it or go
-    without: the canonical ledger (two branches, one `event_id`, one row — the placed-writer
-    collision), a tool's idempotency token, and — the reason this is a substrate change rather
-    than a patch — value attribution, where a tree search has to say which node earned a score.
+    Every consumer that needs an address *per node* rather than *per op* reads it here: the
+    canonical ledger's writer (two branches, one `event_id`), a tool's idempotency key, and value
+    attribution, where a tree search has to say which node earned a score.
 
     One publication, several readers, because the alternative is several spellings of one address
     that drift apart; the fork scope token is the worked example of what that costs."""
@@ -342,40 +336,86 @@ def layer_run_state(key: Key) -> dict[str, Any]:
     return scope.setdefault(key, {})
 
 
+def close_under(gen: Generator[Any, Any, Any], unwinding: BaseException) -> None:
+    """Close a layer generator while `unwinding` passes it, which stays in flight.
+
+    | the layer's cleanup | then                                                         |
+    |---------------------|--------------------------------------------------------------|
+    | finishes            | the generator is closed                                      |
+    | raises              | its exception becomes a note on `unwinding`                  |
+    | yields an op        | the yield's `RuntimeError` becomes a note, and a second      |
+    |                     | close finishes the generator                                 |
+    """
+    for _ in range(2):
+        try:
+            gen.close()
+        except BaseException as cleanup:
+            unwinding.add_note(repr(cleanup))
+
+
+@contextmanager
+def closed_after(gen: Generator[Any, Any, Any]) -> Iterator[None]:
+    """Close a layer generator when the block ends, and under `close_under` when an exception
+    ends it."""
+    try:
+        yield
+    except BaseException as unwinding:
+        close_under(gen, unwinding)
+        raise
+    gen.close()
+
+
 def drive_through(
     layers: Sequence[Callable[[Any], Generator[Any, Any, Any]]],
     op: Any,
     base: Callable[[Any], Any],
+    *,
+    escapes: tuple[type[BaseException], ...] = (),
+    forwarding: Callable[[int, Any], None] | None = None,
 ) -> Any:
     """Run one `op` through the layer stack down to `base`, threading the result back.
 
-    Each layer is advanced to its `yield op`; the yielded (possibly rewritten) op
-    is forwarded inward; the result is sent back via `.send`; a downstream
-    exception is propagated into the layer's `yield` via `.throw` (so retry's
-    `try/except` works). A layer that returns before yielding (e.g. a refusal)
-    short-circuits cleanly.
+    Each layer is advanced to its `yield op`, and the op it yields (possibly rewritten) is
+    forwarded inward. A layer that returns before yielding (a refusal) answers the op itself.
+    What comes back from the layers below decides what this layer sees:
+
+    ```
+    the layers below
+    ├── return a result ────────────── sent into this layer's `yield`
+    ├── raise a member of `escapes` ── this layer is closed under it, and it goes on out
+    ├── raise another `Exception` ──── thrown into this layer's `yield`, which decides (`retry`)
+    └── raise a `BaseException` ────── this layer is closed under it, and it goes on out
+    ```
+
+    `escapes` holds the engine's signals: a park, a cancel, a run already failed.
+    `forwarding(level, op)` hears each op as it enters a level, `level` being the layers below it.
     """
+    if forwarding is not None:
+        forwarding(len(layers), op)
     if not layers:
         return base(op)
     head, *rest = layers
     gen = head(op)
-    try:
-        inner = gen.send(None)  # advance to the first `yield op`
-    except StopIteration as done:  # the layer returned without yielding (e.g. a refusal)
-        return done.value
-    while True:
+    with closed_after(gen):
         try:
-            result = drive_through(rest, inner, base)
-        except Exception as exc:  # propagate into the layer's yield; the layer decides
+            inner = gen.send(None)  # advance to the first `yield op`
+        except StopIteration as done:  # the layer returned without yielding (e.g. a refusal)
+            return done.value
+        while True:
             try:
-                inner = gen.throw(exc)
-            except StopIteration as done:
-                return done.value
-        else:
-            try:
-                inner = gen.send(result)
-            except StopIteration as done:
-                return done.value
+                result = drive_through(rest, inner, base, escapes=escapes, forwarding=forwarding)
+            except escapes:
+                raise
+            except Exception as exc:  # propagate into the layer's yield; the layer decides
+                try:
+                    inner = gen.throw(exc)
+                except StopIteration as done:
+                    return done.value
+            else:
+                try:
+                    inner = gen.send(result)
+                except StopIteration as done:
+                    return done.value
 
 
 # --- The two combinators ----------------------------------------------------
@@ -471,13 +511,12 @@ def retry(attempts: int = 2, on: type[Exception] = TransientError) -> OpLayer[An
     `attempts` retries → `attempts + 1` total tries. The `for` around `yield` is the
     second yield `@contextmanager` forbids and the harness wants.
 
-    SCOPE: sound on live/no-trace handlers, where it is proven. On the **durable engines it is
-    unsound under retry-then-crash**: a re-forward calls `ctx.step(name)` again, which burns the
-    occurrence counter (`absurd_sdk.begin_step` → `name#2`), so the retried success
-    commits under `name#2` and a later crash-replay looks up `name`, misses, and
-    re-executes the domain call live. For retry of *domain I/O* prefer `retry_domain`
-    (below the seam, one `ctx.step`, one occurrence). Op-seam retry keeps its role as the
-    multi-yield exemplar and for genuinely idempotent live-only ops.
+    A re-forward carries the op's placement, so on the durable engines a retried success is
+    checkpointed where its first try would have been, and a crash replay is served it. A
+    re-forward is the same op object yielded again; a layer that rebuilds the op before
+    re-yielding forwards it afresh.
+    `retry_domain` retries below the seam instead, inside one op interpretation, where the trace
+    and the trip see one call.
     """
 
     @op_layer
@@ -525,7 +564,7 @@ def retry_domain(
     transient failure, *inside one op interpretation*: invisible to checkpoints, the trace, the
     trip and the ledger. This is retry below the seam: because a replayed op never
     reaches the domain, it fires only on live calls, and because it lives under one `ctx.step`
-    it never touches the occurrence counter (the durable-engine unsoundness `retry` carries).
+    one checkpoint holds the call however many tries it took.
 
     Deliberately a separate `@domain_layer`-decorated def, NOT a factored shared body: the
     layer-authority lint keys on the decorator at the def site, and a domain-seam retry must

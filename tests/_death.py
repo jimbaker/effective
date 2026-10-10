@@ -103,17 +103,6 @@ class HeldUntilSettled:
 
         return self._ctx.step(name, waits)
 
-    def step_resolved(self, name: Key, thunk: Any) -> Any:
-        """`step`'s wait, for a step whose thunk is handed the name the engine resolved."""
-        if WINNER not in name.stored():
-            return self._ctx.step_resolved(name, thunk)
-
-        def waits(resolved: Key) -> Any:
-            assert self._started.wait(30), "the loser's first append never started"
-            return thunk(resolved)
-
-        return self._ctx.step_resolved(name, waits)
-
     def holding(self, ledger: Any) -> Any:
         """`ledger`, holding the loser's first append until the choice is settled."""
         return _HeldLedger(ledger, self._started, self._settled)

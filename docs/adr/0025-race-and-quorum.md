@@ -240,7 +240,7 @@ bounded as the table says:
 | answered an op | answers it the same way | replayed; no record is kept of a layer's answer |
 
 A domain's refusal is recorded (§9) and served on a later attempt without calling the domain, and
-the engine counts the served occurrence as it counted the refused call. A layer that injects an op
+the walk places the served occurrence as it placed the refused call. A layer that injects an op
 while handling one it then refuses needs no declared provenance until the first such layer is
 written; until then the rejection above covers it.
 

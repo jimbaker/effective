@@ -17,10 +17,8 @@ as an interface.
 fork point means the caller's `through` reached into the tail. A steer *is* that arm: there is no
 prefix to replay and no phase to cross, so the table here is two arms over `key ∈ steers`.
 
-**Occurrence-keyed, for the reason `SeedingCtx` documents**: a repeated op name is suffixed
-`name#k` by the engines *below* this seam, so a steer authored from a tape carries the suffix while
-the handler passes the bare `name` each time. This ctx counts the same way and passes the bare name
-down, so the inner ctx's own counter remains the thing that names the checkpoint.
+**Occurrence-keyed, for the reason `SeedingCtx` documents**: the handler names each occurrence of
+a repeated op `name#k`, which is the key a steer authored from a tape carries.
 
 **Two things this seam cannot check, both for one reason: it sees `(name, thunk)` and never the
 op.**
@@ -78,7 +76,6 @@ class SteeringCtx:
     def __init__(self, ctx: TaskContext, steers: Mapping[Key, Steer]) -> None:
         self._ctx = ctx
         self._steers = steers
-        self._occurrences: dict[Key, int] = {}
         self._applied: dict[Key, Segment] = {}
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
@@ -87,17 +84,11 @@ class SteeringCtx:
         Two arms over `key ∈ steers`, closed with `assert_never` — the substrate's states-as-data
         idiom, and what makes a third arm a type error rather than a silent fall-through.
         """
-        count = self._occurrences.get(name, 0) + 1
-        self._occurrences[name] = count
-        key = name.occurrence(count)
-        match self._steers.get(key):
+        match self._steers.get(name):
             case None:
                 return self._ctx.step(name, thunk)
             case Steer(value=value, by=by):
-                self._applied[key] = by
-                # The BARE `name`, not `key`: the inner ctx runs its own occurrence counter and is
-                # what names the checkpoint. Handing it the suffixed key would suffix it twice, and
-                # the resulting checkpoint would be one no replay ever binds to.
+                self._applied[name] = by
                 return self._ctx.step(name, lambda: value)
             case unreachable:
                 assert_never(
@@ -127,9 +118,6 @@ class SteeringCtx:
         return frozenset(self._steers) - frozenset(self._applied)
 
     def peek_step(self, name: Key, /) -> Never:
-        refuse_a_settled_checkpoint_under("SteeringCtx")
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Never:
         refuse_a_settled_checkpoint_under("SteeringCtx")
 
     def settle(self, name: Key, value: Any, /) -> Never:

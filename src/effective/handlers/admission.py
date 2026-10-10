@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from effective.choice import Choice
+from effective.layers import closed_after
 
 STEP_BUDGET = 0
 """Steps a stopped loser may take past its horizon: structures entered, or ops a layer yields
@@ -208,6 +209,7 @@ def drive_racing(
     *,
     new_work: Callable[[], None],
     stopped: tuple[type[BaseException], ...],
+    forwarding: Callable[[int, Any], None] | None = None,
 ) -> Any:
     """`layers.drive_through` for a race branch.
 
@@ -219,18 +221,22 @@ def drive_racing(
     | an op                                   | yields, while the op it admitted finishes   |
     | every layer generator is closed on exit | a stopped layer's `finally` runs            |
     """
+    if forwarding is not None:
+        forwarding(len(layers), op)
     if not layers:
         return base(op)
     head, *rest = layers
     gen = head(op)
-    try:
+    with closed_after(gen):
         try:
             inner = gen.send(None)
         except StopIteration as done:
             return done.value
         while True:
             try:
-                value = drive_racing(rest, inner, base, new_work=new_work, stopped=stopped)
+                value = drive_racing(
+                    rest, inner, base, new_work=new_work, stopped=stopped, forwarding=forwarding
+                )
             except stopped:
                 raise
             except Exception as raised:
@@ -244,8 +250,6 @@ def drive_racing(
                 except StopIteration as done:
                     return done.value
             new_work()
-    finally:
-        gen.close()
 
 
 def observed(value: Any) -> Any | None:

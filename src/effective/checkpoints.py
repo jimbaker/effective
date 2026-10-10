@@ -27,7 +27,7 @@ from uuid import UUID
 
 from effective.handlers.base import TraceEntry
 from effective.keys import Key, unframed
-from effective.keys.grammar import TAG_SEPARATOR, TERM_SEPARATOR
+from effective.keys.grammar import TAG_SEPARATOR, TERM_SEPARATOR, split_occurrence
 from effective.sql import bind
 from effective.sqlite import connect
 
@@ -137,6 +137,30 @@ row for its own suspension bookkeeping* (engine-specific — SQLite writes none 
 asks *does this row commit a Step's value* (engine-independent, and true of `ledger:` rows that
 are emphatically not bookkeeping). `sleep:` and `$awaitEvent:` satisfy both; neither list subsumes
 the other."""
+
+
+class SparsePrefix(ValueError):
+    """A step prefix holds an occurrence whose earlier occurrences it lacks: a layer refused the
+    earlier asks, which leave no checkpoint. A positional replay of it would hand a later ask's
+    value to an earlier ask, so it is refused."""
+
+
+def positional_key(name: str, seen: dict[Key, int]) -> Key:
+    """A step checkpoint's name without its occurrence, for a replay that indexes by position.
+
+    `seen` counts the occurrences read so far, per name, in commit order; an occurrence that is
+    not the next one raises `SparsePrefix`."""
+    base, occurrence = split_occurrence(name)
+    key = Key.parse(base)
+    count = seen.get(key, 0) + 1
+    if (occurrence or 1) != count:
+        raise SparsePrefix(
+            f"{name!r} is occurrence {occurrence or 1} of {base!r}, and the prefix holds "
+            f"{count - 1} before it: an earlier ask was refused and left no checkpoint, so a "
+            "positional replay would bind the wrong answer"
+        )
+    seen[key] = count
+    return key
 
 
 def is_step_checkpoint(name: str, markers: tuple[str, ...] = NON_STEP) -> bool:

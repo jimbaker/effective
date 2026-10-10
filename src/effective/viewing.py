@@ -52,7 +52,7 @@ from effective.handlers.base import TaskContext, framed_refusal_record, served_r
 from effective.keys import Key
 from effective.ops import WaitOutcome, settled_wait
 
-DELEGATED: frozenset[str] = frozenset({"peek_event", "concurrent_safe", "event_rename"})
+DELEGATED: frozenset[str] = frozenset({"peek_event", "concurrent_safe", "event_rename", "task_id"})
 """Ctx members a viewer may reach unchanged — every one a READ.
 
 An ALLOWLIST, and the shape is the argument. The obvious spelling is `__getattr__` delegating
@@ -119,15 +119,10 @@ class ViewingCtx:
     def __init__(self, ctx: TaskContext, tape: Collection[Key]) -> None:
         self._ctx = ctx
         self._tape = frozenset(tape)
-        self._occurrences: dict[Key, int] = {}
         self._reached: list[Key] = []
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         """Serve a recorded step; refuse one the tape does not have.
-
-        The occurrence count is kept here and the BARE `name` goes down, for the reason
-        `SteeringCtx` and `SeedingCtx` both document: the inner ctx runs its own counter and is
-        what names the checkpoint, so handing it a suffixed key would suffix it twice.
 
         | the tape holds                     | this                                          |
         |------------------------------------|-----------------------------------------------|
@@ -139,29 +134,19 @@ class ViewingCtx:
         self._reach(name)
         return self._ctx.step(name, thunk)
 
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        """`step`'s tape check, for a step whose thunk is handed the name the engine resolved."""
-        self._reach(name)
-        inner: Any = self._ctx
-        return inner.step_resolved(name, thunk)
-
     def _reach(self, name: Key) -> None:
-        """Count `name`'s occurrence and note what the tape holds for it, or raise
-        `OutranTheTape`."""
-        count = self._occurrences.get(name, 0) + 1
-        self._occurrences[name] = count
-        key = name.occurrence(count)
-        if key in self._tape:
-            self._reached.append(key)
+        """Note what the tape holds for `name`, or raise `OutranTheTape`."""
+        if name in self._tape:
+            self._reached.append(name)
             return
-        if (record := framed_refusal_record(key)) in self._tape and served_refusal(
+        if (record := framed_refusal_record(name)) in self._tape and served_refusal(
             self.peek_step(record)[1]
         ):
-            # A race branch's recorded refusal: its thunk raises it, and the inner ctx counts the
-            # occurrence without writing, so the next step of this name reads its own record.
+            # A race branch's recorded refusal: its thunk raises it and writes nothing, and the
+            # walk places the next ask of this name as the next occurrence, with its own record.
             self._reached.append(record)
             return
-        raise OutranTheTape(key)
+        raise OutranTheTape(name)
 
     def await_event(self, name: Key, /) -> Any:
         """Return an already-delivered payload; otherwise report the park.

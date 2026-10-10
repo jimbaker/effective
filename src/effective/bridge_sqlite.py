@@ -22,10 +22,9 @@ import sqlite3
 from uuid import UUID
 
 from effective.budget import BUDGET_GRANT_LIKE, Grant, names_a_budget_grant
-from effective.checkpoints import is_step_checkpoint
+from effective.checkpoints import is_step_checkpoint, positional_key
 from effective.fork import MeteredEntry
 from effective.keys import Key
-from effective.keys.grammar import split_occurrence
 from effective.parked import read_sqlite_parked_conn
 from effective.sql import bind
 
@@ -40,6 +39,7 @@ def export_measured_prefix(
     never sniffs a `{result, usage}` shape: that placement is the driver's, which holds the op
     class, and a content sniff here would disagree with it."""
     entries: list[MeteredEntry] = []
+    seen: dict[Key, int] = {}
     rows = conn.execute(
         *bind(t"SELECT name, state FROM checkpoints WHERE task_id={task_id} ORDER BY rowid")
     ).fetchall()
@@ -55,7 +55,7 @@ def export_measured_prefix(
         # cannot drift. `#0`, `#1` (which has no wire form) and `#02` are not occurrences: they
         # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
         # rather than being admitted as a Step.
-        key = Key.parse(split_occurrence(name)[0])  # name#2 → name (fork keys by raw op_key)
+        key = positional_key(name, seen)  # name#2 → name, refusing a gap
         entries.append(MeteredEntry(key=key, state=raw))
 
     grants: dict[Key, Grant] = {}

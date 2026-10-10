@@ -28,7 +28,13 @@ from effective.domain import SpawnArgs, Spawned
 from effective.govern import REFUSALS, ChildRefused
 from effective.handlers.base import Continued, Finished
 from effective.keys import Key, Run, compose_key
-from effective.ops import DONE_EVENT_PARAM, Addressing, Unretryable, leaves, unretryable
+from effective.ops import (
+    DONE_EVENT_PARAM,
+    Addressing,
+    Unretryable,
+    leaves,
+    unretryable,
+)
 
 
 def spawn_child(

@@ -1,7 +1,7 @@
 # ADR-0023: Test roles: what a test is for decides what its pass proves
 
 - **Date:** 2026-08-04
-- **Status:** Accepted. `pyproject.toml` registers five role markers under `--strict-markers`, a
+- **Status:** Accepted. `pyproject.toml` registers six role markers under `--strict-markers`, a
   test with no role is a `unit` test, and every other role is declared. The set is open: a new
   role is expected, with BDD a named candidate.
 - **Relates to:** [ADR-0016](0016-formalization-and-operational-semantics.md) (the three-tier proof partition; this names the test tier's internal
@@ -49,7 +49,7 @@ name now carries a per-run occurrence suffix, and
 `test_one_approval_does_not_authorize_a_second_charge_of_the_same_tool` ([`tests/test_permission.py`](../../tests/test_permission.py))
 pins it.
 
-## 3. The five roles
+## 3. The six roles
 
 | role | overlap with other roles | what a pass proves | obligation |
 |---|---|---|---|
@@ -58,6 +58,7 @@ pins it.
 | **journey** | deliberate | a realistic path works end to end | none |
 | **adversarial** | irrelevant | the attack failed, if the test could have failed | a mutation check |
 | **conformance** | by design, across arms | the implementations agree with the model | enroll every interpreter |
+| **property** | expected, with every test of the same function | a law holds over a generated domain | the corners its seeds reach, and a mutant only it detects |
 
 The discriminator is what overlap means and what a pass proves. Subject matter does not decide it:
 two roles may exercise the same code.
@@ -66,6 +67,13 @@ two roles may exercise the same code.
 their acceptance conditions are opposite. A journey confirms; an adversarial test falsifies. A
 journey that cannot fail is a broken journey; an adversarial test that cannot fail is
 indistinguishable from a passing one.
+
+`property` and `unit` share a subject, one function, and read overlap oppositely. A unit test's
+line of its own is its claim to exist; a property test drives every case through the same lines,
+so its claim is the corners its generated domain reaches and a mutant no other test detects. A
+`property` test drives one class or function directly; a sampled property (§4a) runs a workflow or
+combinator through a handler and keeps the journey or spine role. §4a's two rules and its corner
+test bind both.
 
 ## 4. The exemplars
 
@@ -81,6 +89,7 @@ indistinguishable from a passing one.
 | [`tests/test_projection.py`](../../tests/test_projection.py) | spine: the projections against the workflows above, since a quotient means something only over tapes a workflow produced |
 | [`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py) | adversarial: injectivity attacks |
 | [`tests/test_permission.py`](../../tests/test_permission.py) (the approval attack) | adversarial |
+| [`tests/test_reforward_replay_property.py`](../../tests/test_reforward_replay_property.py) | property: generated layer programs against the re-forward replay |
 
 Each declares its role with a marker. A workflow a test drives lives under `tests/`, as
 [`tests/_funnel.py`](../../tests/_funnel.py) does, so the determinism-boundary lint (whose `WORKFLOW_ROLE_SRCS` is
@@ -143,7 +152,7 @@ re-running `just formal-vectors`.
 Markers are registered in `pyproject.toml`, and `--strict-markers` refuses an unregistered one.
 A test that declares no role is a `unit` test: a collection hook in [`tests/conftest.py`](../../tests/conftest.py) marks it,
 so `-m unit` selects every test whose pass proves one seam in isolation, and a test that proves
-more declares `spine`, `journey`, `adversarial` or `conformance`. The default is the common case,
+more declares `spine`, `journey`, `adversarial`, `conformance` or `property`. The default is the common case,
 and the declaration marks the exception.
 
 `just cov-contexts` ([`scripts/cov_contexts.py`](../../scripts/cov_contexts.py), under `COVERAGE_CORE=pytrace`) records which test

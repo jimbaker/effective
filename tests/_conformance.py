@@ -1461,23 +1461,6 @@ class FaultCtx:
             case unreachable:
                 assert_never(unreachable)
 
-    def step_resolved(self, name, thunk):
-        """`step`'s fault, for a step whose thunk is handed the name the engine resolved."""
-        match self._f.position:
-            case FaultPosition.BEFORE_OP:
-                self._trip(name)
-                return self._ctx.step_resolved(name, thunk)
-            case FaultPosition.AFTER_THUNK:
-
-                def landed(resolved):
-                    result = thunk(resolved)
-                    self._trip(name)
-                    return result
-
-                return self._ctx.step_resolved(name, landed)
-            case unreachable:
-                assert_never(unreachable)
-
     def await_event(self, name):
         self._trip_before(name)
         return self._ctx.await_event(name)
@@ -1991,6 +1974,7 @@ class AbsurdBackend:
             "event_payload": None,
         }
         ctx = object.__new__(TaskContext)
+        ctx.task_id = str(task_id)  # as the SDK's own `_create_task_context` sets it
         ctx._conn = conn
         ctx._queue_name = "default"
         ctx._task = claimed

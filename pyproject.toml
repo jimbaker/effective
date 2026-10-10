@@ -115,6 +115,7 @@ markers = [
     "journey: a realistic path end to end; a pass means the path works",
     "adversarial: an attack — a pass means only that it FAILED, so this role owes a mutation check",
     "conformance: one model, many interpreters; overlap across arms is the design",
+    "property: a law over a generated domain; it owes the corners its seeds reach and a mutant only it detects",
 ]
 
 [tool.coverage.run]

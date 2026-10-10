@@ -127,39 +127,111 @@ def test_a_fork_refuses_to_settle(wrapper):
 
 
 @pytest.mark.parametrize("deployed", [False, True], ids=["concurrent-ctx", "deployed-ctx"])
-def test_step_resolved_hands_the_thunk_the_name_its_checkpoint_lands_under(backend, deployed):
-    """Reddens if the name handed to the thunk is not the one the checkpoint is written under, at
-    either occurrence, in a frame or out of one, or if a retry's hit runs the thunk."""
-    name, seen, calls = private("resolves"), list[Any](), list[str]()
+def test_a_step_forwarded_again_lands_at_its_name_and_a_completed_one_is_served(backend, deployed):
+    """A step that raised is forwarded again at the same name, and a step forwarded after it
+    completed is served its value: one checkpoint, at exactly the name handed down."""
+    name, calls = private("forwarded"), list[str]()
+    op = Key.parse("step;tool:a#2")
+
+    def thunk(value: str) -> Any:
+        def run() -> str:
+            calls.append(value)
+            if value == "raises":
+                raise RuntimeError("a transient failure")
+            return value
+
+        return run
+
+    def body(params: Any, ctx: Any) -> Any:
+        with pytest.raises(RuntimeError):
+            ctx.step(op, thunk("raises"))
+        return [ctx.step(op, thunk("first")), ctx.step(op, thunk("again"))]
+
+    backend.register_body(name, body, deployed=deployed)
+    task_id = backend.spawn(name, str(uuid4()))
+    snapshot = backend.run_until_result(task_id)
+    assert snapshot is not None
+    assert snapshot.state == "completed", snapshot
+    assert snapshot.result == ["first", "first"]
+    assert calls == ["raises", "first"]
+    assert backend.checkpoint_keys(task_id) == ["step;tool:a#2"]
+
+
+@pytest.mark.parametrize("deployed", [False, True], ids=["concurrent-ctx", "deployed-ctx"])
+def test_a_completed_step_serves_its_checkpoint_after_a_caller_changes_its_value(
+    backend, deployed
+):
+    """A value handed back to a caller is the caller's: changing it, top level or nested,
+    changes nothing a later forward of the step is served."""
+    name = private("detached")
+    op = Key.parse("step;tool:a")
+
+    def body(params: Any, ctx: Any) -> Any:
+        first = ctx.step(op, lambda: {"v": 1, "nested": {"w": 2}})
+        first["v"], first["nested"]["w"] = 999, 999
+        return [ctx.step(op, lambda: {"v": 0}), ctx.peek_step(op)[1]]
+
+    backend.register_body(name, body, deployed=deployed)
+    snapshot = backend.run_until_result(backend.spawn(name, str(uuid4())))
+    assert snapshot is not None
+    assert snapshot.state == "completed", snapshot
+    assert snapshot.result == [{"v": 1, "nested": {"w": 2}}] * 2
+
+
+@pytest.mark.parametrize("deployed", [False, True], ids=["concurrent-ctx", "deployed-ctx"])
+def test_a_step_value_with_no_json_form_is_refused_with_nothing_written(backend, deployed):
+    name = private("unencodable")
+    op = Key.parse("step;tool:a")
+
+    def body(params: Any, ctx: Any) -> Any:
+        with pytest.raises(TypeError):
+            ctx.step(op, lambda: {"v": object()})
+        return list(ctx.peek_step(op))
+
+    backend.register_body(name, body, deployed=deployed)
+    snapshot = backend.run_until_result(backend.spawn(name, str(uuid4())))
+    assert snapshot is not None
+    assert snapshot.state == "completed", snapshot
+    assert snapshot.result == [False, None]
+
+
+@pytest.mark.parametrize("deployed", [False, True], ids=["concurrent-ctx", "deployed-ctx"])
+def test_a_step_lands_under_the_name_it_is_handed(backend, deployed):
+    """Reddens if a checkpoint is written under any name but the one handed down, at either
+    occurrence, in a frame or out of one, or if a retry's hit runs the thunk."""
+    name, seen, calls = private("lands"), list[Any](), list[str]()
     op = Key.parse("step;tool:a")
 
     def body(params: Any, ctx: Any) -> Any:
         branch = _PrefixedCtx(ctx, gather_prefix(0, 1))
 
-        def thunk(resolved: Key) -> str:
-            calls.append(resolved.stored())
-            return resolved.stored()
+        def thunk(value: str) -> Any:
+            def run() -> str:
+                calls.append(value)
+                return value
+
+            return run
 
         handed = [
-            ctx.step_resolved(op, thunk),
-            ctx.step_resolved(op, thunk),
-            branch.step_resolved(op, thunk),
+            ctx.step(op, thunk("first")),
+            ctx.step(op.occurrence(2), thunk("second")),
+            branch.step(op, thunk("framed")),
         ]
         landed = [
-            ctx.peek_step(Key.parse(stored))[0]
+            ctx.peek_step(Key.parse(stored))
             for stored in ("step;tool:a", "step;tool:a#2", gather_prefix(0, 1) + "step;tool:a")
         ]
         seen.append(handed)
         if len(seen) == 1:
             raise RuntimeError("the worker dies after its steps")
-        return {"handed": handed, "landed": landed}
+        return {"handed": handed, "landed": [list(peeked) for peeked in landed]}
 
     backend.register_body(name, body, deployed=deployed)
     snapshot = backend.run_until_result(backend.spawn(name, str(uuid4()), max_attempts=2))
     assert snapshot is not None
     assert snapshot.state == "completed", snapshot
     assert snapshot.result == {
-        "handed": ["step;tool:a", "step;tool:a#2", "step;tool:a"],
-        "landed": [True, True, True],
+        "handed": ["first", "second", "framed"],
+        "landed": [[True, "first"], [True, "second"], [True, "framed"]],
     }
-    assert calls == ["step;tool:a", "step;tool:a#2", "step;tool:a"]
+    assert calls == ["first", "second", "framed"]

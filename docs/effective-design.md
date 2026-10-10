@@ -107,7 +107,7 @@ effect is entirely on the names inside it, and `Respawn` ends the task.
 ```python
 type Effect[T] = Generator[WorkflowOp, Any, T]
 
-def step[T](name: str, op: DomainOp[T], idempotency_key: str | None = None) -> Effect[T]:
+def step[T](name: str, op: DomainOp[T], idempotency_key: Minted | None = None) -> Effect[T]:
     raw = yield Step(name=name, op=op, idempotency_key=idempotency_key)
     return cast(T, raw)
 ```
@@ -743,9 +743,9 @@ flowchart TD
 ```
 
 The discriminator is precise: **only PARK is the op seam's exclusive authority.** Raising is
-available at both. Op-seam retry is unsound on the durable engines, because `begin_step` burns the
-per-run occurrence counter unconditionally, so a retry-then-crash commits under `name#2` and replay
-re-executes the call live. `retry_domain` is the domain twin that is sound.
+available at both. Op-seam retry re-forwards the op at its placement, so the durable engines
+checkpoint a retried success where its first try would have been; `retry_domain` is its domain
+twin, whose tries are one op to the trace and the ledger.
 
 **`govern` is built, conformance-tested and unadopted**, and a reimplementer should know that
 before copying it. Its *types* are used throughout (`permission.py` and `budget.py` both import

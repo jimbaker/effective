@@ -139,13 +139,11 @@ the layer with the recorded answer folded in, and never resumes a captured layer
 
 ### Retry at each seam
 
-`retry` (op seam) is proven on a context that keeps no durable checkpoints
-(`test_retry_op_layer_recovers_a_flaky_step_through_the_handler`). On the durable engines it is unsound
-under retry-then-crash: a re-forward calls `ctx.step(name)` again, which advances the engine's
-occurrence counter, so the retried success commits under `name#2` and a crash-replay that looks
-up `name` re-executes the call. Retry of domain I/O therefore uses `retry_domain`, which
-re-invokes the call inside one `ctx.step` and is invisible to checkpoints, the trace and the
-ledger. A `RateLimited` (429) is retried only when a `backoff` is configured, so an immediate
+`retry` (op seam) re-forwards its op, and the re-forward carries the op's placement, so on the
+durable engines a retried success is checkpointed where its first try would have been and a
+crash replay is served it (`test_op_seam_retry_then_crash_calls_the_domain_once_per_try`). Retry
+of domain I/O uses `retry_domain`, which re-invokes the call inside one `ctx.step` and is
+invisible to checkpoints, the trace and the ledger. A `RateLimited` (429) is retried only when a `backoff` is configured, so an immediate
 re-fire on a rate limit cannot be spelled.
 
 ## Consequences

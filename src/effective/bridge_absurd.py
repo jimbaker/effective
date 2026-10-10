@@ -29,10 +29,10 @@ from effective.checkpoints import (
     Checkpoint,
     is_engine_internal,
     is_step_checkpoint,
+    positional_key,
 )
 from effective.fork import MeteredEntry
 from effective.keys import Key
-from effective.keys.grammar import split_occurrence
 
 # Queries use PEP 750 t-strings (psycopg ≥ 3.3): `{table:i}` is a safely-quoted identifier,
 # `{value}` a bound parameter — the whole query structure stays inline (no split format()+params).
@@ -44,6 +44,7 @@ def export_measured_prefix(
     """Export a parked measured run's prefix + delivered grants. Feed both to `measured_drive`."""
     c_tbl = f"c_{queue}"
     entries: list[MeteredEntry] = []
+    seen: dict[Key, int] = {}
     rows = _committed(conn, task_id, queue)
     steps = [(name, state, at) for name, state, at in rows if is_step_checkpoint(name)]
     _refuse_ambiguous_order(steps, task_id, c_tbl, "the positionally-indexed prefix")
@@ -59,7 +60,7 @@ def export_measured_prefix(
         # cannot drift. `#0`, `#1` (which has no wire form) and `#02` are not occurrences: they
         # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
         # rather than being admitted as a Step.
-        key = Key.parse(split_occurrence(name)[0])  # name#2 → name (fork keys by raw op_key)
+        key = positional_key(name, seen)  # name#2 → name, refusing a gap
         entries.append(MeteredEntry(key=key, state=state))
 
     # `payload IS NOT NULL` selects only DELIVERED grants: an Absurd park writes a pending-await

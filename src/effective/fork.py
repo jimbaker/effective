@@ -51,9 +51,9 @@ from effective.counterfactual import (
     genesis_row,
     sealed_row,
 )
-from effective.domain import DomainOp, Spawned
+from effective.domain import SPAWN_TOOL, CallTool, DomainOp, Spawned
 from effective.engines.absurd import _adapt_ctx
-from effective.govern import BudgetRefused
+from effective.govern import BudgetRefused, Refused
 from effective.handlers.absurd import (
     DurableHandler,
     LedgerWriter,
@@ -69,6 +69,7 @@ from effective.handlers.absurd import (
 from effective.handlers.base import (
     TaskContext,
     TraceEntry,
+    keyed_call,
     op_key,
     placed_await_name,
     placed_key,
@@ -365,8 +366,8 @@ def _live_loop(
             tail.result = done.value
             return tail
         match op:
-            case Step(op=inner):
-                result, usage = domain.run_metered(inner)
+            case Step():
+                result, usage = _run_live(op, domain)
                 tail.usage = tail.usage + usage
                 tail.trace.append(TraceEntry(op_key(op).prefixed(prefix), op, result))
                 send = result
@@ -521,6 +522,28 @@ class MeasuredTail:
 # the same way — pinned by `test_prefix_is_step_indexed_like_the_bridge_exports_it`.
 
 
+def _run_live(op: Step[Any], domain: MeteredDomain) -> tuple[Any, Usage]:
+    """A step an in-process driver runs live. The driver has no task, so a step that asks for
+    an idempotency key is refused, as the durable handler refuses one outside a task, and so is a
+    spawn, which is named by its task; a key the handler did not mint is refused as the handler
+    refuses it."""
+    match op.op:
+        case CallTool(name=name) if name == SPAWN_TOOL:
+            raise Refused(
+                op,
+                "a spawn is named by its task and placement, and an in-process fork has no task",
+            )
+        case _:
+            pass
+    if keyed_call(op, op.op) is not None:
+        raise Refused(
+            op,
+            "an idempotency key is minted from the task and the step's placement, and an "
+            "in-process fork has no task",
+        )
+    return domain.run_metered(op.op)
+
+
 def _step_result(
     op: Step[Any], prefix: list[MeteredEntry], i: int, domain: MeteredDomain
 ) -> tuple[Any, Usage, bool]:
@@ -530,7 +553,7 @@ def _step_result(
     The prefix decode is placed AT THE OP, never by the bridge, which cannot know the op
     class."""
     if i >= len(prefix):
-        return (*domain.run_metered(op.op), True)
+        return (*_run_live(op, domain), True)
     entry = prefix[i]
     if entry.key != op_key(op):
         raise ReplayMismatch(f"measured prefix divergence at {i}: {op_key(op)!r}")

@@ -5,13 +5,12 @@ The **shaping** layer between a reader and a renderer. The readers (`checkpoints
 is the child join, the cost sum, the parked-to-state mapping and the frame split: each is a small
 decision that belongs to no reader, and without this layer each pane makes it independently.
 
-**That gap is where drift lives**, and the repo has three instances of the shape:
+**That gap is where drift lives**, and the repo has instances of the shape:
 
 | one side                                          | disagrees with                             |
 |---------------------------------------------------|--------------------------------------------|
 | `telemetry` mints `f"{prefix}.{i}.message.role"`  | a reader hard-codes `llm.input_messages.…` |
 | `bridge_*._decode_state` sniffs `{result, usage}` | `metered_call` owns that shape             |
-| `AbsurdHandler._place` counts one way             | the engines count another                  |
 
 A one-line fix applied where a maintainer would naturally make it, in the pane in front of them,
 leaves two renderers disagreeing silently, with no error on either side.

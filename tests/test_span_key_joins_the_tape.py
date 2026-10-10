@@ -107,26 +107,12 @@ def refused_then_retried_wf(run_id: str):
     return {"second": (yield from call_tool("a", {}, int))}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="`_place` counts every op routed through the op-layer stack; the engines count "
-    "only ops reaching `ctx.step`. A layer that short-circuits desynchronizes them permanently "
-    "for that name; the fix is to unify the placement minters.",
-)
 def test_no_span_addresses_a_node_the_tape_lacks_when_a_layer_SHORT_CIRCUITS(backend):
-    """The same assertion as above, over the composition the file above never walks.
+    """The same assertion as above, over a layer that refuses an op before the engine sees it.
 
-    **This file's docstring claims the empty right-orphan set "catches the entire class *someone
-    added a second address minter*".** There are already two, and they agree only on the path the
-    happy-path workflow takes. `AbsurdHandler._place` is evaluated BEFORE `drive_through(...)`, so
-    it burns an occurrence for an op the layer stack refuses; `permission.cascade`'s `Deny` arm
-    raises `Refused` without ever forwarding, so `ctx.step`, where the engines keep their own
-    counter, is never called. The retry then commits as `step;tool:a` while its span says
-    `step;tool:a#2`.
-
-    **Pinned rather than fixed.** Joining `_place`'s counter against a second bookkeeper, the
-    span, turns a disagreement that only ever had to agree with itself into a wrong number on a
-    dashboard; the fix is to unify the placement minters.
+    `permission.cascade`'s `Deny` arm raises `Refused` without forwarding, so the first ask writes
+    no checkpoint. The walk placed it all the same, so the retry is the name's second occurrence,
+    and its span and its checkpoint both say `step;tool:a#2`.
 
     Pinned with the SHIPPED cascade rather than a bespoke short-circuiting layer, because the
     question a reader will ask is whether this reaches production, and the answer is that this is
@@ -153,3 +139,4 @@ def test_no_span_addresses_a_node_the_tape_lacks_when_a_layer_SHORT_CIRCUITS(bac
     assert addressed - set(tape) == set(), (
         f"a span addresses a node the tape does not have: {addressed - set(tape)}; tape={tape}"
     )
+    assert addressed == {"step;tool:a#2"}, addressed

@@ -313,17 +313,11 @@ def _shape_space() -> Effect[str]:
 
 
 def _assert_fidelity(handed: list[Key], stored: list[str]) -> None:
-    """Every stored name is the handed name, modulo the occurrence the ENGINE assigns.
-
-    The occurrence is stripped with `grammar.split_occurrence` rather than a regex, so this
-    exercises the one reader instead of adding a second — the defect the bridges still carry.
-    """
+    """Every stored name is exactly the handed name, its occurrence included."""
     assert stored, "nothing was written, so this proved nothing"
-    assert [split_occurrence(s)[0] for s in stored] == [k.stored() for k in handed]
-    # ANTI-VACUITY: the repeat really did get disambiguated, so the strip above did work.
-    assert any(s.endswith("#2") for s in stored), stored
-    # and the suffix is the ONLY difference — no name was silently rewritten
-    assert stored != [k.stored() for k in handed]
+    assert stored == [k.stored() for k in handed]
+    # ANTI-VACUITY: the repeat reached the engine as its own occurrence.
+    assert any(split_occurrence(s)[1] == 2 for s in stored), stored
 
 
 def test_sqlite_stores_EXACTLY_the_names_the_substrate_handed_down(

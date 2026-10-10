@@ -23,12 +23,22 @@ from effective.keys.grammar import TERM_SEPARATOR, KeySyntaxError, parse
 
 
 @dataclass(frozen=True)
+class Minted:
+    """Asks the handler for a step's idempotency key, minted from the task and the step's
+    placement and handed to the tool in its args under `idempotency_key`.
+
+    A receiver that remembers the key performs the step's effect once, however often a crash
+    re-runs the call: this task's engine always, and an outside service for as long as it keeps
+    the key."""
+
+
+@dataclass(frozen=True)
 class Step[T]:
     """Run a domain operation as a durable, checkpointed step."""
 
     name: str
     op: DomainOp[T]
-    idempotency_key: str | None = None
+    idempotency_key: Minted | None = None
 
 
 class Addressing(Enum):

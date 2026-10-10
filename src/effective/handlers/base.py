@@ -44,7 +44,8 @@ from pydantic_core import to_jsonable_python
 from effective.api import Effect
 from effective.choice import Choice, Ending, Raised, Refusal, Stopped, Unchosen, Won, decide
 from effective.cost import Usage
-from effective.govern import all_refusals
+from effective.domain import SPAWN_TOOL, CallTool, DomainOp
+from effective.govern import Refused, all_refusals
 from effective.keys import (
     FramePosition,
     Key,
@@ -65,6 +66,7 @@ from effective.ops import (
     AppendLedgerRow,
     AwaitEvent,
     Gather,
+    Minted,
     Race,
     Respawn,
     Scoped,
@@ -466,6 +468,45 @@ def placed_key(op: WorkflowOp) -> Key:
         raise
 
 
+def keyed_call(op: Step[Any], inner: DomainOp[Any]) -> CallTool[Any] | None:
+    """The tool call whose args take a minted key, `None` when the step needs none, and a
+    refusal for a key nobody but the handler may write. `idempotency_key` is reserved in every
+    tool call's args.
+
+    | the step asks | the call                       | answer                              |
+    |---------------|--------------------------------|-------------------------------------|
+    | a string      | any                            | refused                             |
+    | anything      | a spawn                        | `None`: `_spawn_request` keys every |
+    |               |                                | spawn and refuses a supplied one    |
+    | anything      | a tool call whose args name it | refused, whatever the value         |
+    | nothing       | any other                      | `None`                              |
+    | `Minted()`    | a tool call                    | the call                            |
+    | `Minted()`    | a model call                   | refused: it has no args             |"""
+    match op.idempotency_key, inner:
+        case str() as supplied, _:
+            raise Refused(
+                op, f"an idempotency key is minted by the handler, not supplied: {supplied!r}"
+            )
+        case _, CallTool(name=name) if name == SPAWN_TOOL:
+            return None
+        case _, CallTool(args={"idempotency_key": supplied}):  # the name is reserved
+            raise Refused(
+                op, f"an idempotency key is minted by the handler, not by its args: {supplied!r}"
+            )
+        case None, _:
+            return None
+        case Minted(), CallTool() as call:
+            return call
+        case Minted(), _:
+            raise Refused(
+                op,
+                f"an idempotency key reaches a tool through its args, and "
+                f"{type(inner).__name__} has none",
+            )
+        case unreachable:
+            assert_never(unreachable)
+
+
 @runtime_checkable
 class Handler(Protocol):
     def run[T](self, program: Callable[[], Effect[T]]) -> Any: ...
@@ -497,6 +538,11 @@ class BranchRaised:
 class BranchStopped:
     """A branch that stopped at an op admission because a race's saved choice names it a loser,
     held as the branch's slot like `BranchRaised`."""
+
+
+class EngineSignal(Exception):
+    """An engine's signal that ends the walk at an op: a park, a cancel, a run already failed. It
+    unwinds to the task boundary past every layer."""
 
 
 class Stopping(Exception):
@@ -927,11 +973,6 @@ class TaskContext(Protocol):
     reached, so a replay serves it and an event landing after an expiry leaves that expiry
     standing: a wait with two possible answers has to say which one it gave. A ctx without this
     meets a named refusal (``DurableHandler._await_bounded``) rather than a dropped deadline.
-
-    **Optional capability: ``step_resolved(name: Key, thunk: Callable[[Key], Any]) -> Any``**
-    (discovered the same way): ``step``, with the thunk handed the name the checkpoint lands
-    under, occurrence suffix included, in the caller's coordinates. A race branch's guard reads
-    the refusal record at that name before calling the domain.
     """
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:

@@ -23,7 +23,7 @@ from effective.fork import OpIndex, fork_at, measured_drive, replay_prefix
 from effective.handlers.absurd import DurableHandler
 from effective.handlers.base import TraceEntry, op_key
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Key, Run, Segment, compose_key
+from effective.keys import Index, Key, Run, Segment, compose_key
 from effective.ops import LedgerRow, Step
 from effective.permission import APPROVE, Allow, Escalate, cascade, human, rules
 
@@ -261,10 +261,11 @@ def test_a_measured_drive_asks_the_second_entry_for_its_own_grant(nested):
 # --- one handler run per claim --------------------------------------------------------------
 
 
-def test_a_second_handler_run_over_one_claim_is_kept_apart_only_by_the_engine(backend):
+@pytest.mark.parametrize("adapted", [True, False], ids=["one-adapter", "an-adapter-per-run"])
+def test_a_second_handler_run_over_one_claim_is_served_the_first(backend, adapted):
     """A handler run is one claim's walk. A second run over the same ctx restarts the handler's
-    counts, so it places its ops as the first did; the engine's per-claim count is what keeps their
-    checkpoints apart, and both runs' effects happen."""
+    counts, so it places its ops as the first did and is served the first run's checkpoints,
+    whether the two runs share one adapter or each handler adapts the engine's ctx itself."""
     task, domain = private("two-runs"), Counting()
 
     def body(params, ctx):
@@ -272,10 +273,35 @@ def test_a_second_handler_run_over_one_claim_is_kept_apart_only_by_the_engine(ba
         second = DurableHandler(ctx, domain).run(lambda: call_tool("a", {}, int))
         return [first, second]
 
+    if adapted:
+        backend.register_body(task, body)
+    else:
+        backend.app.register_task(task)(body)
+    task_id = backend.spawn(task, str(uuid4()))
+    snapshot = backend.run_until_result(task_id)
+
+    assert snapshot.state == "completed", snapshot
+    assert snapshot.result == [1, 1]
+    assert backend.checkpoint_keys(task_id) == ["step;tool:a"]
+
+
+def test_two_handler_runs_over_one_claim_are_kept_apart_by_their_scopes(backend):
+    """Two walks over one claim that each run under a scope of their own place their ops apart,
+    and both effects happen."""
+    task, domain = private("two-scoped-runs"), Counting()
+
+    def body(params, ctx):
+        return [
+            DurableHandler(ctx, domain).run(
+                lambda n=n: scoped(compose_key(t"run:{Index(n)}"), lambda: call_tool("a", {}, int))
+            )
+            for n in (0, 1)
+        ]
+
     backend.register_body(task, body)
     task_id = backend.spawn(task, str(uuid4()))
     snapshot = backend.run_until_result(task_id)
 
     assert snapshot.state == "completed", snapshot
     assert snapshot.result == [1, 2]
-    assert sorted(backend.checkpoint_keys(task_id)) == ["step;tool:a", "step;tool:a#2"]
+    assert sorted(backend.checkpoint_keys(task_id)) == ["run:0;step;tool:a", "run:1;step;tool:a"]

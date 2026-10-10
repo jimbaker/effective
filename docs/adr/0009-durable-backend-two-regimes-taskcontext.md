@@ -61,7 +61,7 @@ the docstrings are the contract the conformance suite pins:
 
 Names are `Key`s, never `str`: a checkpoint name and a park name are what replay binds to, so an
 f-string there is a `ty` error. Further capabilities (`peek_event`, `repark`, `await_until`,
-`peek_step`, `settle`, `step_resolved`, `concurrent_safe`) are optional and discovered by
+`peek_step`, `settle`, `concurrent_safe`) are optional and discovered by
 `getattr`, so a minimal test ctx stays small and a ctx lacking one meets a named refusal.
 
 ### 3. The SQLite side is an engine, and there is no SQLite handler

@@ -21,7 +21,7 @@ from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, Spawned, SpawnResult
 from effective.fork import spawn_fork
 from effective.govern import Refused
-from effective.handlers.absurd import DurableHandler, respawn_name, spawned_name
+from effective.handlers.absurd import DurableHandler, idempotency_key_for, respawn_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, compose_key
 from effective.ops import Writer
@@ -139,7 +139,7 @@ def test_a_respawn_that_lands_before_its_checkpoint_enqueues_one_successor(backe
     assert not fault.armed, "the crash never fired, so this pinned nothing"
     assert len(backend.enqueued(chain_task)) == 2
     placed = Writer(task=str(first), placement=respawn_name(run, 1))
-    assert set(names) == {spawned_name(placed).stored()}
+    assert set(names) == {idempotency_key_for(placed).stored()}
 
 
 @pytest.mark.parametrize(

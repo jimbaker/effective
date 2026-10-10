@@ -22,10 +22,9 @@ layer may yield more than once, so a `for` or `while` around `yield op` is retry
 | domain | `@domain_layer` | `DomainOp` | call-scoped | cannot alter control flow |
 
 Two facts make the split structural. Permission and the budget trip are one pattern: a
-`Proceed | Park | Refuse` transition with a durable await. And retry on the op seam is unsound on
-the durable engines: Absurd's `begin_step` advances the per-run occurrence counter on every
-attempt, so a retry followed by a crash commits under `name#2` and replay re-executes the call
-live. Retry belongs below the checkpoint, on the domain seam.
+`Proceed | Park | Refuse` transition with a durable await. And retry of domain I/O belongs below
+the checkpoint, on the domain seam, where its tries are one op to the trace, the trip and the
+ledger.
 
 ## Decision
 

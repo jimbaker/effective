@@ -1328,37 +1328,17 @@ def test_durable_run_code_in_gather_crash_resume(backend):
     assert len(domain.action_calls) == 2  # exactly once per branch, across the crash
 
 
-@pytest.mark.xfail(
-    reason="`run_code` composes the action's `idempotency_key` in the WORKFLOW, from (run_code "
-    "name, action index, tool) only — so two gather branches hand the tool the identical token "
-    "`code:action,0,c;tool:send_email` while their checkpoints are correctly disjoint "
-    "(`gather:0,0;step;…` vs `gather:0,1;…`). The frames are handler-side and invisible at the "
-    "composition site, which is the same shape `api.qualified_event_name` exists to fix on the "
-    "event axis. No fix is pinned here because the placed identity is not reachable where the "
-    "token is built: `current_op_name()` is None at the domain boundary, and the fully placed "
-    "name is first known inside `ctx.step`, below it — so publishing it is a substrate change "
-    "across all interpreters, not a patch to `code.py`. Strict, so the day it is fixed this "
-    "fails as an unexpected pass instead of quietly becoming true.",
-    strict=True,
-)
 def test_two_gather_branches_hand_an_action_tool_distinct_idempotency_keys(backend):
-    """Exactly-once for an action tool that dedupes on the token, under gather.
-
-    `run_code`'s docstring promises that "an action tool that dedupes on it achieves true
-    exactly-once". Inside a gather that promise is false in the direction that costs money: two
-    branches request the same action, the tool sees one token, and a deduping tool sends one
-    email where the workflow asked for two. The checkpoints are already disjoint, and
-    `CodeActionDomain` ignores the key, so nothing else in the suite notices.
-    """
+    """Exactly-once for an action tool that dedupes on its key, under gather: two branches
+    requesting the same action hand the tool two keys, one per branch, so a deduping tool sends
+    two emails where the workflow asked for two."""
     _, domain, _, _, _ = _run_code_run(backend, factory=gather_run_code_wf)
-    tokens = [call["idempotency_key"] for call in domain.action_calls]
-    # ONE assertion, and deliberately not an arity check alongside it. A strict xfail is
-    # satisfied by ANY failure, so a second assertion here would let an unrelated regression
-    # (a double-fire: three action calls where two are expected) masquerade as the
-    # expected failure and keep this green. Arity is pinned where it can actually fail:
-    # `test_durable_run_code_in_gather_keys_disjoint` and `..._in_gather_crash_resume` both
-    # assert `len(domain.action_calls) == 2`.
-    assert len(set(tokens)) == 2, f"both branches deduped to one token: {tokens}"
+    keys = sorted(call["idempotency_key"] for call in domain.action_calls)
+    # each key carries its own branch's frame
+    assert [(";gather:0,0;" in k, ";gather:0,1;" in k) for k in keys] == [
+        (True, False),
+        (False, True),
+    ], keys
 
 
 def test_durable_run_code_duplicate_names_agree_across_engines(backend):
@@ -1689,27 +1669,14 @@ def test_a_flaky_metered_service_recovers_under_serve_on_both_engines(backend):
     assert len(base.calls) == 3  # ...and exactly three calls were CHARGED, not five
 
 
-@pytest.mark.xfail(
-    reason="op-seam `retry` is UNSOUND under retry-then-crash on occurrence-suffixing engines: "
-    "the re-forward calls ctx.step(name) again, burning the occurrence counter, so the retried "
-    "success commits under `name#2` while a crash-replay looks up `name`, misses, and "
-    "re-executes the domain call live. Documented in `retry`'s docstring; `retry_domain` "
-    "is the sound seam. This pin guards the window so the day the engines stop suffixing, or "
-    "the layer starts reusing the occurrence, it fails LOUDLY as "
-    "an unexpected pass rather than silently becoming true.",
-    strict=True,
-)
-def test_op_seam_retry_then_crash_re_executes_the_domain(backend):
-    """The unsoundness, executed rather than asserted in prose.
-
-    A flaky first attempt makes op-seam `retry` re-forward the Step; the retried success commits
-    under a SUFFIXED checkpoint name. A crash after that point replays, looks up the UNsuffixed
-    name, misses, and calls the domain again — so the domain sees the op more times than the
-    workflow yielded it. Exactly-once is what fails; `xfail(strict)` is the ratchet."""
+def test_op_seam_retry_then_crash_calls_the_domain_once_per_try(backend):
+    """A flaky first try makes op-seam `retry` re-forward the Step, which lands at the step's own
+    placement. A crash after the retried success commits replays and is served it, so the domain
+    sees one call per try and none from the replay."""
     domain = CountingDomain(flaky=True)
     run_id = f"rtc-{uuid4().hex[:8]}"
     name = f"retry-crash-{run_id}"
-    # Crash right after the retried step commits, forcing a replay across the suffixed name.
+    # Crash right after the retried step commits, forcing a replay that must find it.
     backend.register(name, two_step_wf, domain, Fault(k=3), (retry(2),))
     task_id = backend.spawn(name, run_id)
 

@@ -45,7 +45,7 @@ graph LR
   end
 ```
 
-`ask#2` is a different node from `ask` because the engine named it that way, and it named it that
+`ask#2` is a different node from `ask` because the walk named it that way, and it named it that
 way because replay has to re-derive the same name. The repeated task is the same shape, and each
 instance is its own node: the graph looks cyclic because it does the same set of tasks repeatedly.
 

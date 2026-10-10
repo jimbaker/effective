@@ -465,7 +465,7 @@ class Witness:
         from effective.handlers import absurd, recording
 
         def driving(original: Callable[..., Any]) -> Callable[..., Any]:
-            def drive_through(op_layers, op, base):
+            def drive_through(op_layers, op, base, **options):
                 names = tuple(layer_name(layer) for layer in op_layers)
                 drive = Drive(
                     op=op,
@@ -476,7 +476,7 @@ class Witness:
                 )
                 token = _DRIVE.set((*_DRIVE.get(), drive))
                 try:
-                    return original(op_layers, op, Forwarding(drive, base, sites))
+                    return original(op_layers, op, Forwarding(drive, base, sites), **options)
                 finally:
                     _DRIVE.reset(token)
                     sites.clear()
@@ -537,10 +537,10 @@ class Witness:
 
         record_ledger = delegating(original_record)
 
-        def durable_record_ledger(handler, row):
+        def durable_record_ledger(handler, row, writer):
             if handler.ledger is None:  # the no-commit mode: a checkpoint, no append
-                return original_record(handler, row)
-            return record_ledger(handler, row)
+                return original_record(handler, row, writer)
+            return record_ledger(handler, row, writer)
 
         self._patch(SqliteLedger, "append", self._store_sensor(original_sqlite))
         self._patch(ForkLedger, "append", delegating(original_fork))

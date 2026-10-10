@@ -35,6 +35,7 @@ from effective.ops import (
     AwaitEvent,
     Gather,
     LedgerRow,
+    Minted,
     Race,
     Respawn,
     Scoped,
@@ -49,7 +50,7 @@ from effective.ops import (
 type Effect[T] = Generator[WorkflowOp, Any, T]
 
 
-def step[T](name: str, op: DomainOp[T], idempotency_key: str | None = None) -> Effect[T]:
+def step[T](name: str, op: DomainOp[T], idempotency_key: Minted | None = None) -> Effect[T]:
     """The `Step` primitive, typed: every domain op reaches its handler through here.
 
     A cancelled op raises `OpCancelled` here, whichever handler recorded it."""

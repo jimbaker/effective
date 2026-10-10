@@ -128,8 +128,8 @@ def activate_skill(name: str) -> Effect[Pin]:
     """Activation as a recorded, namespaced step: ``skill:{name},activate``.
 
     **Each call is its own pin event** — activate once and thread the pin. On
-    the durable engine a duplicate same-named step gets an occurrence-suffixed
-    checkpoint key (the SDK's ``name#2``), so a second activation performs a
+    the durable engines a duplicate same-named step gets an occurrence-suffixed
+    checkpoint key (``name#2``), so a second activation performs a
     fresh disclose — an unnamed refresh, deterministic on replay but a new pin.
     (The in-memory ``RecordingHandler`` cans responses by name and would hand
     back the same value — don't lean on that divergence.) A deliberate,

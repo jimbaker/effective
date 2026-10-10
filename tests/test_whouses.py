@@ -203,7 +203,8 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `telemetry._guarded` reads a hole's value, expression, conversion and spec to rebuild it.
     # `lint.check_sdk_private_source` reads an attribute's receiver and name, and an import's
     # module and names.
-    assert reached == 250, f"the corpus this fix was measured on held 250; found {reached}"
+    # `DurableHandler._keyed` reads a tool call's name and args.
+    assert reached == 254, f"the corpus this fix was measured on held 254; found {reached}"
 
     seen = {
         (str(p), line + 1)

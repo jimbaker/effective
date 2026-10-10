@@ -14,12 +14,11 @@ replay-trace key for one op are the same string by construction. (A ``Step`` kee
 author name; the other arms carry their reserved tag, and a Step name that lands in a reserved
 namespace is rejected by ``op_key``.)
 
-**Scope:** ``op_key`` is the single producer, and *duplicate-occurrence identity* is decided per
-engine BELOW it. The Absurd SDK and the SQLite ctx suffix a second same-named step ``name#2``
-(and the durable step re-executes it); the recording core is **positional** (no suffix; a
-re-yielded name re-serves the first occurrence's canned value). So the same-string guarantee
-holds for first occurrences, and at occurrence 2 and above the two sides diverge by
-construction: a *named* divergence, which the bridges normalize through
+**Occurrences:** the walk counts a repeated name (``DurableHandler._place``) and hands the engine
+``name#2``, which the engine checkpoints at exactly that name. The recording core is
+**positional** (no suffix; a re-yielded name re-serves the first occurrence's canned value). So
+the same-string guarantee holds for first occurrences, and at occurrence 2 and above the two
+sides diverge by construction: a *named* divergence, which the bridges normalize through
 ``grammar.split_occurrence`` for ``measured_drive``'s positional keying.
 
 Absurd checkpoints are JSON, so a step result round-trips through ``dict``.
@@ -46,7 +45,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import cache
 from typing import Any, Never, Protocol, assert_never
@@ -88,7 +87,7 @@ from effective.domain import (
     Spawned,
     SpawnResult,
 )
-from effective.engines.absurd import _adapt_ctx
+from effective.engines.absurd import _adapt_ctx, sdk_signals
 from effective.govern import BudgetRefused, all_refusals, delivered
 from effective.handlers.admission import (
     Cursor,
@@ -104,6 +103,7 @@ from effective.handlers.base import (
     BranchRaised,
     BranchStopped,
     Continued,
+    EngineSignal,
     Finished,
     Racing,
     RefusalDiverged,
@@ -118,6 +118,7 @@ from effective.handlers.base import (
     deadline_of,
     ending_of,
     gated_record,
+    keyed_call,
     op_key,
     placed_await_name,
     placed_key,
@@ -228,10 +229,10 @@ def respawn_name(run_id: str, generation: int) -> Key:
     return compose_key(t"respawn:{Run(run_id)},{Index(generation)}")
 
 
-def spawned_name(writer: Writer) -> Key:
-    """The engine's idempotency key for a spawn: the task that spawns, and where it placed the
-    spawn. A retry re-executes the same placement, so it enqueues nothing new."""
-    return compose_key(t"spawned:{Run(writer.task)};{writer.placement:domain=any}")
+def idempotency_key_for(writer: Writer) -> Key:
+    """A step's idempotency key: the task that runs it, and where it was placed. A retry
+    re-executes the same placement, so a receiver that remembers the key does nothing new."""
+    return compose_key(t"idempotency:{Run(writer.task)};{writer.placement:domain=any}")
 
 
 def spawn_done_name(writer: Writer) -> Key:
@@ -239,8 +240,8 @@ def spawn_done_name(writer: Writer) -> Key:
     their own, so an answer reaches only the task and placement that spawned it.
 
     The placement's occurrence is a coordinate here, where it is a ``#N`` suffix on the spawn: a
-    child composes this name into its emit step's key, and an engine counting that step's name
-    refuses a key already carrying an occurrence."""
+    child composes this name into its emit step's key, where a trailing ``#N`` would read as that
+    step's own occurrence."""
     base, occurrence = split_occurrence(writer.placement.stored())
     placement = Key.parse(base)
     return compose_key(
@@ -354,6 +355,111 @@ class _ChainContinues(BaseException):
 
     def __init__(self, result: Any) -> None:
         self.result = result
+
+
+@dataclass
+class _Forward:
+    """One op entering one level of the layer stack, and the names placed below it.
+
+    A re-forward shares its first forward's `names` and reads them from `cursor`.
+
+    | the forward is | when                            | so it                                 |
+    |----------------|---------------------------------|---------------------------------------|
+    | replaying      | `cursor` is before the end      | hands the name at `cursor`            |
+    | recording      | `cursor` is at the end          | appends each name placed below it     |
+    | diverged       | a key other than its next name  | takes no part, and its names stay as  |
+    |                | was placed while it replayed    | they were, so a later re-forward      |
+    |                |                                 | replays the first forward's alone     |
+    """
+
+    level: int
+    op: WorkflowOp
+    names: list[tuple[Key, int]]
+    cursor: int
+    diverged: bool = False
+
+    @property
+    def replaying(self) -> bool:
+        return not self.diverged and self.cursor < len(self.names)
+
+    @property
+    def recording(self) -> bool:
+        return not self.diverged and self.cursor == len(self.names)
+
+
+@dataclass
+class _Reforwards:
+    """The forwards one walk op's layer stack made, so a re-forward is placed as its first
+    forward was.
+
+    A layer re-forwards by yielding an op object again to the level it went to before, within one
+    forward of its own, as `retry` does. Counts only grow.
+
+    When the walk places a key, it visits the open forwards:
+
+    ```
+    each open forward, innermost first
+    ├── replaying, its next name this key ─── hands its occurrence; the visit ends
+    │     └── each recording forward inside it records that occurrence
+    ├── replaying, its next name another key ─ diverges; the visit goes on outward
+    ├── recording, or diverged ─────────────── the visit goes on outward
+    └── past the outermost ─────────────────── the key is counted afresh
+          └── every recording forward records the new occurrence
+    ```
+
+    The names are the walk's. A layer that numbers its own op per invocation, as the human tier and
+    `govern` number their awaits, places a new key on a re-forward; on Absurd the SDK numbers an
+    await itself, once per ask."""
+
+    handed: list[_Forward] = field(default_factory=list)
+    open: list[_Forward] = field(default_factory=list)
+
+    def entering(self, level: int, op: WorkflowOp) -> None:
+        """`op` enters `level` of the stack, `level` being the layers below it.
+
+        ```
+        the op entering this level, within the yielding layer's current forward
+        ├── an object this level saw before ── a re-forward, replaying that forward's names
+        └── an object new to this level ────── a first forward, recording
+        ```
+        """
+        while self.open and self.open[-1].level <= level:
+            self.open.pop()
+        forward = _Forward(level, op, [], cursor=0)
+        for earlier in reversed(self.handed):
+            if earlier.level > level:
+                break  # the yielding layer's own forward began there
+            if earlier.level == level and earlier.op is op:
+                forward = _Forward(level, op, earlier.names, cursor=0)
+                break
+        self.handed.append(forward)
+        self.open.append(forward)
+
+    def replayed(self, placed: Key) -> int | None:
+        """The occurrence a replaying forward hands `placed`, or `None` when no open forward has
+        it next; the class docstring has the visit."""
+        for depth in range(len(self.open) - 1, -1, -1):
+            forward = self.open[depth]
+            if not forward.replaying:
+                continue
+            key, occurrence = forward.names[forward.cursor]
+            if key != placed:
+                forward.diverged = True
+                continue  # a forward around it may have placed this name first
+            forward.cursor += 1
+            for inner in self.open[depth + 1 :]:
+                if inner.recording:
+                    inner.names.append((placed, occurrence))
+                    inner.cursor += 1
+            return occurrence
+        return None
+
+    def counted(self, placed: Key, occurrence: int) -> None:
+        """`placed` was counted afresh at `occurrence`."""
+        for forward in self.open:
+            if forward.recording:
+                forward.names.append((placed, occurrence))
+                forward.cursor += 1
 
 
 class _GatherPark(BaseException):
@@ -477,9 +583,7 @@ def _race_capable(ctx: Any) -> Any:
     base = ctx
     while isinstance(base, (_PrefixedCtx, RenamedAwaitCtx, SeedingCtx, SteeringCtx, ViewingCtx)):
         base = base._ctx
-    if not all(
-        callable(getattr(base, name, None)) for name in ("peek_step", "settle", "step_resolved")
-    ):
+    if not all(callable(getattr(base, name, None)) for name in ("peek_step", "settle")):
         raise NotImplementedError(
             f"a race needs a ctx that can peek and settle a checkpoint, and "
             f"{type(base).__name__} cannot: run it on SQLite, or on Absurd through `SdkCtx` or "
@@ -524,15 +628,6 @@ class _PrefixedCtx:
         # `prefixed`: the scope is applied to an IDENTITY through a named method, so the call
         # site is greppable.
         return self._ctx.step(name.prefixed(self._prefix), thunk)
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        """`step_resolved` under the frame, handing the thunk `name` in this ctx's coordinates."""
-        inner: Any = self._ctx
-
-        def unframed(resolved: Key) -> Any:
-            return thunk(name.occurrence(split_occurrence(resolved.stored())[1] or 1))
-
-        return inner.step_resolved(name.prefixed(self._prefix), unframed)
 
     def await_event(self, name: Key, /) -> Any:
         # `prefixed`, the same call the `step` arm above makes: one frame prefix, one spelling,
@@ -624,10 +719,6 @@ class RenamedAwaitCtx:
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         return self._ctx.step(name, thunk)  # steps are child-task-scoped — do NOT rename
 
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        inner: Any = self._ctx
-        return inner.step_resolved(name, thunk)
-
     def _scoped(self, name: Key) -> Key:
         return fork_event_name(self._child_run_id, name)
 
@@ -713,10 +804,9 @@ class SeedingCtx:
     Replaying THROUGH the inner ctx means the child's own checkpoint holds the value, so a crash
     mid-tail replays from the CHILD and never re-reads the base.
 
-    OCCURRENCE-AWARE: a repeated op name is suffixed ``name#k`` by the engines *below* this seam,
-    so ``read_sqlite_task`` returns seed keys carrying those suffixes while the handler passes the
-    bare ``name`` each time. This ctx counts occurrences the same way, so a workflow that repeats a
-    step name (any agent loop) seeds each occurrence with ITS OWN base value.
+    OCCURRENCE-AWARE: the handler names each occurrence of a repeated op ``name#k``, and
+    ``read_sqlite_task`` returns seed keys carrying the same suffixes, so a workflow that repeats
+    a step name (any agent loop) seeds each occurrence with ITS OWN base value.
     ``unconsumed()`` is the complementary check the driver asserts. Only ``step`` is seeded;
     ``sleep_until`` (and ``peek_event`` etc. via ``__getattr__``) delegate UNCHANGED.
 
@@ -743,22 +833,18 @@ class SeedingCtx:
         self._fork_point = fork_point
         self._transplanted = transplanted
         self.consumed: set[Key] = set()
-        self._occurrences: dict[Key, int] = {}
         self._phase: Phase = Seeding()
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
-        count = self._occurrences.get(name, 0) + 1
-        self._occurrences[name] = count
-        key = name.occurrence(count)  # mirror the engines' dup-name suffixing
-        match self._phase, key in self._seed:
+        match self._phase, name in self._seed:
             case Live(), True:  # a tail op is seeded — the seed reached past the fork point
                 raise SeedBoundaryError(
-                    f"seed key {key!r} matched a TAIL op (past the fork point "
+                    f"seed key {name!r} matched a TAIL op (past the fork point "
                     f"{self._fork_point!r}) — `fork_seed`'s `through` reached into the tail."
                 )
             case Seeding(), True:  # replay the base; the domain thunk is dead
-                self.consumed.add(key)
-                value = self._seed[key]  # the base's RAW checkpoint state, undecoded
+                self.consumed.add(name)
+                value = self._seed[name]  # the base's RAW checkpoint state, undecoded
                 return self._ctx.step(name, lambda: value)
             case Seeding(), False:
                 # A step in the PREFIX that the seed does not cover. By the phase's own definition
@@ -769,7 +855,7 @@ class SeedingCtx:
                 # because `unconsumed()`-empty is NECESSARY, NOT SUFFICIENT: it cannot see an
                 # INSERTION.
                 raise SeedBoundaryError(
-                    f"step {key!r} ran LIVE during the Seeding phase — before the fork point "
+                    f"step {name!r} ran LIVE during the Seeding phase, before the fork point "
                     f"{self._fork_point!r}, where every op must come from the seed. One of three "
                     f"things is wrong: `fork_seed`'s `through` stopped SHORT of the fork point "
                     f"(so "
@@ -816,7 +902,7 @@ class SeedingCtx:
         says so.
 
         **Name-keyed with no occurrence coordinate, unlike `step` above, because that is what the
-        ENGINE does.** `step` counts occurrences because a repeated step name gets a `name#k`
+        ENGINE does.** A step carries an occurrence because a repeated step name gets a `name#k`
         checkpoint per occurrence. An event name is a FACT: on the SQLite engine, a workflow
         awaiting one name twice with a single `emit_event` completes, both awaits returning the
         same payload. So two awaits of one name are one question answered once, and there is no
@@ -889,9 +975,6 @@ class SeedingCtx:
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
     def peek_step(self, name: Key, /) -> Never:
-        refuse_a_settled_checkpoint_under("SeedingCtx")
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Never:
         refuse_a_settled_checkpoint_under("SeedingCtx")
 
     def settle(self, name: Key, value: Any, /) -> Never:
@@ -1047,6 +1130,8 @@ class DurableHandler:
         stop: Stop = NO_RACE,
     ) -> None:
         self.ctx = _adapt_ctx(ctx)
+        # What the engine raises to end the walk at an op, which no layer sees.
+        self._signals = (EngineSignal, *sdk_signals())
         # The ctx this handler was CONSTRUCTED at — `self.ctx` before any `scoped(...)` pushed a
         # frame onto it. `_run_scoped` swaps `self.ctx` and restores it; this never moves.
         #
@@ -1125,10 +1210,11 @@ class DurableHandler:
         # scope frames between the branch root and the await would be silently dropped from the
         # re-armed name, and the run would park on a name no emitter can produce.
         self._scope_path = ""
-        # Per-execution occurrence counts for `_place` — the handler's own, because the
-        # engines mint theirs below `ctx.step` where no arm can read it. Rebuilt per attempt,
-        # so it re-derives from the workflow's deterministic yield order on replay.
+        # Per-execution occurrence counts for `_place`, the one minter of `#N`. Rebuilt per
+        # attempt, so it re-derives from the workflow's deterministic yield order on replay.
         self._placements: dict[Key, int] = {}
+        # What the walk op now running its layers has placed, so a re-forward is placed alike.
+        self._reforwards: _Reforwards | None = None
         # Race admission (`effective.handlers.admission`). Every one of these is read only when
         # `self._stop` says a race encloses this handler.
         #
@@ -1277,7 +1363,9 @@ class DurableHandler:
                 task_name=op.task,
                 params=params,
                 queue=queue,
-                idempotency_key=spawned_name(Writer(task=str(task), placement=key)).stored(),
+                idempotency_key=idempotency_key_for(
+                    Writer(task=str(task), placement=key)
+                ).stored(),
             )
             return _dump(self.domain.run(successor.call()))
 
@@ -1298,7 +1386,8 @@ class DurableHandler:
                 # be audited.
                 granted=op.granted,
                 carry_digest=content_digest(op.state),
-            )
+            ),
+            None,  # a respawn is never placed, so its row's writer is unknown
         )
         raise _ChainContinues({"next_generation": op.generation, "task_id": str(spawned.task_id)})
 
@@ -1366,11 +1455,7 @@ class DurableHandler:
                     # `_place` is evaluated INSIDE `placing` — a positional arm has no key
                     # until the walk mints one, and `placed_key` reads it from there.
                     with placing(op, self._position), placement_scope(self._place(op)):
-                        send_value = (
-                            self._race_leaf(op)
-                            if self._stop.racing
-                            else drive_through(self.op_layers, op, self._handle)
-                        )
+                        send_value = self._through_layers(op)
             except Exception as raised:
                 # a refusal, bare or grouped out of a scoped body or a gather, re-derives at the
                 # same point on replay
@@ -1412,24 +1497,30 @@ class DurableHandler:
             self._halted = True
             raise Stopping from None
 
-    def _here(self, op: WorkflowOp) -> Key | None:
-        """The op's name inside this handler's frames, with the occurrence `_place` counted; `None`
-        for an op a layer yielded itself, which the walk never placed."""
-        placed = placed_key(op)
-        counted = self._placements.get(placed.prefixed(getattr(self.ctx, "prefix", "")))
-        return None if counted is None else placed.occurrence(counted)
+    def _through_layers(self, op: WorkflowOp) -> Any:
+        """The walk op, once placed, driven through the op layers to `_handle`."""
+        outer, self._reforwards = self._reforwards, _Reforwards()
+        forwarding = self._reforwards.entering
+        try:
+            if self._stop.racing:
+                return self._race_leaf(op, forwarding)
+            return drive_through(
+                self.op_layers, op, self._handle, escapes=self._signals, forwarding=forwarding
+            )
+        finally:
+            self._reforwards = outer
 
-    def _race_leaf(self, op: WorkflowOp) -> Any:
+    def _race_leaf(self, op: WorkflowOp, forwarding: Callable[[int, WorkflowOp], None]) -> Any:
         """A walk op inside a race branch, once `_place` has counted it, driven through the layers.
 
         A gate's refusal is recorded at the walk name (`gated_record`); unless this walk is fresh
         that record is read before the layers run, and a refused op that the layers now forward
         or answer is `RefusalDiverged`. What the op hands the workflow joins this thread's inputs,
         which the race's endings carry as a digest."""
-        here = self._here(op)
-        gate = None if here is None else gated_record(here)
+        here = self._step_name(op, self._slot(op))
+        gate = gated_record(here)
         ctx = _race_capable(self.ctx)
-        refused_before = gate is not None and not self._fresh and ctx.peek_step(gate)[0]
+        refused_before = not self._fresh and ctx.peek_step(gate)[0]
         free, outer = self._free, (self._gated, self._domain_refusals)
         self._gated, self._domain_refusals = refused_before, []
         try:
@@ -1438,7 +1529,8 @@ class DurableHandler:
                 op,
                 self._handle,
                 new_work=self._new_work,
-                stopped=(Stopping, RefusalDiverged),
+                stopped=(Stopping, RefusalDiverged, *self._signals),
+                forwarding=forwarding,
             )
             if refused_before:
                 raise RefusalDiverged(
@@ -1451,7 +1543,7 @@ class DurableHandler:
             raise
         except Exception as raised:
             self._inputs.append(observed_error(raised))
-            if gate is not None and all_refusals(raised) and self._gate_refused(raised):
+            if all_refusals(raised) and self._gate_refused(raised):
                 if refused_before:
                     raise
                 if not free:
@@ -1470,19 +1562,20 @@ class DurableHandler:
             all(leaf is not domain for domain in self._domain_refusals) for leaf in leaves(raised)
         )
 
-    def _checkpoint(self, op: WorkflowOp, name: Key, thunk: Callable[[], Any]) -> Any:
-        """`ctx.step(name, thunk)`, and in a race branch the BASE CHECK on a miss.
+    def _checkpoint(self, op: WorkflowOp, slot: Key, thunk: Callable[[], Any]) -> Any:
+        """`ctx.step` at the op's placed name, and in a race branch the BASE CHECK on a miss.
 
         | on a miss, in a race branch                  | the guard                               |
         |----------------------------------------------|-----------------------------------------|
         | a walk that is not fresh, and the domain's   | raises it, and the domain is not called |
-        | recorded refusal at the resolved name        |                                         |
+        | recorded refusal at the step's name          |                                         |
         | a stored choice names this thread a loser    | stops: no new effect after the choice   |
         | otherwise                                    | calls the domain, recording a refusal   |
 
         A fresh walk reads no refusal record, since no earlier execution reached it. A resume
         after a park runs on the same attempt as the execution that parked, so attempt 1 alone
         does not make a walk fresh: the race's choice on the store says an earlier one ran."""
+        name = self._step_name(op, slot)
         try:
             return self._checkpointed(op, name, thunk)
         except ReservedShape as reserved:  # the refusal names the step, as `served` does
@@ -1498,16 +1591,16 @@ class DurableHandler:
             )
         if self._halted:
             raise Stopping
-        return _race_capable(self.ctx).step_resolved(name, self._guard(op, thunk))
+        return _race_capable(self.ctx).step(name, self._guard(op, name, thunk))
 
-    def _guard(self, op: WorkflowOp, thunk: Callable[[], Any]) -> Callable[[Key], Any]:
+    def _guard(self, op: WorkflowOp, name: Key, thunk: Callable[[], Any]) -> Callable[[], Any]:
         """The thunk `_checkpoint` hands the engine in a race branch, which runs only on a miss."""
         ctx = _race_capable(self.ctx)
 
-        def guard(resolved: Key) -> Any:
+        def guard() -> Any:
             recorded = False
             if not self._fresh:
-                recorded, record = ctx.peek_step(refusal_record(resolved))
+                recorded, record = ctx.peek_step(refusal_record(name))
                 if recorded and served_refusal(record):
                     refused = Refused(op, record["reason"])
                     self._domain_refusals.append(refused)
@@ -1522,7 +1615,7 @@ class DurableHandler:
                 served = type(refused) is Refused
                 if not recorded:
                     entry = refusal_entry(refused.reason, "serve" if served else "call")
-                    ctx.settle(refusal_record(resolved), entry)
+                    ctx.settle(refusal_record(name), entry)
                 if not served:
                     raise
                 normalized = Refused(op, refused.reason)
@@ -1534,36 +1627,38 @@ class DurableHandler:
     def _place(self, op: WorkflowOp) -> Key:
         """The op's full address: the ctx's frames, its placed key, and an occurrence.
 
-        Three coordinates, and the third is the subtle one. The engine mints `#N` for a repeated
-        checkpoint name *below* `ctx.step` (`sqlite.py`, and the SDK's `_get_checkpoint_name`),
-        rebinding a local and returning only the step's value — so the arm that asked for the step
-        never learns which occurrence it got. Without a counter here, two SEQUENTIAL appends of one
-        `event_id` share `prefix + op_key` and are indistinguishable, which is exactly the case
-        that makes the collision family about the WRITER rather than about `gather`.
+        A step's occurrence is minted here and nowhere else. `_step_name` hands the engine this
+        placement in the ctx's coordinates, and the engine checkpoints at exactly that name, so a
+        span, a `Writer` and the checkpoint carry one address. The Absurd SDK still numbers an
+        await's or a sleep's name itself; the walk keeps those unique by position and by
+        `placing`. A layer that short-circuits an op
+        has still had it placed, so the next ask of that name is the next occurrence; a layer
+        that re-forwards an op forwards its placement, so a retried step lands where its first
+        try would have.
 
-        Deterministic under replay by the same argument the engines' own counter rests on: the
-        handler is rebuilt per attempt, the workflow re-executes its ops in yield order, so the
-        n-th execution of a name is the n-th on every attempt. A gather branch counts in its own
-        child handler under its gather's frame, whose ordinal the handler never hands out twice, so
-        a gather inside a scope entered twice places its branches apart. A handler run is one
-        claim's walk: a second run over one ctx restarts this counter and places its ops again.
+        Deterministic under replay: the handler is rebuilt per attempt and the workflow
+        re-executes its ops in yield order, so the n-th execution of a name is the n-th on every
+        attempt. A gather branch counts in its own child handler under its gather's frame, whose
+        ordinal the handler never hands out twice, so a gather inside a scope entered twice places
+        its branches apart. A handler run is one claim's walk: a second run over one ctx restarts
+        this counter, places its ops again, and is served the first run's checkpoints.
 
         Occurrence is byte-preserving at n <= 1 (`Key.occurrence`), so a placement that happens
         once reads exactly as the key it places.
 
-        **It counts only where nothing else did**, which the grammar enforces rather than merely
-        asks: `Key.occurrence` REFUSES a second suffix — *"two counters reaching the same name is
-        a counting bug… the producers each apply once per name per attempt"* — so the walk having
-        already qualified a `Scope.SETTLEMENT` await (`placing`) means this must defer to it, not
-        add to it. Deferring is also correct on the merits: that suffix counts asks of the name,
-        which is the same coordinate under a different producer. Learned the way the grammar
-        intended — by a raise: four `descend`/await tests went red the moment this counted
-        twice."""
+        **It counts only where nothing else did**: `Key.occurrence` refuses a second suffix, and a
+        `Scope.SETTLEMENT` await already carries the one `placing` gave it. That suffix counts
+        asks of the name, which is the same coordinate under a different producer."""
         placed = placed_key(op).prefixed(getattr(self.ctx, "prefix", ""))
         if split_occurrence(placed.stored())[1] is not None:
             return placed  # the walk already distinguished this one
+        reforwards = self._reforwards
+        if reforwards is not None and (replayed := reforwards.replayed(placed)) is not None:
+            return placed.occurrence(replayed)
         count = self._placements.get(placed, 0) + 1
         self._placements[placed] = count
+        if reforwards is not None:
+            reforwards.counted(placed, count)
         return placed.occurrence(count)
 
     def _handle(self, op: WorkflowOp) -> Any:
@@ -1573,7 +1668,10 @@ class DurableHandler:
             case AwaitEvent():
                 return self._await(op)
             case AppendLedgerRow(row=row):
-                return self._checkpoint(op, op_key(op), lambda row=row: self._record_ledger(row))
+                slot = self._slot(op)
+                return self._checkpoint(
+                    op, slot, lambda row=row: self._record_ledger(row, self._writer(slot))
+                )
             case StoreArtifact(value=value):
                 # Content-addressed: the checkpoint (the durable store, absent a CAS)
                 # persists the value under the injective key
@@ -1583,7 +1681,7 @@ class DurableHandler:
                 # returns the recorded value. Digest computed once (artifacts can be
                 # large) — the checkpoint key is `op_key(op)`, the id its tail.
                 aid = artifact_id(op)
-                self._checkpoint(op, op_key(op), lambda v=value: _dump(v))
+                self._checkpoint(op, self._slot(op), lambda v=value: _dump(v))
                 return aid
             case SleepUntil(when=when):
                 if self._stop.racing:  # a sleep a layer injected, which admission never saw
@@ -1627,6 +1725,8 @@ class DurableHandler:
         or a domain with no `run_metered`) and names the model-call marker and `CallTool`, so an
         op outside `ModelCall` is a type error here."""
         schema = _schema_of(inner)
+        slot = self._slot(op)
+        keyed_call(op, inner)  # a key nobody but the handler may write refuses before the step
         match inner:
             case AsksModel() if (
                 run_metered := getattr(self.domain, "run_metered", None)
@@ -1644,7 +1744,7 @@ class DurableHandler:
                 # its byte-identity holds.
                 raw = self._checkpoint(
                     op,
-                    op_key(op),
+                    slot,
                     lambda fn=run_metered, inner=inner: _encode_usage_envelope(*fn(inner)),
                 )
                 result_raw, usage = _decode_usage_envelope(raw)
@@ -1654,7 +1754,7 @@ class DurableHandler:
                 # The decision runs inside the thunk, and a refusal is its recorded value, so a
                 # spawn replayed from a checkpoint or a fork's seed is served as recorded and never
                 # decided again.
-                writer = self._writer()
+                writer = self._writer(slot)
 
                 def spawn() -> Any:
                     try:
@@ -1665,7 +1765,7 @@ class DurableHandler:
                     return {**enqueued, "done_event": done_event.stored()}
 
                 # The checkpoint holds the done event as text, and this is where it is read back.
-                match self._checkpoint(op, op_key(op), spawn):
+                match self._checkpoint(op, slot, spawn):
                     case {"done_event": str(stored), **enqueued}:
                         return _load(schema, {**enqueued, "done_event": Key.parse(stored)})
                     case {"refused": True, "reason": str(reason)}:
@@ -1678,10 +1778,33 @@ class DurableHandler:
                             "join."
                         )
             case AsksModel() | CallTool():
+                # The key is minted on a miss, so a step served from the store asks nothing of
+                # the ctx, which may have no task.
+                writer = self._writer(slot)
                 raw = self._checkpoint(
-                    op, op_key(op), lambda inner=inner: _dump(self.domain.run(inner))
+                    op,
+                    slot,
+                    lambda inner=inner: _dump(self.domain.run(self._keyed(op, inner, writer))),
                 )
                 return _load_step(schema, raw)
+            case unreachable:
+                assert_never(unreachable)
+
+    def _keyed(self, op: Step[Any], inner: DomainOp[Any], writer: Writer | None) -> DomainOp[Any]:
+        """`inner`, with the idempotency key the step asks for minted into its args."""
+        match keyed_call(op, inner):
+            case None:
+                return inner
+            case CallTool(args=args) as call:
+                if writer is None:
+                    raise Refused(
+                        op,
+                        "an idempotency key is minted from the task and the step's placement, "
+                        "and this ctx has no task",
+                    )
+                return replace(
+                    call, args={**args, "idempotency_key": idempotency_key_for(writer).stored()}
+                )
             case unreachable:
                 assert_never(unreachable)
 
@@ -1717,7 +1840,7 @@ class DurableHandler:
                     op, "a spawn is named by its task and placement, and this ctx has no task"
                 )
             case None, Writer() as placed:
-                name, done_event = spawned_name(placed), spawn_done_name(placed)
+                name, done_event = idempotency_key_for(placed), spawn_done_name(placed)
         authored = {k: v for k, v in args.params.items() if k not in SUBSTRATE_PARAMS}
         stamped = {**authored, DONE_EVENT_PARAM: done_event.stored()}
         request = args.model_copy(
@@ -1875,9 +1998,7 @@ class DurableHandler:
                 "`await_until` (the embedded SQLite engine and the Absurd SDK both do)."
             )
         inner: Any = at
-        outcome: WaitOutcome[Any] = inner.await_until(
-            name, deadline.timestamp(), self._wait_slot(op)
-        )
+        outcome: WaitOutcome[Any] = inner.await_until(name, deadline.timestamp(), self._slot(op))
         match outcome:
             case Arrived(payload=payload):
                 return Arrived(_load(op.schema, payload))
@@ -1886,20 +2007,27 @@ class DurableHandler:
             case unreachable:
                 assert_never(unreachable)
 
-    def _wait_slot(self, op: AwaitEvent[Any]) -> Key:
-        """The slot this wait settles into, which has to be the WAIT's placement.
+    def _step_name(self, op: WorkflowOp, slot: Key) -> Key:
+        """The name `ctx.step` checkpoints `op` at: its key in the ctx's coordinates, at the
+        occurrence of its slot."""
+        return op_key(op).occurrence(split_occurrence(slot.stored())[1] or 1)
 
-        `current_placement` publishes the op the walk is DRIVING, and a layer may yield an
-        `AwaitEvent` of its own inside that scope — `layers.LAYERED_OPS_DURABLE_ONLY` names this
-        op as one it may inject, and `permission` and `govern` both do. The ambient name there
-        belongs to the op the layer wrapped, so settling under it overwrites that op's checkpoint
-        and serves the wait's record back as its result. Reproduced: a layer waiting ahead of a
-        step left `step:s1` holding the wait's outcome, in the durable store, past every replay.
+    def _slot(self, op: WorkflowOp) -> Key:
+        """The op's placement in this handler's frames: the walk's, or one counted here.
 
-        So the ambient name is taken only when it IS this op's — compared with the occurrence
-        stripped, since the walk adds one — and an injected wait is counted here, where nothing
-        has counted it. `_place` is the same counter either way, so two injected waits on one
-        name are two slots for the same reason two authored ones are."""
+        | the op                                     | its slot                                  |
+        |--------------------------------------------|-------------------------------------------|
+        | the walk op, forwarded once or again       | `current_placement`, minted by `_place`   |
+        | an op a layer yields: `permission`'s and   | `_place(op)`, counted as the walk counts  |
+        | `govern`'s awaits, `govern`'s announce     | its own                                   |
+
+        The ambient placement is this op's when its key, occurrence stripped, is this op's key.
+        Under any other op's placement, an injected wait would settle into the wrapped op's
+        checkpoint and serve the wait's record back as that op's result. An op a layer yields
+        under the key of the op it wraps takes that op's slot, and is served its checkpoint. An
+        op injected under a re-forward with the key its first forward asked takes the slot that
+        forward counted (`_Reforwards`); one whose layer numbers its key per invocation places a
+        new key."""
         mine = placed_key(op).prefixed(getattr(self.ctx, "prefix", "")).stored()
         ambient = current_placement()
         if ambient is not None and split_occurrence(ambient.stored())[0] == mine:
@@ -2272,7 +2400,7 @@ class DurableHandler:
         child._stop = Stop((child._cursor.stopped,), tree)
         return child
 
-    def _record_ledger(self, row: LedgerRow) -> Any:
+    def _record_ledger(self, row: LedgerRow, writer: Writer | None) -> Any:
         # Append to the dedicated append-only ledger (idempotent by event_id);
         # ctx.step makes it skip on replay. Without a ledger writer the row is
         # just checkpointed.
@@ -2287,14 +2415,14 @@ class DurableHandler:
         # without the damage. The other half of counterfactual safety (stopping a world-mutating
         # TOOL) is `effective.sandbox.DryRun`; this seam does not cover it.
         if self.ledger is not None:
-            self.ledger.append(row, writer=self._writer())
+            self.ledger.append(row, writer=writer)
         return _dump(row)
 
-    def _writer(self) -> Writer | None:
-        """WHO is writing this row — the task, and the placed op inside it.
+    def _writer(self, placement: Key) -> Writer | None:
+        """WHO is writing: the task, and the op's slot inside it (`_slot`), which for an op a
+        layer yields is its own and not the wrapped op's.
 
-        `None` when either half is missing, and both halves genuinely can be. A ctx exercised
-        outside a drive loop publishes no placement, and `task_id` is not on the `TaskContext`
+        `None` when the task is missing: `task_id` is not on the `TaskContext`
         protocol — it is reachable by `getattr` on both engines (a `UUID` on SQLite, a `str` on
         the SDK) the same way `prefix` is, but a test double need not carry it. `None` reads as
         *unknown*, which the store's check allows; a guess would read as *known* and refuse a
@@ -2304,7 +2432,4 @@ class DurableHandler:
         predicate precisely so a retry, which re-executes the same placement, stays permitted;
         including attempt would refuse the crash window this exists to allow."""
         task = getattr(self.ctx, "task_id", None)
-        placement = current_placement()
-        if task is None or placement is None:
-            return None
-        return Writer(task=str(task), placement=placement)
+        return None if task is None else Writer(task=str(task), placement=placement)

@@ -46,7 +46,7 @@ from uuid import UUID, uuid7
 
 from pydantic_core import to_jsonable_python
 
-from effective.handlers.base import Attempt, failing_leaf
+from effective.handlers.base import Attempt, EngineSignal, failing_leaf
 from effective.keys import Key
 from effective.ops import (
     DONE_EVENT_PARAM,
@@ -230,7 +230,7 @@ def _failure_text(error: BaseException) -> str:
     return "\n".join([repr(error), *getattr(error, "__notes__", ())])
 
 
-class _Suspend(Exception):
+class _Suspend(EngineSignal):
     """Raised by the ctx to park a task durably: waiting on an event, or sleeping.
 
     A control signal, not an error condition (hence the non-``Error`` name).
@@ -472,14 +472,6 @@ class SqliteTaskContext:
         self.claimed_as = claimed_as
         self._guard: AbstractContextManager[Any] = write_lock or nullcontext()
         self.concurrent_safe = write_lock is not None
-        # Per-execution occurrence counts, mirroring the Absurd SDK's
-        # `_get_checkpoint_name`: a duplicate step name checkpoints as `name#2`,
-        # `name#3`, …. The ctx is freshly constructed per claim, so replay
-        # re-derives the same suffixes from the same deterministic yield order.
-        # Without this the two conformance backends DIVERGED on duplicates:
-        # SQLite silently served the first occurrence's checkpoint to the second
-        # (a stale read) where Absurd executed it (ratchet finding B2).
-        self._occurrences: dict[Key, int] = {}
         # Wakes this execution has already spent, in memory and per claim: a wake belongs to the
         # attempt it woke, and the claim is what ends one. See `_clock_woke_us`.
         self._spent_wakes: set[str] = set()
@@ -497,21 +489,14 @@ class SqliteTaskContext:
         return Attempt(number=row[0] if self.claimed_as is None else self.claimed_as, limit=row[1])
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
-        return self.step_resolved(name, lambda resolved: thunk())
-
-    def step_resolved(self, name: Key, thunk: Callable[[Key], Any], /) -> Any:
-        """`step`, with the thunk handed `name` at the occurrence this call resolved to."""
         with self._guard:
-            count = self._occurrences.get(name, 0) + 1
-            self._occurrences[name] = count
-            name = name.occurrence(count)  # `name#N`, the engines' shared dup-name rule
             task_id = self.task_id
             row = self.conn.execute(
                 *bind(t"SELECT state FROM checkpoints WHERE task_id={task_id} AND name={name}")
             ).fetchone()
         if row is not None:  # already committed on a prior attempt — do NOT re-run the thunk
             return json.loads(row[0]) if row[0] is not None else None
-        result = thunk(name)  # OUTSIDE the lock — tool work overlaps across branches
+        result = thunk()  # OUTSIDE the lock: tool work overlaps across branches
         with self._guard:
             task_id, state, claimed_as = self.task_id, json.dumps(result), self.claimed_as
             written = self.conn.execute(
