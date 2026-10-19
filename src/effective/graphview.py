@@ -76,9 +76,9 @@ from effective.keys.frame import (
     ARM_TAGS,
     FRAME_ARMS,
     GATHER_ARM,
-    RACE_ARM,
     branch_frames,
     is_branch_frame,
+    is_race_record_frame,
     past_frames,
     split_frames,
 )
@@ -1013,7 +1013,7 @@ def to_sequence(graph: RunGraph) -> str:
             lines.append(_statement(t"  Note over {lane}: awaits {label}"))
             if node.state == COMMITTED:
                 lines.append(_statement(t"  world-->>{lane}: {label}"))
-        elif inner and _is_race(race := inner[-1]):
+        elif inner and is_race_record_frame(race := inner[-1]):
             lines.append(_statement(t"  Note over {lane}: {race} {label}"))
         else:
             lines.append(_statement(t"  {lane}->>world: {label}"))
@@ -1057,12 +1057,6 @@ def _coordinates(frames: tuple[str, ...]) -> tuple[tuple[str, tuple[int, ...]], 
         numbers = coordinates.split(ARITY_SEPARATOR)
         placed.append((tag, tuple(int(n) for n in numbers if n.isdigit())))
     return tuple(placed)
-
-
-def _is_race(frame: str) -> bool:
-    """A `race:{r}` frame, the one a race's own choice and endings sit under."""
-    tag, _, coordinates = frame.partition(TAG_SEPARATOR)
-    return tag == RACE_ARM and ARITY_SEPARATOR not in coordinates
 
 
 def identity(node: Node) -> str:

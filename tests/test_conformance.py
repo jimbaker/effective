@@ -93,6 +93,7 @@ from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
 from effective.handlers.base import op_key, step_key
 from effective.handlers.durable import DurableHandler, SeedingCtx, fork_event_name
+from effective.handlers.recording import RecordingHandler
 from effective.keys import Index, Key, Run, Segment, compose_key, frame_path, gather_prefix
 from effective.layers import retry, retry_domain
 from effective.machine.spec import Ctx
@@ -2815,6 +2816,18 @@ def test_two_gather_branches_appending_one_event_id_are_refused(backend):
     )
     assert backend.failure_kind(snap) == "PlacedWriterCollision"
     assert backend.task_attempts(task) == 1
+
+
+@pytest.mark.parametrize(
+    "workflow", [colliding_gather_wf, sequential_collision_wf], ids=["gather", "sequence"]
+)
+def test_the_recorder_refuses_one_event_id_appended_twice(workflow):
+    """The recorder decides a held id with the engines' function, so it refuses what they do."""
+    run_id = f"r-{uuid4().hex[:8]}"
+    recorder = RecordingHandler(responses={"tool:a": 1, "tool:b": 2})
+    with pytest.raises(PlacedWriterCollision):
+        recorder.run(lambda: workflow(run_id))
+    assert len(recorder.ledger) == 1
 
 
 def test_two_sequential_appends_of_one_event_id_are_refused(backend):

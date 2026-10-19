@@ -28,6 +28,7 @@ from uuid import UUID
 from effective.engines.sqlite import connect
 from effective.handlers.base import TraceEntry
 from effective.keys import FramePosition, Key, unframed
+from effective.keys.frame import is_race_record_frame, split_frames
 from effective.keys.grammar import TAG_SEPARATOR, TERM_SEPARATOR, split_occurrence
 from effective.sql import bind
 
@@ -102,9 +103,9 @@ def is_engine_internal(name: str, markers: tuple[str, ...] = ENGINE_INTERNAL) ->
     `gather:`-prefixed name whose *branch step* siblings must stay in — so the wake-race marker is
     matched where it actually sits, mid-name.
 
-    **`unframed` first, for the prefix markers, exactly as `is_step_checkpoint` does.** A sleep
-    inside a `scoped(...)` reads `rec:0;sleep:0`, which does not START with its tag — so a bare
-    `startswith` would call it NOT engine-internal while calling its unscoped twin `sleep:0`
+    **`unframed` first, for the prefix markers**, as `is_step_checkpoint` takes the frames off.
+    A sleep inside a `scoped(...)` reads `rec:0;sleep:0`, which does not START with its tag, so a
+    bare `startswith` would call it NOT engine-internal while calling its unscoped twin `sleep:0`
     internal. A frame-blind predicate answers differently for the same op depending on where it
     was placed, which is the one thing a classifier here may not do.
 
@@ -134,7 +135,6 @@ NON_STEP = (
     "artifact:",
     "event;",
     "sleep:",
-    "gather:",
     "$awaitEvent:",
     "monitor:",
 )
@@ -179,11 +179,22 @@ def dense_key(name: str, seen: FramePosition) -> Key:
 
 
 def is_step_checkpoint(name: str, markers: tuple[str, ...] = NON_STEP) -> bool:
-    """Whether a checkpoint commits a `Step`'s value — one spelling for both bridges and the pin.
+    """Whether a checkpoint commits a `Step`'s value: one spelling for both bridges and the pin.
 
-    `unframed` first: a checkpoint inside a `scoped(...)` reads `rec:0;ledger:…`, which does not
-    START with its tag, so a bare `startswith` calls it a Step. That defect shipped twice."""
-    return not unframed(name, tags=markers).startswith(markers)
+    | the checkpoint                               | a step's |
+    |----------------------------------------------|----------|
+    | an engine's suspension bookkeeping           | no       |
+    | its identity, past every frame, in `markers` | no       |
+    | a race's own choice or endings               | no       |
+    | any other                                    | yes      |
+
+    The frames come off first, so a scope, a gather branch and a race branch frame a step alike:
+    `gather:0,0;rec:0;race:0,0;step;tool:a` is a step's checkpoint."""
+    if is_engine_internal(name):
+        return False
+    frames, identity = split_frames(name)
+    races_own = bool(frames) and is_race_record_frame(frames[-1])
+    return not (races_own or identity.startswith(markers))
 
 
 def read_sqlite_task(

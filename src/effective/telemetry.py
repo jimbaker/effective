@@ -271,9 +271,9 @@ class Span:
     # The PLACED key of the op this span observes — scope frames, own key and occurrence
     # together (`layers.current_placement`): the join column to the tape. It is unique per
     # occurrence and stable across a resume, so with `attempt` it identifies the span; one op
-    # can span several times, once per retry attempt. `None` is a real answer: the
-    # recording/replay core publishes no placement, and a layer under unit test has no walk
-    # above it, so a keyless span falls back to its name and turn.
+    # can span several times, once per retry attempt. `None` is a real answer: replay
+    # publishes no placement, and a layer under unit test has no walk above it, so a
+    # keyless span falls back to its name and turn.
     key: Key | None = None
     attempt: int = 0  # which span of this key (or of this name and turn) this is, from 0
 
@@ -892,8 +892,8 @@ def _fold_measurements(rows: Iterable[tuple[str, float | None, int]]) -> Measure
 def measurements(spans: Iterable[Span]) -> Measurements:
     """Fold live spans into the mapping `from_keys(telemetry=…)` takes.
 
-    A span with `key=None` is DROPPED, not counted under some placeholder: the recording/replay
-    core publishes no placement and a layer under unit test has no walk above it, so `None` means
+    A span with `key=None` is DROPPED, not counted under some placeholder: replay publishes no
+    placement and a layer under unit test has no walk above it, so `None` means
     "this observation has no address", which is a left-outer miss rather than an orphan."""
     return _fold_measurements(
         (span.key.stored(), _span_cost(span.usage_attributes), span.duration_ns)

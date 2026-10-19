@@ -578,8 +578,8 @@ class Witness:
         original_interpret = recording.RecordingHandler._interpret
         arm = Frame.of(original_interpret.__code__, original_interpret.__code__.co_firstlineno)
 
-        def interpret(handler, op):
-            result = original_interpret(handler, op)
+        def interpret(handler, op, here):
+            result = original_interpret(handler, op, here)
             match op:
                 case AppendLedgerRow(row=row):
                     effect: Effect = "ledger"

@@ -79,6 +79,22 @@ class ReplayDivergence(ReplayMismatch):
         )
 
 
+def past_injected(
+    trace: Sequence[TraceEntry], i: int, position: FramePosition, prefix: str
+) -> int:
+    """The index past the injected entries at `i`, each placed through `position` and checked.
+
+    A layer's op is recorded before the walk op it ran for, and a walk without the layers never
+    asks it, so a replay places it where the record did and serves nothing to the workflow."""
+    while (
+        i < len(trace) and (entry := trace[i]).injected and entry.key.stored().startswith(prefix)
+    ):
+        if (placed := position.place(placed_key(entry.op).prefixed(prefix))) != entry.key:
+            raise ReplayDivergence(i, entry.key.stored(), placed.stored())
+        i += 1
+    return i
+
+
 def _named(op: Any, prefix: str) -> str:
     """An op's name for a DIAGNOSTIC, which must never be the thing that raises.
 
@@ -306,13 +322,19 @@ class ReplayHandler:
                 return
 
     def _holds(self, prefix: str) -> bool:
-        """Whether the next recorded entry is one of the branch's own, under `prefix`.
+        """Whether the record holds an op of the branch's own next, under `prefix`, past the
+        injected entries its layers recorded.
 
         A frame prefix ends in its term separator, so `race:0,1;` is never a prefix of
         `race:0,10;`, and the text test is exact."""
-        return self._i < len(self.recorded) and self.recorded[self._i].key.stored().startswith(
+        i = self._i
+        while i < len(self.recorded) and (entry := self.recorded[i]).key.stored().startswith(
             prefix
-        )
+        ):
+            if not entry.injected:
+                return True
+            i += 1
+        return False
 
     def _ahead(self, key: Key) -> Any | None:
         """The result recorded at `key` anywhere ahead of this position, left unconsumed."""
@@ -378,9 +400,12 @@ class ReplayHandler:
         fail to find, a checksum fails when anything moved."""
         if racing and isinstance(op, AwaitEvent | SleepUntil):
             refuse_a_park_in_a_race_branch(op, prefix)
-        if stopping and not self._holds(prefix):
-            raise Stopping
         with placing(op, position):
+            # A loser stopped here has the ops its layers asked first on record, and stops after
+            # them.
+            self._i = past_injected(self.recorded, self._i, position, prefix)
+            if stopping and not self._holds(prefix):
+                raise Stopping
             if self._i >= len(self.recorded):
                 raise ReplayMismatch(
                     f"workflow yielded an extra op {_named(op, prefix)} at position {self._i}"

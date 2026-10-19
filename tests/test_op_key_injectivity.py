@@ -1934,6 +1934,7 @@ _ARMS = [
         "no scope",
     ),
     ("framed Key", lambda: Key.parse("foo:0;bar:x"), "holds frames"),
+    ("numbered Key", lambda: Key.parse("review:m1#2"), "carries an occurrence"),
     ("composed authority Key", lambda: _depth_grant(), None),
     ("ordinary Key", lambda: Key.parse("review:m1"), None),
     ("str + op arm", lambda: "event;review:m1", "op ARM"),
@@ -1985,7 +1986,7 @@ def test_an_absolute_await_takes_another_tasks_framed_address():
     assert awaited.name == address
 
 
-ARMS_IN_THE_TABLE = 9
+ARMS_IN_THE_TABLE = 10
 """How many `case` arms `event_name`'s match has — pinned so adding one forces a row above.
 
 Rows outnumber arms: the structured-text arm refuses three rows (`str + frame delimiter`,

@@ -280,7 +280,7 @@ def placement_scope(placement: Key) -> Iterator[None]:
 def current_placement() -> Key | None:
     """The fully placed name of the op in flight, or `None` outside a drive loop.
 
-    `None` is a real answer and readers must handle it: the recording/replay core publishes no
+    `None` is a real answer and readers must handle it: replay runs no layers and publishes no
     placement, and a layer or domain exercised directly in a unit test has no walk above it."""
     return _PLACEMENT.get()
 

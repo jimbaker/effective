@@ -763,6 +763,24 @@ class FramedEventName(CompositionRefused):
         )
 
 
+class NumberedEventName(CompositionRefused):
+    """A relative await name an author numbered.
+
+    An occurrence is the walk's to place: it counts the asks of an unnumbered name and places a
+    numbered one as written, so two asks of `go#2` would share one key."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return (
+            f"await name {self.name!r} carries an occurrence, which the walk places. Give each "
+            "question a coordinate that says which one it is, or await another task's placed "
+            "park with `Addressing.ABSOLUTE`"
+        )
+
+
 class PlacedWriterCollision(CompositionRefused):
     """Two placed ops in one task wrote one canonical `event_id`, so the second row was lost.
 
@@ -1233,6 +1251,7 @@ def event_name(name: str | Key, addressing: Addressing = Addressing.RELATIVE) ->
     a `Key` leading with an op arm              refused: `OpIdentityAwaited`
     a parsed `Key` with a reserved term         refused: `ReservedEventName`
     a relative `Key` framing another term       refused: `FramedEventName`
+    an author's relative `Key` with an `#N`     refused: `NumberedEventName`
     any other `Key`                             parks on it
     text leading with an op arm                 refused: `OpIdentityAwaited`
     text in a reserved namespace                refused: `ReservedEventName`
@@ -1262,6 +1281,12 @@ def event_name(name: str | Key, addressing: Addressing = Addressing.RELATIVE) ->
         # may frame what it settles (`approve;step;tool:x`, `fork:r2;review:m1`).
         case Key() if addressing is Addressing.RELATIVE and _framed(name):
             raise FramedEventName(name.stored())
+        # The walk counts the asks of an unnumbered name and places a numbered one as written,
+        # so an author's `go#2` asked twice would take one key twice.
+        case Key(scope=None) if (
+            addressing is Addressing.RELATIVE and name.structure().occurrence is not None
+        ):
+            raise NumberedEventName(name.stored())
         # A scoped authority name and an occurrence of one, such as
         # `depth_grant_name(...).occurrence(2)`, are the substrate's own parks.
         case Key():

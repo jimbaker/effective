@@ -278,6 +278,12 @@ def is_branch_frame(frame: str) -> bool:
     return tag in FRAME_ARMS and bool(marker) and ARITY_SEPARATOR in coordinates
 
 
+def is_race_record_frame(frame: str) -> bool:
+    """Does one frame name a race whose own choice and endings sit under it (`race:{r}`)?"""
+    tag, _marker, coordinates = frame.partition(TAG_SEPARATOR)
+    return tag == RACE_ARM and ARITY_SEPARATOR not in coordinates
+
+
 def branch_frames(key: str) -> tuple[str, ...]:
     """The frames of the innermost BRANCH `key` runs in, outermost first, empty on the main line.
 

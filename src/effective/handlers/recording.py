@@ -34,11 +34,14 @@ from effective.handlers.base import (
     TraceEntry,
     artifact_id,
     barrier_errors,
+    branch_scope,
     branch_slot,
     deadline_of,
     ending_of,
+    forwards_held,
     keyed_call,
     kinded_name,
+    place_through,
     placed_await_name,
     placed_key,
     placing,
@@ -57,7 +60,13 @@ from effective.keys import (
     race_endings,
     race_prefix,
 )
-from effective.layers import CHECKPOINTED_OPS, OpLayer, drive_through, run_scope
+from effective.layers import (
+    CHECKPOINTED_OPS,
+    OpLayer,
+    current_placement,
+    drive_through,
+    placement_scope,
+)
 from effective.ops import (
     CARRY_PARAM,
     GENERATION_PARAM,
@@ -77,15 +86,20 @@ from effective.ops import (
     Step,
     StoreArtifact,
     WorkflowOp,
+    Writer,
     awaits_an_absolute_name,
     chain_held,
     refuse_a_bounded_wait_in_a_branch,
     refuse_a_park_in_a_race_branch,
     refuse_absolute_await_in_branch,
+    refuse_placed_writer_collision,
     refuse_respawn_in_branch,
     step_name_text,
 )
 from effective.permission import Refused
+
+RECORDED_TASK = "recording"
+"""The task every placement in one recording writes under: a recording is one run's walk."""
 
 
 @dataclass
@@ -129,19 +143,14 @@ class Suspended[T]:
                 "recorder binds by POSITION, so naming a different event would silently swap "
                 "payloads (the engines bind by name)."
             )
-        # The event entry carries the handler's path prefix like every other branch leaf, so a
-        # resumed-gather trace replays by re-execution with the same keys the durable checkpoint
-        # store would use. An ABSOLUTE await is the exception in both halves: it RESOLVED at the
-        # root, so it is recorded there — prefixing it would make the trace disagree with the
-        # durable record (Absurd checkpoints the bare `$awaitEvent:spawn-done:...`) and with this
-        # comment's own claim. The reconstructed op carries its addressing for the same reason.
-        key = compose_key(t"event;{self.awaiting:domain=address}")
+        # The entry's key is where the await sits in the walk, under the handler's frames as
+        # every leaf's is, an ABSOLUTE await's included; its name, the address it waited on,
+        # stays unframed in the op.
+        key = compose_key(t"event;{self.awaiting:domain=address}").prefixed(self.handler._prefix)
         parked = AwaitEvent(
             self.awaiting, self.schema, addressing=self.addressing, deadline=self.deadline
         )
         answer = _canned_answer(parked, event)
-        if self.addressing is not Addressing.ABSOLUTE:
-            key = key.prefixed(self.handler._prefix)
         self.handler.trace.append(TraceEntry(self.handler._position.place(key), parked, answer))
         return self._continue(answer)
 
@@ -413,6 +422,9 @@ class RecordingHandler:
         self.op_layers: tuple[OpLayer[Any], ...] = tuple(op_layers)
         self.trace: list[TraceEntry] = []
         self.ledger: list[LedgerRow] = []
+        # The placement that wrote each event id the ledger holds, by the id's stored form; `None`
+        # for a claim, which names no writer.
+        self._writers: dict[str, Key | None] = {}
         self.artifacts: dict[str, tuple[str, Any]] = {}
         # A gather branch runs in a child handler whose keys are namespaced by the path to
         # it: `gather:{g},{i};` per frame (`_position.gather` is this handler's gather ordinal,
@@ -440,7 +452,7 @@ class RecordingHandler:
         # `(CHAIN_DEPTH, CHAIN_GENERATION) = (1, 3)` hands its branch `(1, 3)`, as the durable
         # handler does; `walk_run()` here would reset the branch to `(0, None)`.
         if self._in_gather:
-            with run_scope():
+            with branch_scope():
                 return self._drive(program(), None)
         with walk_run():
             return self._drive(program(), None)
@@ -583,25 +595,31 @@ class RecordingHandler:
         """Drive one ordinary op through the layer stack, recording it either way. In a race branch
         a stop escapes the layers, and an op a layer yields after a resume is new work a stopped
         loser does not start (`admission.drive_racing`)."""
+        here = self._placed(op)
         try:
-            result = (
-                drive_racing(
-                    self.op_layers,
-                    op,
-                    self._interpret,
-                    new_work=self._stop_if_chosen,
-                    stopped=(Stopping,),
+            with placement_scope(here), forwards_held() as reforwards:
+                result = (
+                    drive_racing(
+                        self.op_layers,
+                        op,
+                        self._base,
+                        new_work=self._stop_if_chosen,
+                        stopped=(Stopping,),
+                        forwarding=reforwards.entering,
+                    )
+                    if self._stop.racing
+                    else drive_through(
+                        self.op_layers, op, self._base, forwarding=reforwards.entering
+                    )
                 )
-                if self._stop.racing
-                else drive_through(self.op_layers, op, self._interpret)
-            )
         except Refused as refused:
             # A layer (a permission cascade) blocked the op. Record the refusal and deliver it
             # *into* the workflow so a loop can catch it (e.g. route around a denied tool). If the
             # workflow doesn't catch it, `gen.throw` re-raises and it propagates out.
-            self._record(TraceEntry(self._placed(op), op, None, error=refused))
+            self._record(TraceEntry(here, op, None, error=refused))
             return Deliver(refused)
-        return self._record_result(op, result)
+        self._record(TraceEntry(here, op, result))
+        return Joined(result)
 
     def _record_result(self, op: WorkflowOp, result: Any) -> Joined:
         """Record a resolved op at its path-prefixed key and hand the value to the workflow."""
@@ -610,7 +628,7 @@ class RecordingHandler:
 
     def _placed(self, op: WorkflowOp) -> Key:
         """The op's key under this handler's frames, at its occurrence in this thread."""
-        return self._position.place(placed_key(op).prefixed(self._prefix))
+        return place_through(self._position, placed_key(op).prefixed(self._prefix))
 
     @contextmanager
     def _scope(self, prefix: str) -> Iterator[None]:
@@ -825,7 +843,8 @@ class RecordingHandler:
         timing — and, for a parked round, independent of wake timing."""
         results: list[Any] = []
         for child, result in children:
-            self.ledger.extend(child.ledger)
+            for row in child.ledger:
+                self._hold(row, child._writers[row.event_id.stored()])
             # Content-addressed ids make the artifact merge safe: same content dedups,
             # distinct content never clobbers.
             self.artifacts.update(child.artifacts)
@@ -882,19 +901,93 @@ class RecordingHandler:
         if self._stop.now():
             raise Stopping
 
-    def _ledgered(self, op: AppendLedgerRow | ReadLedgerRow) -> Any:
-        """The payload on record under the op's id, after an append appends its row."""
+    def _ledgered(self, op: AppendLedgerRow | ReadLedgerRow, here: Key) -> Any:
+        """The payload on record under the op's id, after an append written at `here` holds its
+        row."""
         match op:
-            case AppendLedgerRow(row=row):
-                held = next((had for had in self.ledger if had.event_id == row.event_id), row)
-                self.ledger.append(row)
+            case AppendLedgerRow(row=row, claim=claim):
+                # A claim names no writer, so every claim of an id reads the row that holds it.
+                self._hold(row, None if claim else here)
+                held = next(had for had in self.ledger if had.event_id == row.event_id)
             case ReadLedgerRow(event_id=event_id):
                 held = next((had for had in self.ledger if had.event_id == event_id), None)
             case unreachable:
                 assert_never(unreachable)
         return to_jsonable_python(held)
 
-    def _interpret(self, op: WorkflowOp) -> Any:
+    def _hold(self, row: LedgerRow, placement: Key | None) -> None:
+        """Hold `row`, written at `placement`, deciding a held id as both engines decide it.
+
+        | the id                                   | the row                          |
+        |------------------------------------------|----------------------------------|
+        | held by no row                           | appended                         |
+        | held by a claim, or claimed by this row  | kept as it is                    |
+        | held by a row this placement wrote       | kept as it is                    |
+        | held by a row another placement wrote    | refused: `PlacedWriterCollision` |
+        """
+        stored = row.event_id.stored()
+        if stored not in self._writers:
+            self._writers[stored] = placement
+            self.ledger.append(row)
+            return
+        held = self._writers[stored]
+        refuse_placed_writer_collision(
+            row.event_id,
+            None if placement is None else Writer(RECORDED_TASK, placement),
+            (RECORDED_TASK, None if held is None else held.stored()),
+        )
+
+    def _base(self, op: WorkflowOp) -> Any:
+        """The base of the layer stack, under the walk op's placement, `current_placement()`.
+
+        | the op                              | placed at         | recorded             |
+        |-------------------------------------|-------------------|----------------------|
+        | the walk op, or one under its key   | the published one | once, by the walk    |
+        | any other op a layer yields         | its own placement | as an injected entry |
+
+        An injected entry records what the op answered or raised, as a checkpoint records a
+        step, so a replay counts its placement where the record did. A layer's op forwarded again
+        takes its first forward's placement, as on the durable walk, and is served what that
+        forward answered; one that raised there is asked again and its entry replaced."""
+        ambient = current_placement()
+        if ambient is not None and ambient.is_occurrence_of(placed_key(op).prefixed(self._prefix)):
+            return self._interpret(op, ambient)
+        placed, held = self._layers_placement(op)
+        if held is not None and held.error is None:
+            return held.result
+        try:
+            result = self._interpret(op, placed)
+        except Stopping:
+            raise
+        except Exception as raised:
+            self._hold_injected(TraceEntry(placed, op, None, error=raised, injected=True), held)
+            raise
+        self._hold_injected(TraceEntry(placed, op, result, injected=True), held)
+        return result
+
+    def _layers_placement(self, op: WorkflowOp) -> tuple[Key, TraceEntry | None]:
+        """Where a layer's op is placed, and the entry its first forward recorded there, if this
+        is a re-forward.
+
+        | the op                                   | placed                               |
+        |------------------------------------------|--------------------------------------|
+        | its key names an occurrence              | as it is                             |
+        | a re-forward an open forward has next    | at that forward's occurrence         |
+        | any other                                | counted afresh, and the count heard  |
+        """
+        here = place_through(self._position, placed_key(op).prefixed(self._prefix))
+        held = next((e for e in reversed(self.trace) if e.injected and e.key == here), None)
+        return here, held
+
+    def _hold_injected(self, entry: TraceEntry, held: TraceEntry | None) -> None:
+        """Record `entry`, in place of `held` when a re-forward asks again at its placement."""
+        if held is None:
+            self._record(entry)
+            return
+        at = next(i for i, had in enumerate(self.trace) if had is held)
+        self.trace[at] = entry
+
+    def _interpret(self, op: WorkflowOp, here: Key) -> Any:
         if self._stop.racing and isinstance(op, CHECKPOINTED_OPS):
             self._stop_if_chosen()  # an op reaching the base after the choice, injected or not
         match op:
@@ -929,7 +1022,7 @@ class RecordingHandler:
                     "layer's logic, or use DurableHandler for real durable suspend/resume."
                 )
             case AppendLedgerRow() | ReadLedgerRow():
-                return self._ledgered(op)
+                return self._ledgered(op, here)
             case StoreArtifact(value=value, content_type=content_type):
                 # Content-addressed: the id is a function of the value, so two
                 # gather branches storing the same value get the same id (a

@@ -209,6 +209,8 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `durable.keyed` reads a named key's fact, `DurableHandler._interpret` a ledger append's row
     # and whether it claims, and `_report_raised` the error a raised loser's slot holds.
     # `ops.placed_leaves` reads the exceptions a group holds, to find an undecided race's.
+    # `ops.event_name` reads a relative key's scope, and `RecordingHandler._ledgered` whether an
+    # append claims.
     # The determinism lint for layers and schemas: `lint._binds` reads the names a node binds,
     # stores, captures and shares, `_use` and `_accumulates` a write's target and a call's callee
     # and arguments, `_path_of` an attribute or item path's parts, `_reads_the_world` and
@@ -232,7 +234,7 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `react._carrying` reads the loop a redirect hands the next level.
     # `handlers.base.op_key` reads a step's op, whose kind its key names.
     # `fork._parked_on` reads an await's addressing.
-    assert reached == 349, f"the corpus this fix was measured on held 349; found {reached}"
+    assert reached == 351, f"the corpus this fix was measured on held 351; found {reached}"
 
     seen = {
         (str(p), line + 1)

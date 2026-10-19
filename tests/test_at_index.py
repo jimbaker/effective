@@ -13,6 +13,8 @@ at every prefix length, two independent projections that must not drift. Sibling
 the other end of the same boundary (the measured driver indexes Step-only).
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from _steps import placed_step
 
@@ -20,6 +22,7 @@ from effective.api import append_ledger, ask_llm, await_event, call_tool, scoped
 from effective.checkpoints import is_step_checkpoint
 from effective.fork import OpIndex, to_step_index
 from effective.handlers.base import step_key
+from effective.handlers.durable import wake_race_at_time, wake_race_on_event
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Key, Subject, compose_key
 from effective.ops import CompositionRefused, LedgerRow
@@ -115,6 +118,31 @@ def test_a_key_that_merely_starts_like_an_arm_tag_is_still_a_step():
     prefix would index short."""
     assert is_step_checkpoint("monitoring:daily"), "a step's key was read as a substrate arm"
     assert not is_step_checkpoint("monitor:0")
+
+
+@pytest.mark.parametrize(
+    ("name", "step"),
+    [
+        ("gather:0,0;rec:0;race:0,0;step;tool:a", True),
+        ("gather:0,0;ledger;done:m1", False),
+        ("race:0;choice", False),
+        ("gather:0,1;race:0;endings", False),
+    ],
+)
+def test_a_checkpoint_reads_as_a_step_by_its_identity_past_its_frames(name, step):
+    assert is_step_checkpoint(name) is step
+
+
+@pytest.mark.parametrize(
+    "parked",
+    [
+        wake_race_at_time(0, 1, datetime(2026, 10, 18, tzinfo=UTC)),
+        wake_race_on_event(0, 1, compose_key(t"go:{Subject('x')}")),
+    ],
+    ids=["a sleep", "an event"],
+)
+def test_an_engines_wake_race_record_reads_as_no_step(parked):
+    assert not is_step_checkpoint(parked.stored())
 
 
 def test_an_authors_step_name_cannot_take_an_arm_tag():

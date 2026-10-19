@@ -77,7 +77,7 @@ from effective.handlers.durable import (
     fork_event_name,
     metered_call,
 )
-from effective.handlers.replay import ReplayMismatch
+from effective.handlers.replay import ReplayMismatch, past_injected
 from effective.keys import FramePosition, Key, Segment, compose_key, frame_path
 from effective.ops import (
     Addressing,
@@ -245,12 +245,13 @@ def replay_prefix[T](
     # to re-derive the same `sleep:{n}` and `#n` the record assigned, and it can only do that by
     # counting the same way.
     position = FramePosition() if position is None else position
-    while i < at:
+    while _walk_entry(trace, i) < at:
         op = delivery.into(gen)
         if isinstance(op, Scoped):
             delivery, i = _replay_scoped(op, trace, i, at, prefix="", position=position)
             continue
         with placing(op, position):
+            i = past_injected(trace, i, position, "")
             if (actual := position.place(placed_key(op))) != trace[i].key:
                 raise PrefixReplayDivergence(i, actual.stored(), trace[i].key.stored())
         delivery = Delivery.of(trace[i])
@@ -280,17 +281,37 @@ def _replay_scoped(
             inner = delivery.into(body)
         except StopIteration as done:
             return Delivery(value=done.value), i
-        if i >= at:
+        if _walk_entry(trace, i) >= at:
             # the fork point is INSIDE this scope — see `replay_prefix`'s docstring
             raise ForkPointInsideScope(inner, scope)
         if isinstance(inner, Scoped):
             delivery, i = _replay_scoped(inner, trace, i, at, prefix=scope, position=position)
             continue
         with placing(inner, position):
+            i = past_injected(trace, i, position, scope)
             if (actual := position.place(placed_key(inner).prefixed(scope))) != trace[i].key:
                 raise PrefixReplayDivergence(i, actual.stored(), trace[i].key.stored())
         delivery = Delivery.of(trace[i])
         i += 1
+
+
+def _walk_entry(trace: list[TraceEntry], i: int) -> int:
+    """The index of the first entry at or past `i` that the workflow's own op wrote."""
+    while i < len(trace) and trace[i].injected:
+        i += 1
+    return i
+
+
+class ForkAtAnInjectedOp(ValueError):
+    """A fork point at an injected entry, an op a layer yielded. A fork's walk runs no layers, so
+    nothing in it asks that op; fork at the workflow's op the layer ran for."""
+
+    def __init__(self, at: int) -> None:
+        super().__init__(at)
+        self.at = at
+
+    def __str__(self) -> str:
+        return f"fork point {self.at} is an injected entry, which a fork's walk never asks"
 
 
 class ForkPointDivergence(ReplayMismatch):
@@ -319,8 +340,14 @@ def fork_at[T](
     """Fork `program` at op `at`, substituting `substitute` as that op's result, and run the
     tail live under `domain`. For a pending-park fork (`at == len(trace)`) pass `pending_name`
     (the parked event name) — there is no `trace[at]` to validate against."""
+    if at < len(trace) and trace[at].injected:
+        raise ForkAtAnInjectedOp(at)
     position = FramePosition()
     gen, delivery = replay_prefix(program, trace, at, position=position)
+    # the injected entries the fork point's layers recorded before it
+    layered = at
+    while layered > 0 and trace[layered - 1].injected:
+        layered -= 1
     op = delivery.into(gen)  # the op AT `at` (the fork point) — consumed here, guarded below
     # The fork point must be a DECISION to substitute. Guard the op CLASS before the key check:
     # a fork AT a sleep, write or concurrent op is refused by class, and op_key is not defined for
@@ -348,6 +375,7 @@ def fork_at[T](
         case _:
             raise ForkPointRefused(op)  # AppendLedgerRow / StoreArtifact — a write, not a decision
     with placing(op, position):
+        past_injected(trace, layered, position, "")
         asked = placed_key(op)
         placed = position.place(asked)
     if at < len(trace):

@@ -307,10 +307,10 @@ one. One exception: [`tests/test_gather.py:137`](../tests/test_gather.py#L137) d
 row per branch.
 
 **And the quotient alone does not buy the metatheorem**, which is the trap to avoid here. Two
-things survive it. Schedule-dependent *payloads* differ across handlers whatever the order, and a
-repeated `event_id` diverges by **outcome**: the recorder completes with two rows, while both
-durable engines refuse the run with `PlacedWriterCollision` and keep the one row that won (measured,
-both engines, [`tests/test_conformance.py:2305`](../tests/test_conformance.py#L2305)). No permutation of rows repairs that. So the
+things survive it. Schedule-dependent *payloads* differ across handlers whatever the order, and no
+permutation of rows repairs that. A repeated authored `event_id` is refused alike: the recorder and
+both engines decide a held id with one function and raise `PlacedWriterCollision`
+([`tests/test_conformance.py:2824`](../tests/test_conformance.py#L2824)). So the
 statement needs a **well-formedness quantifier** over workflows with distinct authored identities,
 and that quantifier is necessary without being sufficient: an installed layer is a shared cell two
 distinct identities both touch, and it moves the payloads themselves (§9.4).
@@ -353,10 +353,10 @@ side.
 rendezvous inside their thunks complete on both engines when the thunks overlap, and time out when
 whole step completions are serialized (measured). So a schedule at this seam explores **effect
 boundaries**, and what happens inside an opaque `Step` is out of its reach: serializing there can
-manufacture a deadlock the production path does not have. The recorder also publishes no placement
-to a layer (`layers.py:293`), so two sibling `Step("same", …)` ops are indistinguishable there while
-both durable engines show `gather:0,0;step;tool:same` and `gather:0,1;step;tool:same`. A portable scheduler
-needs uniquely labelled fixtures until that asymmetry closes.
+manufacture a deadlock the production path does not have. The recorder and both engines publish
+the walk op's placement to a layer, so two sibling `Step("same", …)` ops read
+`gather:0,0;step;tool:same` and `gather:0,1;step;tool:same` on every walk but replay, which runs no
+layers.
 
 The only enabled-set in the repo is in a model rather than in the code: `gather.qnt` picks
 `oneOf(activeBranches)` and explores every interleaving, and it declines to impose the recorder's

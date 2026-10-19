@@ -36,7 +36,8 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import (
     Any,
@@ -110,6 +111,7 @@ def walk_run() -> Iterator[None]:
     |                               | task, and the caller's returns after it                     |
     | `run_scope()`                 | `layers.layer_run_state` hands out one dict for the run     |
     | no meter                      | a gate reads no spend, and a nested run none of its host's  |
+    | no open forward               | a nested run counts its ops afresh, apart from its host's   |
 
     The ambient is per run, and a drive loop recurses per frame: a gather branch and a scoped body
     are frames of the same run, so they do not enter it again.
@@ -125,7 +127,22 @@ def walk_run() -> Iterator[None]:
 def _walk_run(spend: Callable[[], Usage] | None) -> Iterator[None]:
     """`walk_run` for a handler that meters: `spend` reads its own replay-derived meter, and the
     gates of the run read it. A durable handler's run entry is its caller."""
-    with chain_held(ChainPosition()), run_scope(), _metering(spend):
+    with chain_held(ChainPosition()), run_scope(), _metering(spend), _forwards_cleared():
+        yield
+
+
+@contextmanager
+def branch_scope() -> Iterator[None]:
+    """The ambient a gather or race branch enters: a frame of the run, so it keeps the run's
+    chain state and meter.
+
+    | establishes     | so that                                                          |
+    |-----------------|------------------------------------------------------------------|
+    | `run_scope()`   | the branch accrues in its own layer dict, apart from its siblings |
+    | no open forward | a branch of a layer's gather places its ops apart from the layer's |
+    |                 | forwards, which its thread would otherwise share                  |
+    """
+    with run_scope(), _forwards_cleared():
         yield
 
 
@@ -380,12 +397,161 @@ def artifact_id(op: StoreArtifact[Any]) -> str:
     return artifact_key(op).stored().removeprefix("artifact:")
 
 
+@dataclass
+class _Forward:
+    """One op entering one level of the layer stack, and the names placed below it.
+
+    A re-forward shares its first forward's `names` and reads them from `cursor`.
+
+    | the forward is | when                            | so it                                 |
+    |----------------|---------------------------------|---------------------------------------|
+    | replaying      | `cursor` is before the end      | hands the name at `cursor`            |
+    | recording      | `cursor` is at the end          | appends each name placed below it     |
+    | diverged       | a key other than its next name  | takes no part, and its names stay as  |
+    |                | was placed while it replayed    | they were, so a later re-forward      |
+    |                |                                 | replays the first forward's alone     |
+    """
+
+    level: int
+    op: WorkflowOp
+    names: list[tuple[Key, int]]
+    cursor: int
+    diverged: bool = False
+
+    @property
+    def replaying(self) -> bool:
+        return not self.diverged and self.cursor < len(self.names)
+
+    @property
+    def recording(self) -> bool:
+        return not self.diverged and self.cursor == len(self.names)
+
+
+@dataclass
+class _Reforwards:
+    """The forwards one walk op's layer stack made, so a re-forward is placed as its first
+    forward was.
+
+    A layer re-forwards by yielding an op object again to the level it went to before, within one
+    forward of its own, as `retry` does. Counts only grow.
+
+    When the walk places a key, it visits the open forwards:
+
+    ```
+    each open forward, innermost first
+    ├── replaying, its next name this key ─── hands its occurrence; the visit ends
+    │     └── each recording forward inside it records that occurrence
+    ├── replaying, its next name another key ─ diverges; the visit goes on outward
+    ├── recording, or diverged ─────────────── the visit goes on outward
+    └── past the outermost ─────────────────── the key is counted afresh
+          └── every recording forward records the new occurrence
+    ```
+
+    The names are the walk's. A layer that numbers its own op per invocation, as the human tier and
+    `govern` number their awaits, places a new key on a re-forward; on Absurd the SDK numbers an
+    await itself, once per ask."""
+
+    handed: list[_Forward] = field(default_factory=list)
+    open: list[_Forward] = field(default_factory=list)
+
+    def entering(self, level: int, op: WorkflowOp) -> None:
+        """`op` enters `level` of the stack, `level` being the layers below it.
+
+        ```
+        the op entering this level, within the yielding layer's current forward
+        ├── an object this level saw before ── a re-forward, replaying that forward's names
+        └── an object new to this level ────── a first forward, recording
+        ```
+        """
+        while self.open and self.open[-1].level <= level:
+            self.open.pop()
+        forward = _Forward(level, op, [], cursor=0)
+        for earlier in reversed(self.handed):
+            if earlier.level > level:
+                break  # the yielding layer's own forward began there
+            if earlier.level == level and earlier.op is op:
+                forward = _Forward(level, op, earlier.names, cursor=0)
+                break
+        self.handed.append(forward)
+        self.open.append(forward)
+
+    def replayed(self, placed: Key) -> int | None:
+        """The occurrence a replaying forward hands `placed`, or `None` when no open forward has
+        it next; the class docstring has the visit."""
+        for depth in range(len(self.open) - 1, -1, -1):
+            forward = self.open[depth]
+            if not forward.replaying:
+                continue
+            key, occurrence = forward.names[forward.cursor]
+            if key != placed:
+                forward.diverged = True
+                continue  # a forward around it may have placed this name first
+            forward.cursor += 1
+            for inner in self.open[depth + 1 :]:
+                if inner.recording:
+                    inner.names.append((placed, occurrence))
+                    inner.cursor += 1
+            return occurrence
+        return None
+
+    def counted(self, placed: Key, occurrence: int) -> None:
+        """`placed` was counted afresh at `occurrence`."""
+        for forward in self.open:
+            if forward.recording:
+                forward.names.append((placed, occurrence))
+                forward.cursor += 1
+
+
+_FORWARDS: ContextVar[_Reforwards | None] = ContextVar("effective_forwards", default=None)
+
+
+@contextmanager
+def _forwards_cleared() -> Iterator[None]:
+    """No forward open, for a run's or a branch's own ops."""
+    token = _FORWARDS.set(None)
+    try:
+        yield
+    finally:
+        _FORWARDS.reset(token)
+
+
+@contextmanager
+def forwards_held() -> Iterator[_Reforwards]:
+    """The forwards the layer stack makes while it drives one walk op, held for that drive."""
+    token = _FORWARDS.set(reforwards := _Reforwards())
+    try:
+        yield reforwards
+    finally:
+        _FORWARDS.reset(token)
+
+
+def place_through(position: FramePosition, placed: Key) -> Key:
+    """`placed` at its occurrence in this thread of control, as every walk places an op.
+
+    | `placed`                              | placed at                                 |
+    |---------------------------------------|-------------------------------------------|
+    | names an occurrence                   | as it stands                              |
+    | an open forward replays it next       | that forward's first occurrence           |
+    | any other                             | counted afresh, and each open forward told |
+    """
+    if placed.structure().occurrence is not None:
+        return placed
+    reforwards = _FORWARDS.get()
+    if reforwards is not None and (replayed := reforwards.replayed(placed)) is not None:
+        return placed.occurrence(replayed)
+    here = position.place(placed)
+    if reforwards is not None:
+        reforwards.counted(placed, here.structure().occurrence or 1)
+    return here
+
+
 @dataclass(frozen=True)
 class TraceEntry:
     key: Key
     op: WorkflowOp
     result: Any
     error: BaseException | None = None  # set when the op was refused/raised, not resolved
+    injected: bool = False  # a layer yielded the op, so a walk without the layers never asks it
 
 
 def kinded_name(name: str | Key, kind: OpKind) -> Key:

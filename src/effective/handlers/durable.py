@@ -37,7 +37,7 @@ from the other.
 import asyncio
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import cache
 from typing import Any, Never, Protocol, assert_never
@@ -106,13 +106,16 @@ from effective.handlers.base import (
     _walk_run,
     artifact_id,
     barrier_errors,
+    branch_scope,
     branch_slot,
     content_digest,
     deadline_of,
     ending_of,
+    forwards_held,
     gated_record,
     keyed_call,
     op_key,
+    place_through,
     placed_await_name,
     placed_key,
     placing,
@@ -152,7 +155,6 @@ from effective.layers import (
     drive_through,
     layer_routing,
     placement_scope,
-    run_scope,
 )
 from effective.ops import (
     ACCRUAL_PARAM,
@@ -387,111 +389,6 @@ class _ChainContinues(BaseException):
 
     def __init__(self, result: Any) -> None:
         self.result = result
-
-
-@dataclass
-class _Forward:
-    """One op entering one level of the layer stack, and the names placed below it.
-
-    A re-forward shares its first forward's `names` and reads them from `cursor`.
-
-    | the forward is | when                            | so it                                 |
-    |----------------|---------------------------------|---------------------------------------|
-    | replaying      | `cursor` is before the end      | hands the name at `cursor`            |
-    | recording      | `cursor` is at the end          | appends each name placed below it     |
-    | diverged       | a key other than its next name  | takes no part, and its names stay as  |
-    |                | was placed while it replayed    | they were, so a later re-forward      |
-    |                |                                 | replays the first forward's alone     |
-    """
-
-    level: int
-    op: WorkflowOp
-    names: list[tuple[Key, int]]
-    cursor: int
-    diverged: bool = False
-
-    @property
-    def replaying(self) -> bool:
-        return not self.diverged and self.cursor < len(self.names)
-
-    @property
-    def recording(self) -> bool:
-        return not self.diverged and self.cursor == len(self.names)
-
-
-@dataclass
-class _Reforwards:
-    """The forwards one walk op's layer stack made, so a re-forward is placed as its first
-    forward was.
-
-    A layer re-forwards by yielding an op object again to the level it went to before, within one
-    forward of its own, as `retry` does. Counts only grow.
-
-    When the walk places a key, it visits the open forwards:
-
-    ```
-    each open forward, innermost first
-    ├── replaying, its next name this key ─── hands its occurrence; the visit ends
-    │     └── each recording forward inside it records that occurrence
-    ├── replaying, its next name another key ─ diverges; the visit goes on outward
-    ├── recording, or diverged ─────────────── the visit goes on outward
-    └── past the outermost ─────────────────── the key is counted afresh
-          └── every recording forward records the new occurrence
-    ```
-
-    The names are the walk's. A layer that numbers its own op per invocation, as the human tier and
-    `govern` number their awaits, places a new key on a re-forward; on Absurd the SDK numbers an
-    await itself, once per ask."""
-
-    handed: list[_Forward] = field(default_factory=list)
-    open: list[_Forward] = field(default_factory=list)
-
-    def entering(self, level: int, op: WorkflowOp) -> None:
-        """`op` enters `level` of the stack, `level` being the layers below it.
-
-        ```
-        the op entering this level, within the yielding layer's current forward
-        ├── an object this level saw before ── a re-forward, replaying that forward's names
-        └── an object new to this level ────── a first forward, recording
-        ```
-        """
-        while self.open and self.open[-1].level <= level:
-            self.open.pop()
-        forward = _Forward(level, op, [], cursor=0)
-        for earlier in reversed(self.handed):
-            if earlier.level > level:
-                break  # the yielding layer's own forward began there
-            if earlier.level == level and earlier.op is op:
-                forward = _Forward(level, op, earlier.names, cursor=0)
-                break
-        self.handed.append(forward)
-        self.open.append(forward)
-
-    def replayed(self, placed: Key) -> int | None:
-        """The occurrence a replaying forward hands `placed`, or `None` when no open forward has
-        it next; the class docstring has the visit."""
-        for depth in range(len(self.open) - 1, -1, -1):
-            forward = self.open[depth]
-            if not forward.replaying:
-                continue
-            key, occurrence = forward.names[forward.cursor]
-            if key != placed:
-                forward.diverged = True
-                continue  # a forward around it may have placed this name first
-            forward.cursor += 1
-            for inner in self.open[depth + 1 :]:
-                if inner.recording:
-                    inner.names.append((placed, occurrence))
-                    inner.cursor += 1
-            return occurrence
-        return None
-
-    def counted(self, placed: Key, occurrence: int) -> None:
-        """`placed` was counted afresh at `occurrence`."""
-        for forward in self.open:
-            if forward.recording:
-                forward.names.append((placed, occurrence))
-                forward.cursor += 1
 
 
 class _GatherPark(BaseException):
@@ -1437,7 +1334,6 @@ class DurableHandler:
         # re-armed name, and the run would park on a name no emitter can produce.
         self._scope_path = ""
         # What the walk op now running its layers has placed, so a re-forward is placed alike.
-        self._reforwards: _Reforwards | None = None
         # Race admission (`effective.handlers.admission`). Every one of these is read only when
         # `self._stop` says a race encloses this handler.
         #
@@ -1497,7 +1393,7 @@ class DurableHandler:
         # cross-branch interference) but must NOT re-enter the RUN (`chain_held` would reset
         # chain state mid-run). Per-RUN versus per-FRAME, stated once by this branch.
         if self._in_gather:
-            with run_scope():
+            with branch_scope():
                 try:
                     # `_drive`, not `_run`: a BRANCH value is not a task result. It flows back
                     # into the parent's live generator through `_join`, so it must stay a
@@ -1748,16 +1644,16 @@ class DurableHandler:
 
     def _through_layers(self, op: WorkflowOp) -> Any:
         """The walk op, once placed, driven through the op layers to `_handle`."""
-        outer, self._reforwards = self._reforwards, _Reforwards()
-        forwarding = self._reforwards.entering
-        try:
+        with forwards_held() as reforwards:
             if self._stop.racing:
-                return self._race_leaf(op, forwarding)
+                return self._race_leaf(op, reforwards.entering)
             return drive_through(
-                self.op_layers, op, self._handle, escapes=self._signals, forwarding=forwarding
+                self.op_layers,
+                op,
+                self._handle,
+                escapes=self._signals,
+                forwarding=reforwards.entering,
             )
-        finally:
-            self._reforwards = outer
 
     def _race_leaf(self, op: WorkflowOp, forwarding: Callable[[int, WorkflowOp], None]) -> Any:
         """A walk op inside a race branch, once `_place` has counted it, driven through the layers.
@@ -1900,16 +1796,9 @@ class DurableHandler:
         **It counts only where nothing else did**: `Key.occurrence` refuses a second suffix, and a
         `Scope.SETTLEMENT` await already carries the one `placing` gave it. That suffix counts
         asks of the name, which is the same coordinate under a different producer."""
-        placed = placed_key(op).prefixed(getattr(self.ctx, "prefix", ""))
-        if placed.structure().occurrence is not None:
-            return placed  # the walk already distinguished this one
-        reforwards = self._reforwards
-        if reforwards is not None and (replayed := reforwards.replayed(placed)) is not None:
-            return placed.occurrence(replayed)
-        here = self._position.place(placed)
-        if reforwards is not None:
-            reforwards.counted(placed, here.structure().occurrence or 1)
-        return here
+        return place_through(
+            self._position, placed_key(op).prefixed(getattr(self.ctx, "prefix", ""))
+        )
 
     def _handle(self, op: WorkflowOp) -> Any:
         match op:

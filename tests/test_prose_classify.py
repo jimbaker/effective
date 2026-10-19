@@ -10,12 +10,20 @@ check and `just check` are indifferent to how much prose survives.
 import pytest
 
 from effective.domain import CallTool
+from effective.handlers.recording import RecordingHandler
+from effective.handlers.replay import ReplayHandler
 from effective.keys import Segment
 from effective.machine.evidence import CommandRun
 from effective.machine.spec import Ctx
 from effective.ops import AwaitEvent, Step, StoreArtifact
 from effective.prose import DESTINATIONS, State, build_prose_specs
-from effective.prose.runners import MAX_ANSWER_ATTEMPTS, AnswerRefused, answered, decode
+from effective.prose.runners import (
+    MAX_ANSWER_ATTEMPTS,
+    AnswerRefused,
+    answered,
+    decode,
+    park_name,
+)
 
 
 def test_a_classified_answer_must_name_a_destination_for_every_block():
@@ -121,11 +129,30 @@ def test_a_refused_answer_asks_again_instead_of_killing_the_run():
     second = gen.send("artifact-id")
     assert isinstance(second, AwaitEvent)
     # a DIFFERENT name, because the first event is durable and a replay would re-serve it forever
-    assert second.name.display() == "prose:probe,classify#2"
+    assert second.name == park_name("probe", State.CLASSIFY, 2)
 
     with pytest.raises(StopIteration) as done:
         gen.send({"verdict": "classified", "blocks": [{"block": "intro", "to": "shows"}]})
     assert done.value.value[0].value == "classified"
+
+
+def test_a_retry_waits_on_an_unnumbered_name():
+    """An occurrence suffix is the walk's to add, so a retry is a coordinate of the name."""
+    second = park_name("probe", State.CLASSIFY, 2)
+    assert second.structure().occurrence is None
+    assert second != park_name("probe", State.CLASSIFY)
+
+
+def test_a_retry_names_its_attempt_as_a_coordinate():
+    assert park_name("probe", State.CLASSIFY, 2).stored() == "prose:probe,classify,attempt=2"
+
+
+def test_a_refused_then_answered_ask_replays():
+    first, second = (park_name("probe", State.CLASSIFY, n).stored() for n in (1, 2))
+    good = {"verdict": "classified", "blocks": [{"block": "intro", "to": "shows"}]}
+    recorder = RecordingHandler({first: {"verdict": "classified"}, second: good})
+    result = recorder.run(lambda: answered("probe", State.CLASSIFY))
+    assert ReplayHandler(recorder.trace).run(lambda: answered("probe", State.CLASSIFY)) == result
 
 
 def test_the_asking_is_bounded():

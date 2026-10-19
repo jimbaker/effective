@@ -22,7 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from effective.api import Effect, await_event, call_tool, store_artifact
-from effective.keys import Name, Subject, compose_key
+from effective.keys import Index, Key, Name, Subject, compose_key
 from effective.machine.evidence import CommandRun
 from effective.machine.spec import Ctx, Report
 from effective.prose.states import VERDICTS, State, Verdict, VerifyVerdict
@@ -53,15 +53,15 @@ def answered(subject: str, state: State) -> Effect[tuple[Verdict, str, str]]:
     ON PURPOSE. Rejecting a bad answer by destroying the run punishes rather than rejects.
 
     Re-awaiting the SAME name cannot work: the event is durable, so a replay re-serves the bad
-    payload forever. `Key.occurrence` is what makes a second ask a different question, and it is
-    byte-preserving at the first ask, so a run that answers
-    correctly composes the name it always composed.
+    payload forever. The attempt coordinate makes a second ask a different question, and it is
+    omitted at the first ask, so a run that answers correctly composes the name it always
+    composed.
 
     The refusal itself is recorded with `store_artifact`, so a driver reads WHY in the run view
     instead of in the database. Deterministic: the value is derived from a recorded answer, so a
     replay re-derives the same artifact."""
     for attempt in range(1, MAX_ANSWER_ATTEMPTS + 1):
-        answer = yield from await_event(park_name(subject, state).occurrence(attempt), dict)
+        answer = yield from await_event(park_name(subject, state, attempt), dict)
         try:
             return decode(state, answer)
         except AnswerRefused as exc:
@@ -75,15 +75,13 @@ def answered(subject: str, state: State) -> Effect[tuple[Verdict, str, str]]:
     )
 
 
-def park_name(subject: str, state: State):
-    """The event a driver answers to advance this state.
+def park_name(subject: str, state: State, attempt: int = 1) -> Key:
+    """The event a driver answers to advance this state, at its `attempt`-th ask.
 
-    Arity two rather than a path, so the two coordinates stay separately addressable: a surface
-    listing every open question for one region filters on the subject, and the grammar gives it
-    that for free. A second visit to the same state under the same subject is distinguished by the
-    key's own `#N` occurrence suffix, which is exactly what that suffix is for — so a back edge
-    needs no coordinate of its own here."""
-    return compose_key(t"prose:{Subject(subject)},{Name(state.value)}")
+    Subject and state stay separate coordinates, so a surface listing every open question for one
+    region filters on the subject. The attempt is omitted at 1."""
+    region, verdict, ask = Subject(subject), Name(state.value), Index(attempt)
+    return compose_key(t"prose:{region},{verdict},attempt={ask:default=1}")
 
 
 def decode(state: State, body: Any) -> tuple[Verdict, str, str]:

@@ -453,11 +453,14 @@ def test_a_checkpoint_class_is_the_head_tag_past_its_frames(identity, head):
 def test_one_identity_from_two_authored_sites_is_a_join_b_group(witness):
     """Reddens if Join B stops pairing two sites that land on one durable identity."""
 
-    def workflow():
-        yield from append_ledger(row("same"))
+    def first():
         yield from append_ledger(row("same"))
 
-    RecordingHandler().run(workflow)
+    def second():
+        yield from append_ledger(row("same"))
+
+    RecordingHandler().run(first)
+    RecordingHandler().run(second)
 
     report = ew.join_b(witness.rows)
     assert "1 groups: 1 test" in report
