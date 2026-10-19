@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, assert_never
 
+from pydantic_core import to_jsonable_python
+
 from effective.api import Effect
 from effective.choice import Answer, answer, stored_endings
 from effective.govern import all_refusals, delivered
@@ -64,6 +66,7 @@ from effective.ops import (
     Gather,
     LedgerRow,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -450,7 +453,7 @@ class RecordingHandler:
                     return self._run_structural(op, gen)
                 case Respawn():
                     return Ended(self._respawn(op))
-                case Step() | AppendLedgerRow() | StoreArtifact() | SleepUntil():
+                case Step() | AppendLedgerRow() | ReadLedgerRow() | StoreArtifact() | SleepUntil():
                     return self._interpret_layered(op)
                 case unreachable:
                     # BOUND, not `op` — the binding is what carries `Never` here once every arm
@@ -840,6 +843,18 @@ class RecordingHandler:
         if self._stop.now():
             raise Stopping
 
+    def _ledgered(self, op: AppendLedgerRow | ReadLedgerRow) -> Any:
+        """The payload on record under the op's id, after an append appends its row."""
+        match op:
+            case AppendLedgerRow(row=row):
+                held = next((had for had in self.ledger if had.event_id == row.event_id), row)
+                self.ledger.append(row)
+            case ReadLedgerRow(event_id=event_id):
+                held = next((had for had in self.ledger if had.event_id == event_id), None)
+            case unreachable:
+                assert_never(unreachable)
+        return to_jsonable_python(held)
+
     def _interpret(self, op: WorkflowOp) -> Any:
         if self._stop.racing and isinstance(op, CHECKPOINTED_OPS):
             self._stop_if_chosen()  # an op reaching the base after the choice, injected or not
@@ -874,9 +889,8 @@ class RecordingHandler:
                     "mid-layer stack (no call/cc). Provide a canned response to test the "
                     "layer's logic, or use DurableHandler for real durable suspend/resume."
                 )
-            case AppendLedgerRow(row=row):
-                self.ledger.append(row)
-                return None
+            case AppendLedgerRow() | ReadLedgerRow():
+                return self._ledgered(op)
             case StoreArtifact(value=value, content_type=content_type):
                 # Content-addressed: the id is a function of the value, so two
                 # gather branches storing the same value get the same id (a

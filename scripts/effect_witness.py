@@ -43,6 +43,7 @@ from effective.ops import (
     AwaitEvent,
     Gather,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -269,7 +270,7 @@ def can_write(effect: Effect, op: WorkflowOp) -> bool:
             return effect in ("ledger", "checkpoint")
         case StoreArtifact():
             return effect in ("artifact", "checkpoint")
-        case Step() | Race():
+        case Step() | ReadLedgerRow() | Race():
             return effect == "checkpoint"  # a race checkpoints its choice and its endings
         case SleepUntil() | AwaitEvent() | Gather() | Scoped() | Respawn():
             return False

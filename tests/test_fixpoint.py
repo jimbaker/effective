@@ -32,13 +32,15 @@ from _shapes import (
     sweep,
 )
 
-from effective.api import Effect, append_ledger, ask_llm, call_tool, gather, scoped
+from effective.api import Effect, append_ledger, ask_llm, call_tool, gather, scoped, step
 from effective.budget import Grant, MeasuredBudget, depth_grant_name
 from effective.budget import as_policy as budget_policy
 from effective.combinators import Converged, Grantor, Unconverged, fix, fixpoint
+from effective.contexts import RecordingCtx
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
 from effective.govern import BudgetRefused, Exceeded, GateState, Policy, Proceed, Refuse, Verdict
+from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Index, Key, Name, Run, compose_key
@@ -547,3 +549,36 @@ def test_a_branch_keeps_the_depth_arm_on_both_engines(backend, program, ending):
         case kind:
             assert outcome.snap.state == "failed", outcome.snap
             assert backend.failure_kind(outcome.snap) == kind, outcome.snap.failure
+
+
+def _sibling_loops(scopes: Sequence[Key | None]) -> list[list[Key]]:
+    """The step keys of two `fixpoint`s run one after the other, each under its scope."""
+
+    def halved(value: int) -> Effect[int]:
+        yield from step("x", CallTool(name="x", args={}, result_schema=int))
+        return value // 2
+
+    def loops() -> Effect[None]:
+        for scope in scopes:
+            loop = partial(fixpoint, 8, halved, budget=5)
+            yield from (loop() if scope is None else scoped(scope, loop))
+
+    ctx = RecordingCtx()
+    DurableHandler(ctx, _Answers()).run(loops)
+    keys = list(ctx.log)
+    return [keys[: len(keys) // 2], keys[len(keys) // 2 :]]
+
+
+class _Answers:
+    def run(self, op: Any) -> int:
+        return 0
+
+
+def test_two_sibling_fixpoints_are_two_shapes_only_under_two_scopes():
+    """Both start at `d:0`, so the second's steps are the first's identities again, read as their
+    second occurrences, until each loop takes its own scope."""
+    first, second = _sibling_loops([None, None])
+    assert {key.terms() for key in first} == {key.terms() for key in second}
+    apart = [compose_key(t"loop:{Name(name)}") for name in ("a", "b")]
+    first, second = _sibling_loops(apart)
+    assert not {key.terms() for key in first} & {key.terms() for key in second}

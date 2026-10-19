@@ -2,6 +2,7 @@
 #   check   ruff + ast-grep lints (incl. seam-dep-direction) + ty + pytest
 #   formal  lake build (Lean/Mathlib) + quint typecheck (the spec gate)
 #   durable the crash-replay + cross-engine suite against a real Postgres
+#   odoo    the AR firm's suites against Odoo Community, both pinned in Podman
 #
 # `durable` exists because `check` cannot fail for the reason that matters here: the
 # Postgres-backed tests SKIP without a database, so a `check` job that never sees one
@@ -34,6 +35,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/free-disk
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       # uv sync installs the pinned Python 3.14 + deps (ast-grep is a dep).
@@ -48,6 +50,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/free-disk
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       # lean-action installs the pinned Lean toolchain, fetches the Mathlib
       # cache, and runs `lake build` in formal/lean (the Lean gate). It caches
@@ -76,6 +79,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/free-disk
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
       # `pgt-up` stands up the digest-pinned Postgres from infra/pg-test/PIN.txt under
@@ -90,3 +94,23 @@ jobs:
           DATABASE_URL: postgresql://effective:effective@localhost:5432/effective
           EFFECTIVE_REQUIRE_PG: "1"
         run: just test
+
+  # The AR firm's live arm: its ERP port, saga and resolution against Odoo Community in a
+  # digest-pinned pod, on both engines. Without Odoo the arm skips, so `EFFECTIVE_REQUIRE_ODOO`
+  # asserts it ran, as `EFFECTIVE_REQUIRE_PG` does for Absurd.
+  odoo:
+    name: odoo (the AR firm against Odoo Community)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/free-disk
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - run: podman --version
+      - run: just pgt-up
+      - run: just odoo-up
+      - name: the AR firm's suites with the live Odoo arm required
+        env:
+          DATABASE_URL: postgresql://effective:effective@localhost:5432/effective
+        run: just odoo-test

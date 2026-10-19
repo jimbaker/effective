@@ -192,6 +192,9 @@ def test_a_colon_bearing_child_run_id_is_refused_at_every_minting_site():
         def append(self, row, *, writer=None):
             pass
 
+        def read(self, event_id):
+            return None
+
     with pytest.raises(ValueError, match="delimiter"):
         ForkLedger(_Hyp(), child_run_id="sweep:0")  # ty: ignore[invalid-argument-type]
     with pytest.raises(ValueError, match="delimiter"):
@@ -235,6 +238,9 @@ def test_a_fork_ledger_cannot_wrap_another_fork_ledger():
         # would have to forward it.
         def append(self, row, *, writer=None):
             pass
+
+        def read(self, event_id):
+            return None
 
     inner = ForkLedger(_Hyp(), child_run_id=Segment("cf-a"))
     with pytest.raises(ValueError, match="cannot wrap another ForkLedger"):

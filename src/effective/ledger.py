@@ -20,7 +20,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import Field, SQLModel, create_engine
 
 import effective.pgkeys  # noqa: F401  — registers the `Key` psycopg dumper
-from effective.ops import LedgerRow, Writer, refuse_placed_writer_collision
+from effective.keys import Key
+from effective.ops import (
+    LedgerRow,
+    Writer,
+    refuse_a_lineage_collision,
+    refuse_placed_writer_collision,
+)
 
 
 def to_sqlalchemy_url(dsn: str) -> str:
@@ -80,7 +86,9 @@ class PostgresLedger:
         self.workflow_run_id = workflow_run_id
         self.hypothetical = hypothetical
 
-    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> None:
+    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> dict[str, Any]:
+        """The payload on record under the row's id: the row, or the row another task appended
+        first."""
         table = LedgerEntry.__table__  # ty: ignore[unresolved-attribute]
         stmt = (
             pg_insert(table)
@@ -102,13 +110,34 @@ class PostgresLedger:
         # then reads the committed winner.
         with self._engine.begin() as conn:
             if conn.execute(stmt).first() is not None:
-                return
+                return to_jsonable_python(row)
             held = conn.execute(
-                select(table.c.writer_task, table.c.writer_placement).where(
-                    table.c.event_id == str(row.event_id.stored())
+                select(
+                    table.c.writer_task,
+                    table.c.writer_placement,
+                    table.c.payload,
+                    table.c.hypothetical,
+                ).where(table.c.event_id == str(row.event_id.stored()))
+            ).first()
+        refuse_placed_writer_collision(
+            row.event_id, writer, None if held is None else (held[0], held[1])
+        )
+        assert held is not None  # the conflict this append lost is a row on record
+        refuse_a_lineage_collision(row.event_id, self.hypothetical, bool(held[3]))
+        return dict(held[2])
+
+    def read(self, event_id: Key) -> dict[str, Any] | None:
+        """The payload on record under `event_id` in this writer's lineage: a canonical reader
+        reads no hypothetical row, and a hypothetical one no canonical row."""
+        table = LedgerEntry.__table__  # ty: ignore[unresolved-attribute]
+        with self._engine.begin() as conn:
+            held = conn.execute(
+                select(table.c.payload).where(
+                    table.c.event_id == str(event_id.stored()),
+                    table.c.hypothetical == self.hypothetical,
                 )
             ).first()
-        refuse_placed_writer_collision(row.event_id, writer, None if held is None else tuple(held))
+        return None if held is None else dict(held[0])
 
     def close(self) -> None:
         self._engine.dispose()

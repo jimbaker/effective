@@ -1,0 +1,9 @@
+# Odoo Community for the ERP port's integration rung, run under rootless Podman.
+# Referenced ONLY by digest; the tag names the nightly the image was built from.
+# A mature product, so no second-machine corroboration: the pin is for a repeatable setup.
+
+image:  docker.io/library/odoo
+tag:    20.0-20260926
+digest: sha256:a54b6a68e1816f57c3f22f611e049246ca274ab86bc9fb24fc021a21c850209e
+pulled: 2026-10-11
+engine: podman 5.7.0 (rootless)

@@ -524,10 +524,10 @@ class MeasuredTail:
 
 
 def _run_live(op: Step[Any], domain: MeteredDomain) -> tuple[Any, Usage]:
-    """A step an in-process driver runs live. The driver has no task, so a step that asks for
-    an idempotency key is refused, as the durable handler refuses one outside a task, and so is a
-    spawn, which is named by its task; a key the handler did not mint is refused as the handler
-    refuses it."""
+    """A step an in-process driver runs live. A keyed step is refused: a minted key names a task
+    the driver does not have, and a named fact names an effect the base run may already have
+    performed, which the fork would perform or be answered in its place. A spawn, named by its
+    task, is refused too."""
     match op.op:
         case CallTool(name=name) if name == SPAWN_TOOL:
             raise Refused(
@@ -537,11 +537,7 @@ def _run_live(op: Step[Any], domain: MeteredDomain) -> tuple[Any, Usage]:
         case _:
             pass
     if keyed_call(op, op.op) is not None:
-        raise Refused(
-            op,
-            "an idempotency key is minted from the task and the step's placement, and an "
-            "in-process fork has no task",
-        )
+        raise Refused(op, "an in-process fork performs no keyed effect")
     return domain.run_metered(op.op)
 
 

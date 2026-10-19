@@ -128,7 +128,16 @@ def is_engine_internal(name: str, markers: tuple[str, ...] = ENGINE_INTERNAL) ->
     return canonical.startswith(prefixes) or any(m in name for m in infixes)
 
 
-NON_STEP = ("ledger;", "artifact:", "event;", "sleep:", "gather:", "$awaitEvent:", "monitor:")
+NON_STEP = (
+    "ledger;",
+    "ledger-read;",
+    "artifact:",
+    "event;",
+    "sleep:",
+    "gather:",
+    "$awaitEvent:",
+    "monitor:",
+)
 """The namespaces whose checkpoints do NOT commit a `Step`'s value — the key-prefix twin of
 `to_step_index`'s op-type projection.
 

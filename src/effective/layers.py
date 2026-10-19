@@ -48,6 +48,7 @@ from effective.ops import (
     AwaitEvent,
     Gather,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -75,10 +76,10 @@ type DomainLayer[T] = Callable[[DomainOp[Any]], Generator[DomainOp[Any], Any, T]
 # this is the shared *statement* of the contract, cited from `RecordingHandler._drive` and
 # `DurableHandler._run` and pinned by `test_layers.py::test_L3_layer_op_stream_named_divergence`,
 # which asserts this contract rather than stream equality.
-LAYERED_OPS: tuple[type, ...] = (Step, SleepUntil, AppendLedgerRow, StoreArtifact)
+LAYERED_OPS: tuple[type, ...] = (Step, SleepUntil, AppendLedgerRow, ReadLedgerRow, StoreArtifact)
 """Ops BOTH handlers route through the op-layer stack."""
 
-CHECKPOINTED_OPS: tuple[type, ...] = (Step, AppendLedgerRow, StoreArtifact)
+CHECKPOINTED_OPS: tuple[type, ...] = (Step, AppendLedgerRow, ReadLedgerRow, StoreArtifact)
 """Ops that reach the engine as a checkpoint write: in a race, what a stopped loser may not
 start."""
 
@@ -117,7 +118,7 @@ def layer_routing(op: WorkflowOp) -> LayerRouting:
     `AwaitEvent`'s park or resume *before* the layer stack, because no-call/cc forbids parking
     mid-layer, so a layer never sees one there."""
     match op:
-        case Step() | SleepUntil() | AppendLedgerRow() | StoreArtifact():
+        case Step() | SleepUntil() | AppendLedgerRow() | ReadLedgerRow() | StoreArtifact():
             return "layered"
         case AwaitEvent():
             return "layered-durable-only"

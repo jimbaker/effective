@@ -126,6 +126,7 @@ AWAIT_TAG = "event;"
 
 KINDS: tuple[tuple[str, str], ...] = (
     (LEDGER_TAG, "ledger"),
+    ("ledger-read;", "read"),
     ("artifact:", "artifact"),
     ("sleep:", "sleep"),
     (AWAIT_TAG, "await"),
@@ -832,6 +833,7 @@ def has_cycle(nodes: Iterable[str], edges: Iterable[Edge]) -> bool:
 _SHAPES: Mapping[str, tuple[str, str]] = {
     "step": ("[", "]"),
     "ledger": ("[(", ")]"),  # a cylinder: it writes to the canonical record
+    "read": ("([", "])"),  # a stadium: it reads the canonical record
     "artifact": ("[/", "/]"),
     "await": ("{{", "}}"),  # a hexagon: the run can stop here
     "sleep": ("(", ")"),
@@ -1023,7 +1025,7 @@ def _branch(key: str, drawn: frozenset[tuple[str, ...]] = frozenset()) -> tuple[
     address, inside the await arm; an authored name can spell a branch frame too, so frames
     found deeper in the address count only when another node ran under them (`drawn`). The
     address alone cannot tell a scoped branch's await from an authored name that spells the same
-    frames, so either can land on the wrong line: `place-awaits-by-provenance-task`."""
+    frames, so either can land on the wrong line."""
     if frames := branch_frames(key):
         return frames
     if not key.startswith(AWAIT_TAG):

@@ -89,6 +89,25 @@ def test_a_policy_refuses_an_approval_by_its_proposer(backend, by, charged):
         assert "the proposer may not approve" in str(snapshot.failure), snapshot
 
 
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    ("payload", "charged", "state", "failure"),
+    [
+        ({POLICY: {"decision": "approve"}}, [3], "completed", None),
+        ({"answers": {POLICY: {"decision": "approve"}}, "note": "x"}, [], "failed", "['note']"),
+    ],
+    ids=["bare", "wrapper-beside-a-key"],
+)
+def test_a_durable_park_reads_a_payload_as_the_in_process_gate_does(
+    backend, payload, charged, state, failure
+):
+    task_id, parked, charges = _parked(backend)
+    answer(backend.engine, parked, payload, by=REVIEWER)
+    snapshot = backend.run_until_result(task_id)
+    assert (charges.charged, snapshot.state) == (charged, state), snapshot
+    assert (snapshot.failure is None) if failure is None else failure in str(snapshot.failure)
+
+
 def test_each_answer_keeps_its_ruler_for_the_op_and_the_run():
     state = GateState(run_id="r", gate="g", op_key="step:charge")
     state = state.absorb(Resolution(answers={"a": 1, "b": 2}), by=PROPOSER)

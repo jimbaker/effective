@@ -208,6 +208,7 @@ All under `src/effective/` unless noted.
 | `uv run python examples/smol_durable.py` | the same house agent, durable and interruptible, with a judge guarding the door ([`examples/smol_door.py`](examples/smol_door.py)) | nothing: offline without keys; `OPENAI_API_KEY` and `JEV_API_KEY` for a real model and judge |
 | `uv run python -m examples.coder <dir> "<task>"` | a small coding agent whose test suite decides when the work is done ([`src/examples/coder/README.md`](src/examples/coder/README.md)) | `OPENAI_API_KEY`, Podman |
 | `uv run python -m examples.deep_research "<question>" cell="..."` | a frontier search over web leads, stopped when two hosts agree on every cell ([`src/examples/deep_research/README.md`](src/examples/deep_research/README.md)) | `BRAVE_SEARCH_API_KEY`, `JEV_API_KEY`, the `claude` CLI |
+| `uv run python -m examples.agent_firm sla-cap` | an accounts-receivable firm: a payment short of its invoice is explained, critiqued against the contract, approved by someone other than its proposer, and settled by saga through an ERP port ([`wiki/concepts/agent-firm.md`](wiki/concepts/agent-firm.md)) | nothing; `--odoo` settles on Odoo Community, after `just odoo-up` |
 | `just tui-demo`, `just dashboard` | the terminal viewer and the run dashboard over a demo run | the `tui` extra for the viewer |
 
 ## Learn more
@@ -227,7 +228,7 @@ All under `src/effective/` unless noted.
 |---|---|
 | [uv](https://docs.astral.sh/uv/) and git | everything; uv installs the pinned Python 3.14 (`.python-version`) |
 | [just](https://github.com/casey/just) | the recipes; `just` alone lists them |
-| rootless [Podman](https://podman.io/) | the durable lane (a digest-pinned Postgres), the coder's sandbox, rendering diagrams, the sandboxed formal checks |
+| rootless [Podman](https://podman.io/) | the durable lane (a digest-pinned Postgres), Odoo Community for the AR firm, the coder's sandbox, rendering diagrams, the sandboxed formal checks |
 | [elan](https://github.com/leanprover/elan) (Lean), node and npm, a JDK 17+ | the formal gates only (`just formal-setup`, `just formal`) |
 
 | extra | for |
@@ -242,7 +243,14 @@ All under `src/effective/` unless noted.
 just check        # the gate: lint, ty, the docs and key checks, the suite
 just pgt-up       # the test Postgres under Podman, for the durable lane
 just formal       # Lean proofs and the Quint typecheck
+just odoo-up      # Odoo Community under Podman; `just odoo-test` runs the AR firm against it
 ```
+
+Beside the formal gates, two instruments in the suite test composition. A turnstile forces the
+order in which gather branches commit, so a test names the schedule it checks
+([`tests/_schedules.py`](tests/_schedules.py)). Each `fixpoint` is checked against a reference
+spelling by open recursion, on both engines, with a crash at every checkpoint
+([`tests/test_fixpoint.py`](tests/test_fixpoint.py)).
 
 Run `just check` from a git clone: its docs gate reads `git ls-files`. Without a test Postgres, it
 skips the Postgres-backed tests and runs everything else.

@@ -1,0 +1,12 @@
+name: free disk
+description: >-
+  Remove the toolchains a hosted runner preinstalls for .NET, Android and Haskell, which no
+  job here uses, and print free space before and after so each run shows its headroom.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        df -h /

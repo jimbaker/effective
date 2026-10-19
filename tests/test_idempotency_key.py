@@ -1,4 +1,5 @@
-"""A step's idempotency key is minted by the handler from its task and placement, or refused."""
+"""A step's idempotency key is minted by the handler from its task and placement, named by the
+business fact its effect is about, or refused."""
 
 from typing import Any
 from uuid import uuid4
@@ -14,9 +15,9 @@ from effective.domain import AskLLM, CallTool, DomainOp, SpawnArgs
 from effective.fork import live_drive, measured_drive
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
-from effective.keys import Run, compose_key
+from effective.keys import Key, Run, Subject, compose_key
 from effective.layers import op_layer
-from effective.ops import Minted, Step
+from effective.ops import CompositionRefused, Minted, Named, Step
 from effective.permission import Refused
 from effective.viewing import ViewingCtx
 
@@ -65,6 +66,54 @@ def test_a_tool_call_in_a_task_is_handed_its_minted_key():
 )
 def test_a_key_the_handler_cannot_mint_is_refused(ctx, op, reason):
     assert reason in DurableHandler(ctx(), _Echo()).run(_asks(op))
+
+
+FACT = compose_key(t"order:{Subject('ORD-7')};line:ship")
+
+
+def _names(op: DomainOp[Any]):
+    def workflow():
+        try:
+            return (yield from step("send", op, idempotency_key=Named(FACT)))
+        except Refused as refused:
+            return refused.reason
+
+    return workflow
+
+
+class _OtherTask(LocalCtx):
+    task_id = "t2"
+
+
+@pytest.mark.parametrize("ctx", [_TaskCtx, _OtherTask, LocalCtx], ids=["t1", "t2", "no-task"])
+def test_a_tool_call_naming_a_fact_is_handed_the_facts_key_in_any_task(ctx):
+    sent = CallTool(name="send", args={"to": "a"}, result_schema=dict)
+    assert DurableHandler(ctx(), _Echo()).run(_names(sent)) == {
+        "to": "a",
+        "idempotency_key": "idempotency;order:ORD-7;line:ship",
+    }
+
+
+def test_a_model_call_naming_a_fact_is_refused():
+    asked = AskLLM(messages=[], response_schema=str)
+    assert "AskLLM has none" in DurableHandler(_TaskCtx(), _Echo()).run(_names(asked))
+
+
+def _names_a_send(run_id: str):
+    sent = CallTool(name="send", args={"v": 1}, result_schema=dict)
+    return (yield from step("send", sent, idempotency_key=Named(FACT)))
+
+
+def test_two_runs_naming_one_fact_reach_the_tool_under_one_key(backend):
+    """Each run is its own task, so a minted key would differ between them."""
+    keys = set()
+    for _ in range(2):
+        run_id = f"r-{uuid4().hex[:8]}"
+        backend.register(run_id, _names_a_send, _Echo(), Fault(None), ())
+        snapshot = backend.run_until_result(backend.spawn(run_id, run_id))
+        assert snapshot.state == "completed", snapshot
+        keys.add(snapshot.result["idempotency_key"])
+    assert keys == {"idempotency;order:ORD-7;line:ship"}
 
 
 @op_layer
@@ -146,8 +195,31 @@ DRIVERS = {
 @pytest.mark.parametrize("drive", DRIVERS.values(), ids=DRIVERS.keys())
 def test_an_in_process_fork_refuses_a_keyed_step_it_would_run_live(drive):
     """A fork driver has no task to mint a key from."""
-    with pytest.raises(Refused, match="no task"):
+    with pytest.raises(Refused, match="no keyed effect"):
         drive()
+
+
+@pytest.mark.parametrize(
+    "drive",
+    [
+        lambda: live_drive(_names_a_send("r"), None, _Metered(), {}),
+        lambda: measured_drive(
+            lambda: _names_a_send("r"), MeasuredBudget(overall=1, run_id="r"), _Metered(), {}
+        ),
+    ],
+    ids=DRIVERS.keys(),
+)
+def test_an_in_process_fork_refuses_a_named_step(drive):
+    """The base run may already have performed the fact's effect, so the fork would perform it
+    or be answered in its place."""
+    with pytest.raises(Refused, match="no keyed effect"):
+        drive()
+
+
+@pytest.mark.parametrize("fact", ["order:ORD-7#2", "step:notify"], ids=["occurrence", "arm"])
+def test_a_fact_naming_an_occurrence_or_an_op_is_refused_where_it_is_built(fact):
+    with pytest.raises(CompositionRefused):
+        Named(Key.parse(fact))
 
 
 def _supplies_its_own_key(run_id: str):
@@ -189,6 +261,12 @@ def test_an_in_process_replay_serves_a_keyed_step_from_its_log(replaying):
     sent = CallTool(name="send", args={"v": 1}, result_schema=dict)
     first = DurableHandler(recorded, _Echo()).run(_asks(sent))
     assert DurableHandler(replaying(recorded.log), _Refuses()).run(_asks(sent)) == first
+
+
+def test_the_recording_core_serves_a_named_step_its_canned_response():
+    handler = RecordingHandler(responses={"send": {"canned": True}})
+    sent = CallTool(name="send", args={}, result_schema=dict)
+    assert handler.run(_names(sent)) == {"canned": True}
 
 
 def test_the_recording_core_refuses_a_key_nobody_but_the_handler_may_write():

@@ -36,9 +36,11 @@ from effective.keys import Key
 from effective.ops import (
     AppendLedgerRow,
     AwaitEvent,
+    ReadLedgerRow,
     Scoped,
     SleepUntil,
     StoreArtifact,
+    UnreadLedger,
     WorkflowOp,
 )
 
@@ -120,9 +122,9 @@ def inspect_only(op: WorkflowOp, answers: Mapping[Key, Any]) -> Inspection:
     counterfactual's safety rules cannot drift between them — the same "one transition, many
     drivers" move as `enforce_measured`, `permission.decide` and `govern.combine`.
 
-    - `AppendLedgerRow` — **not appended.** Returns `None`, exactly as a real append does, so the
-      workflow's control flow is identical while the canonical record is untouched. A fork that
-      appended would forge history for a run that never happened (two bookkeepers).
+    - `AppendLedgerRow` — **not appended.** Returns `None`, so the canonical record is untouched.
+      A fork that appended would forge history for a run that never happened (two bookkeepers).
+    - `ReadLedgerRow` — **refused**, since no ledger is held here to read.
     - `StoreArtifact` — **not stored.** The id is content-addressed, so it can be *derived* from
       the value; the fork gets the id the real run would, for free. (On the DURABLE path this op
       must still checkpoint — the checkpoint is the artifact store there. Different driver,
@@ -142,6 +144,12 @@ def inspect_only(op: WorkflowOp, answers: Mapping[Key, Any]) -> Inspection:
     match op:
         case AppendLedgerRow():
             return Observed(None)
+        case ReadLedgerRow(event_id=event_id):
+            raise UnreadLedger(
+                f"a counterfactual cannot read the ledger's row {event_id.display()!r} in "
+                f"process: the in-process drivers hold no ledger. Use the durable driver "
+                f"(`run_fork`), whose ledger reads the child's own lineage."
+            )
         case StoreArtifact():
             return Observed(artifact_id(op))
         case SleepUntil(when=when):

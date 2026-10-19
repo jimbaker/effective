@@ -55,8 +55,8 @@ Two axes, one declared property, and no new stratification noun:
 * the **workflow axis** — the combinators below, nesting by substitution.
 * ``Addressing`` (`effective.ops`) — is a NAME completed by the frames (`RELATIVE`) or already
   whole (`ABSOLUTE`)? Exactly a filesystem path's distinction, and it belongs to the name rather
-  than to the combinator — attaching it to the op class is what put the first version of the
-  guard on the spawn instead of the join.
+  than to the combinator; attached to the op class, the guard would sit on the spawn instead of
+  the join.
 
 Distinct atoms per slot (``s:0``/``s:1``, ``sk0``/``sk1``, ``classify0``/``classify1``)
 so the grid tests *composition* and not name collision — collision has its own suite
@@ -87,9 +87,11 @@ from effective.combinators import (
     Chain,
     Deeper,
     Done,
+    Hand,
     Turn,
     descend,
     hoisted,
+    mutual,
     recurse,
     respawn,
     route,
@@ -99,7 +101,7 @@ from effective.fork import join_fork, spawn_fork
 from effective.handlers.base import step_key
 from effective.handlers.durable import spawn_done_name
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended
-from effective.keys import Key, compose_key
+from effective.keys import Key, Name, compose_key
 from effective.ops import Writer
 from effective.skills import Pin
 from effective.spawning import ChildAnswer, Returned
@@ -345,6 +347,25 @@ def _build_descend(slot: int) -> Built:
     )
 
 
+def _build_mutual(slot: int) -> Built:
+    role = f"role{slot}"
+
+    def hole(body: Body) -> Effect[str]:
+        def runs(_value: str, _level: Any) -> Effect[Answered[str] | Hand[str, str]]:
+            return Answered((yield from body()))
+
+        return (yield from mutual(Hand(role, "ctx"), {role: runs}, budget=1))
+
+    return Built(
+        name="mutual",
+        is_branch=False,
+        frames=(compose_key(t"d:{0}"), compose_key(t"state:{Name(role)}")),
+        overhead=(),
+        responses={},
+        hole=hole,
+    )
+
+
 def _build_hoisted(slot: int) -> Built:
     skill = f"sk{slot}"
     activate = f"skill:{skill},activate"
@@ -369,6 +390,7 @@ BUILDERS: Mapping[str, Callable[[int], Built]] = {
     "recurse@fold": _build_recurse_fold,
     "route": _build_route,
     "descend": _build_descend,
+    "mutual": _build_mutual,
     "hoisted": _build_hoisted,
 }
 """The workflow-axis combinators that take a body and can be built from one uniformly.

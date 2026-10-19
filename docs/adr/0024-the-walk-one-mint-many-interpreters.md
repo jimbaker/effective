@@ -94,7 +94,7 @@ def walk(
             )
         case Respawn():                                      # terminal: no entry, ends here
             return _boundary(op, in_gather=in_gather)
-        case Step() | AwaitEvent() | AppendLedgerRow() | StoreArtifact() | SleepUntil():
+        case Step() | AwaitEvent() | AppendLedgerRow() | ReadLedgerRow() | StoreArtifact() | SleepUntil():
             with placing(op, position):                      # leaf: one entry, one placed key
                 key = placed_key(op).prefixed(frame)
             send_value, throw = _unwrap((yield Placed(op, key, frame)))

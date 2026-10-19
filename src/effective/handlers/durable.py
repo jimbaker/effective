@@ -173,13 +173,17 @@ from effective.ops import (
     Expired,
     Gather,
     LedgerRow,
+    Minted,
+    Named,
     Race,
+    ReadLedgerRow,
     RecordedValueRejected,
     Respawn,
     Scoped,
     SleepUntil,
     Step,
     StoreArtifact,
+    UnreadLedger,
     Unretryable,
     WaitOutcome,
     WorkflowOp,
@@ -239,6 +243,34 @@ def idempotency_key_for(writer: Writer) -> Key:
     """A step's idempotency key: the task that runs it, and where it was placed. A retry
     re-executes the same placement, so a receiver that remembers the key does nothing new."""
     return compose_key(t"idempotency:{Run(writer.task)};{writer.placement:domain=any}")
+
+
+def named_idempotency_key(fact: Key) -> Key:
+    """A step's idempotency key by the business fact its effect is about: the same in every task
+    that names the fact, and apart from every key `idempotency_key_for` mints."""
+    return compose_key(t"idempotency;{fact:domain=address}")
+
+
+def keyed(op: Step[Any], inner: DomainOp[Any], writer: Writer | None) -> DomainOp[Any]:
+    """`inner`, with the idempotency key the step asks for in its args. `writer` is the task and
+    placement running the step, `None` where no task runs it."""
+    if (asked := keyed_call(op, inner)) is None:
+        return inner
+    call, kind = asked
+    match kind, writer:
+        case Named(fact=fact), _:
+            key = named_idempotency_key(fact)
+        case Minted(), Writer() as placed:
+            key = idempotency_key_for(placed)
+        case Minted(), None:
+            raise Refused(
+                op,
+                "an idempotency key is minted from the task and the step's placement, and no "
+                "task runs this step",
+            )
+        case unreachable:
+            assert_never(unreachable)
+    return replace(call, args={**call.args, "idempotency_key": key.stored()})
 
 
 def spawn_done_name(writer: Writer) -> Key:
@@ -1164,9 +1196,18 @@ class LedgerWriter(Protocol):
     A store that ignores it stays correct and stays BLIND: the placed-writer collision is only
     detectable by reading back who already holds the row. `ForkLedger` passes it straight through
     because it rescopes the id BEFORE the store, so one check at the store covers the canonical
-    and hypothetical lineages alike."""
+    and hypothetical lineages alike.
 
-    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> None: ...
+    It answers the payload on record under the row's id: the row, or the row another task
+    appended first. A store that does not read the record back answers `None`.
+
+    `read` answers the payload on record under an id, or `None` when no row holds it."""
+
+    def append(
+        self, row: LedgerRow, *, writer: Writer | None = None
+    ) -> Mapping[str, Any] | None: ...
+
+    def read(self, event_id: Key) -> Mapping[str, Any] | None: ...
 
 
 def _schema_of(op: DomainOp[Any]) -> type:
@@ -1871,11 +1912,12 @@ class DurableHandler:
                 return self._step(op, inner)
             case AwaitEvent():
                 return self._await(op)
-            case AppendLedgerRow(row=row):
+            case AppendLedgerRow(row=row, claim=claim):
                 slot = self._slot(op)
-                return self._checkpoint(
-                    op, slot, lambda row=row: self._record_ledger(row, self._writer(slot))
-                )
+                writer = None if claim else self._writer(slot)
+                return self._checkpoint(op, slot, lambda row=row: self._record_ledger(row, writer))
+            case ReadLedgerRow(event_id=event_id):
+                return self._checkpoint(op, self._slot(op), lambda: self._read_ledger(event_id))
             case StoreArtifact(value=value):
                 # Content-addressed: the checkpoint (the durable store, absent a CAS)
                 # persists the value under the injective key
@@ -1988,27 +2030,9 @@ class DurableHandler:
                 raw = self._checkpoint(
                     op,
                     slot,
-                    lambda inner=inner: _dump(self.domain.run(self._keyed(op, inner, writer))),
+                    lambda inner=inner: _dump(self.domain.run(keyed(op, inner, writer))),
                 )
                 return _load_step(schema, raw)
-            case unreachable:
-                assert_never(unreachable)
-
-    def _keyed(self, op: Step[Any], inner: DomainOp[Any], writer: Writer | None) -> DomainOp[Any]:
-        """`inner`, with the idempotency key the step asks for minted into its args."""
-        match keyed_call(op, inner):
-            case None:
-                return inner
-            case CallTool(args=args) as call:
-                if writer is None:
-                    raise Refused(
-                        op,
-                        "an idempotency key is minted from the task and the step's placement, "
-                        "and this ctx has no task",
-                    )
-                return replace(
-                    call, args={**args, "idempotency_key": idempotency_key_for(writer).stored()}
-                )
             case unreachable:
                 assert_never(unreachable)
 
@@ -2644,9 +2668,16 @@ class DurableHandler:
         # written and only the canonical append is suppressed — the guarantee a fork needs,
         # without the damage. The other half of counterfactual safety (stopping a world-mutating
         # TOOL) is `effective.sandbox.DryRun`; this seam does not cover it.
-        if self.ledger is not None:
-            self.ledger.append(row, writer=writer)
-        return _dump(row)
+        held = None if self.ledger is None else self.ledger.append(row, writer=writer)
+        return _dump(row) if held is None else dict(held)
+
+    def _read_ledger(self, event_id: Key) -> dict[str, Any] | None:
+        """The payload on record under `event_id`, refused without a ledger writer: the rows a
+        run without one would read are on a ledger it does not hold."""
+        if self.ledger is None:
+            raise UnreadLedger(f"no ledger is held to read {event_id.display()!r}")
+        held = self.ledger.read(event_id)
+        return None if held is None else dict(held)
 
     def _writer(self, placement: Key) -> Writer | None:
         """WHO is writing: the task, and the op's slot inside it (`_slot`), which for an op a

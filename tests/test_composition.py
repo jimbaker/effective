@@ -76,8 +76,8 @@ from effective.keys import Key
 from effective.ops import CompositionRefused
 from effective.skills import Pin
 
-EXPECTED_PAIRS = 49
-"""7 combinator-HOLES squared. Pinned so that a builder silently failing to register — the way a
+EXPECTED_PAIRS = 64
+"""8 combinator-HOLES squared. Pinned so that a builder silently failing to register — the way a
 generated suite dies quietly — fails here instead of shrinking the table to nothing."""
 
 
@@ -702,14 +702,14 @@ def test_the_oracle_is_not_degenerate():
 
     Leaf-suffix and length checks after `actual == expected_keys(...)` hold by construction,
     since `expected_keys` always appends the leaf, so they cannot guard against an empty trace.
-    The ceiling is here instead, stated as the number it is: 45 of the 49 park cells carry
+    The ceiling is here instead, stated as the number it is: 60 of the 64 park cells carry
     at least one frame, and the 4 that do not are the frameless corner (`route` and `hoisted`
     contribute nothing), where the park assertion genuinely does reduce to `ev:1 == ev:1`. That
     is a bounded, named degeneracy rather than an unexamined one."""
     framed = [(o.name, i.name) for o, i in pairs() if enclosing_frames(o, i)]
     bare = [(o.name, i.name) for o, i in pairs() if not enclosing_frames(o, i)]
 
-    assert len(framed) == 45
+    assert len(framed) == 60
     assert set(bare) == {(a, b) for a in ("route", "hoisted") for b in ("route", "hoisted")}
     for outer, inner in pairs():
         # `.stored()` once: this test is ABOUT the oracle's text form — that the composed name

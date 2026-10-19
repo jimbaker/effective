@@ -34,8 +34,8 @@ Two properties are claimed, and **neither is reachability**:
 its tape: a dynamic graph's three growth axes, `route`'s uniform dispatch, `recurse`/`descend`,
 `spawn_fork`/`join_fork`, `respawn`. Nothing here changes what a program *can do*.
 
-**Naming.** This was drafted as "the capability axis" and as Effective's answer to a "third axis"
-Cordis reifies. Both are retired. "Capability" collides with the object-capability tradition's
+**Naming.** Two other names fit less well: "the capability axis", and a "third axis" in the sense
+Cordis reifies. "Capability" collides with the object-capability tradition's
 stronger meaning, unforgeable authority, which this is not, since a declaration is descriptive
 and the permission cascade is what authorizes. And the ordinal framing does not survive contact
 with the repo's own taxonomy, which already decomposes onto **four** targets (control / data /
@@ -81,11 +81,11 @@ A letter is an op's **`op_key`**, its identity *in itself*, never `placed_key`. 
 gather's `gather:{g},{i}`, a scope's prefix) are **path**, not vocabulary.
 
 The domain is forced by the substrate, not chosen. `op_key` (`handlers/base.py:288`) succeeds for
-four arms and refuses the rest:
+five arms and refuses the rest:
 
 | arm | `letter` | why |
 |---|---|---|
-| `Step`, `AwaitEvent`, `AppendLedgerRow`, `StoreArtifact` | `op_key(o)` | content-keyed |
+| `Step`, `AwaitEvent`, `AppendLedgerRow`, `ReadLedgerRow`, `StoreArtifact` | `op_key(o)` | content-keyed |
 | `SleepUntil`, `Gather`, `Scoped` | ⊥ | *"identified by **where the walk found them**, not by anything the op holds"*: positional, hence path |
 | `Respawn` | ⊥, **by ruling, §3a** | a task boundary, not a call |
 
@@ -166,7 +166,7 @@ $$
      {\langle\, o\,;W,\; C,L,E\,\rangle_{A,\mathcal{R}} \;\rightarrow\; \mathsf{Refused}(\mathsf{letter}(o),\,A)}
 $$
 
-**The third premise is load-bearing and was missing from the draft.** Without it, at a step with
+**The third premise is required.** Without it, at a step with
 `C(n) = v` and `letter ∉ A` both this rule and the unguarded `Step-Replay` apply, and the relation
 loses determinism at exactly the crash-resume-under-changed-declaration configuration §4e asks a
 model checker to explore.
@@ -303,8 +303,8 @@ One object on both sides of the turnstile: referenced by `@needs` (requirement),
 deployment (provision). The implementation is deliberately not on the `Tool`: that is the binding,
 and it belongs to the deployment.
 
-**No `key` property, and NOT because it was forgotten.** An earlier draft gave `Tool` a `key`
-returning `compose_key(t"tool:{Segment(self.name)}")`. That is **not the letter**: `step_key` wraps every `Step`
+**No `key` property.** A `key` returning `compose_key(t"tool:{Segment(self.name)}")` would
+**not be the letter**: `step_key` wraps every `Step`
 in its own arm (`handlers/base.py:239`), so a `call_tool`'s letter is `step;tool:{name}`. Worse, the
 substrate **decouples the dispatch name from the durable key on purpose**: `activate_skill` keys
 under `skill:{name},activate` while its `CallTool` name is `skill-disclose` (`skills.py:142-146`),

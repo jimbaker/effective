@@ -15,7 +15,7 @@ import json
 import os
 import sqlite3
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
 from typing import Any, assert_never
 from uuid import UUID, uuid4
@@ -140,15 +140,20 @@ def refusals_of(outcome: ForkOutcome) -> list[tuple[str, str]]:
     raise AssertionError(f"the fork child did not answer a refusal: {outcome.answer!r}")
 
 
-def _spawn_params(run_id: str, contract: Contract) -> dict:
-    """Build a task's immutable spawn params, where the accrual contract rides.
+def _spawn_params(
+    run_id: str, contract: Contract, admitted: Mapping[str, Any] | None = None
+) -> dict:
+    """Build a task's immutable spawn params, where the accrual contract rides beside what the
+    run was `admitted` with.
 
     v0 carries NO key: an in-flight task spawned before the envelope existed looks exactly
     like this, so `Contract.from_params` returns v0 and the task stays on the bare path."""
-    params = {"run_id": run_id}
+    params: dict[str, Any] = {"run_id": run_id}
     if contract is not Contract.V0:
         params[CONTRACT_PARAM] = contract.value
-    return params
+    if clash := params.keys() & dict(admitted or {}).keys():
+        raise ValueError(f"admitted params {sorted(clash)} are the harness's own")
+    return params | dict(admitted or {})
 
 
 # ── the self-contained workflow + domain ─────────────────────────────────────
@@ -1636,6 +1641,8 @@ class SqliteBackend:
         budget_limit: float | None = None,
         on_exhaust: OnExhaust = "park",
         fresh: Callable[[], Any] | None = None,
+        admitted: bool = False,
+        hypothetical: bool = False,
     ) -> None:
         app = self.app
 
@@ -1649,7 +1656,7 @@ class SqliteBackend:
             # Share the app's write-lock so a concurrent gather branch's ledger append
             # serializes with the checkpoint writes on the one connection. `wrap`
             # (e.g. RaceOnFirstPeek) sits INSIDE FaultCtx so faults still see every op.
-            ledger = SqliteLedger(app.conn, rid, app.write_lock)
+            ledger = SqliteLedger(app.conn, rid, app.write_lock, hypothetical=hypothetical)
             inner = wrap(ctx) if wrap is not None else ctx
             budget = (
                 MeasuredBudget(overall=budget_limit, run_id=rid, on_exhaust=on_exhaust)
@@ -1666,7 +1673,7 @@ class SqliteBackend:
                 op_layers=layers,
                 contract=contract,
                 budget=budget,
-            ).run(lambda: factory(rid))
+            ).run(lambda: factory(params if admitted else rid))
 
     def spawn(
         self,
@@ -1674,8 +1681,9 @@ class SqliteBackend:
         run_id: str,
         max_attempts: int | None = None,
         contract: Contract = Contract.V0,
+        params: Mapping[str, Any] | None = None,
     ) -> UUID:
-        params = _spawn_params(run_id, contract)
+        params = _spawn_params(run_id, contract, params)
         if max_attempts is not None:
             return self.app.spawn(name, params, max_attempts=max_attempts)
         return self.app.spawn(name, params)
@@ -1733,12 +1741,24 @@ class SqliteBackend:
         """The canonical rows, which is what a reader such as `runview` is handed."""
         return list(sqlite_payloads(self.app.conn, run_id))
 
+    def hypothetical_payloads(self, run_id: str) -> list[dict[str, Any]]:
+        """The rows a hypothetical run wrote, which every canonical reader fences off."""
+        rows = self.app.conn.execute(
+            "SELECT payload FROM ledger WHERE workflow_run_id=? AND hypothetical ORDER BY seq",
+            (run_id,),
+        )
+        return [json.loads(payload) for (payload,) in rows]
+
     def ledger_append(
         self, run_id: str, event_id: str, kind: str, *, writer: Writer | None = None
     ) -> None:
         SqliteLedger(self.app.conn, run_id, self.app.write_lock).append(
             LedgerRow(event_id=Key.parse(event_id), kind=kind), writer=writer
         )
+
+    def ledger_read(self, event_id: Key) -> dict[str, Any] | None:
+        """The payload on record under `event_id`, as a driver reads it."""
+        return SqliteLedger(self.app.conn, None, self.app.write_lock).read(event_id)
 
     def raw_update_kind(self, event_id: str) -> None:
         self.app.conn.execute("UPDATE ledger SET kind='y' WHERE event_id=?", (event_id,))
@@ -1831,6 +1851,8 @@ class AbsurdBackend:
         budget_limit: float | None = None,
         on_exhaust: OnExhaust = "park",
         fresh: Callable[[], Any] | None = None,
+        admitted: bool = False,
+        hypothetical: bool = False,
     ) -> None:
         from effective.engines.absurd import ConcurrentAbsurdCtx
         from effective.ledger import PostgresLedger
@@ -1843,7 +1865,7 @@ class AbsurdBackend:
             # begin/complete split. PostgresLedger pools, so its appends are already
             # concurrent; only the single SDK checkpoint connection needs the lock. `wrap`
             # (e.g. RaceOnFirstPeek) sits INSIDE FaultCtx so faults still see every op.
-            ledger = PostgresLedger(PG_DSN, workflow_run_id=rid)
+            ledger = PostgresLedger(PG_DSN, workflow_run_id=rid, hypothetical=hypothetical)
             inner = ConcurrentAbsurdCtx(ctx)
             if wrap is not None:
                 inner = wrap(inner)
@@ -1860,7 +1882,7 @@ class AbsurdBackend:
                     op_layers=layers,
                     contract=contract,
                     budget=budget,
-                ).run(lambda: factory(rid))
+                ).run(lambda: factory(params if admitted else rid))
             finally:
                 ledger.close()
 
@@ -1870,8 +1892,9 @@ class AbsurdBackend:
         run_id: str,
         max_attempts: int | None = None,
         contract: Contract = Contract.V0,
+        params: Mapping[str, Any] | None = None,
     ) -> UUID:
-        return self.engine.spawn(name, _spawn_params(run_id, contract), max_attempts)
+        return self.engine.spawn(name, _spawn_params(run_id, contract, params), max_attempts)
 
     def task_attempts(self, task_id: UUID) -> int:
         import psycopg
@@ -2020,6 +2043,17 @@ class AbsurdBackend:
         with psycopg.connect(PG_DSN) as conn:
             return list(pg_payloads(conn, run_id))
 
+    def hypothetical_payloads(self, run_id: str) -> list[dict[str, Any]]:
+        """The rows a hypothetical run wrote, which every canonical reader fences off."""
+        import psycopg
+
+        with psycopg.connect(PG_DSN) as conn:
+            rows = conn.execute(
+                t"SELECT payload FROM ledger WHERE workflow_run_id={run_id} AND hypothetical "
+                t"ORDER BY seq"
+            ).fetchall()
+        return [payload for (payload,) in rows]
+
     def ledger_append(
         self, run_id: str, event_id: str, kind: str, *, writer: Writer | None = None
     ) -> None:
@@ -2028,6 +2062,16 @@ class AbsurdBackend:
         ledger = PostgresLedger(PG_DSN, workflow_run_id=run_id)
         try:
             ledger.append(LedgerRow(event_id=Key.parse(event_id), kind=kind), writer=writer)
+        finally:
+            ledger.close()
+
+    def ledger_read(self, event_id: Key) -> dict[str, Any] | None:
+        """The payload on record under `event_id`, as a driver reads it."""
+        from effective.ledger import PostgresLedger
+
+        ledger = PostgresLedger(PG_DSN)
+        try:
+            return ledger.read(event_id)
         finally:
             ledger.close()
 

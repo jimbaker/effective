@@ -21,6 +21,7 @@ rows out and never sees a `forked` genesis. The complement to `effective.lineage
 two recorded lineages; this one RECORDS the fork that produced the second.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -372,7 +373,7 @@ class ForkLedger:
         self._child_run_id = Segment(child_run_id)
         self.hypothetical = True  # so a nested ForkLedger is refused by its OWN check, below
 
-    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> None:
+    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> Mapping[str, Any] | None:
         # Rebuilt rather than mutated: the caller's row is also the payload source, and `LedgerRow`
         # is frozen. Going back through the constructor (not `model_copy`) keeps the rescoped id
         # under the same `is_instance(Key)` check every other append passes — a rescope is still
@@ -384,7 +385,12 @@ class ForkLedger:
         # exactly as it would within the canonical one. A fork that lost a tail row is the case
         # that made `sealed => valid marginal` false.
         rescoped = fork_scoped(self._child_run_id, row.event_id)
-        self._base.append(_as_row(row, event_id=rescoped), writer=writer)
+        return self._base.append(_as_row(row, event_id=rescoped), writer=writer)
+
+    def read(self, event_id: Key) -> Mapping[str, Any] | None:
+        """The child's own row under `event_id`, read under the id an append of it is written
+        under."""
+        return self._base.read(fork_scoped(self._child_run_id, event_id))
 
 
 __all__ = [

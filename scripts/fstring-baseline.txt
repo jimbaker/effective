@@ -296,6 +296,7 @@ src/effective/telemetry.py :: 'LM.' :: text
 src/effective/telemetry.py :: 'tool..' :: text
 src/effective/viewing.py :: 'the run is parked at ' :: text
 src/effective/viewing.py :: "the tape has no record of : a replay must not outrun the tape's frontier, so this viewer stops rather than committing the op" :: text
+src/examples/agent_firm/erp/odoo.py :: 'k_' :: key -> Odoo's external-id grammar, which no processor owns: an `ir.model.data` name
 src/tui/app.py :: '\n\n**``**\n\n' :: text
 src/tui/app.py :: '  ()' :: text
 src/tui/app.py :: '  ·    ·   ops  ·    ·    ·   parked' :: text

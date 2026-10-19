@@ -74,7 +74,9 @@ from _conformance import (
 from pydantic import BaseModel
 
 from effective.api import (
+    Effect,
     GatherBranch,
+    append_ledger,
     await_event,
     await_until,
     call_tool,
@@ -137,6 +139,38 @@ def test_clean_run_is_the_reference_outcome(backend):
     assert domain.calls == ["a", "b"]
     assert fault.count == 4  # the 4 ctx ops
     assert backend.ledger_kinds(run_id) == ["k1", "k2"]
+
+
+def test_a_run_reads_the_params_it_was_admitted_with(backend):
+    run_id = f"r-{uuid4().hex[:8]}"
+
+    def admitted(params: dict[str, Any]) -> Effect[dict[str, Any]]:
+        yield from ()
+        return params
+
+    backend.register(f"admit-{run_id}", admitted, CountingDomain(), Fault(None), (), admitted=True)
+    task_id = backend.spawn(f"admit-{run_id}", run_id, params={"manifest": {"case": "sla-cap"}})
+    assert backend.run_until_result(task_id).result == {
+        "run_id": run_id,
+        "manifest": {"case": "sla-cap"},
+    }
+    with pytest.raises(ValueError, match="run_id"):
+        backend.spawn(f"admit-{run_id}", run_id, params={"run_id": "another"})
+
+
+def test_a_hypothetical_run_appends_outside_the_canonical_view(backend):
+    run_id = f"r-{uuid4().hex[:8]}"
+    event_id = compose_key(t"hypothetical:{Segment(run_id)}")
+
+    def appends(_run_id: str) -> Effect[None]:
+        yield from append_ledger(LedgerRow(event_id=event_id, kind="k"))
+
+    backend.register(
+        f"hyp-{run_id}", appends, CountingDomain(), Fault(None), (), hypothetical=True
+    )
+    backend.run_until_result(backend.spawn(f"hyp-{run_id}", run_id))
+    assert (backend.ledger_payloads(run_id), backend.ledger_read(event_id)) == ([], None)
+    assert backend.hypothetical_payloads(run_id) == [{"event_id": event_id.stored(), "kind": "k"}]
 
 
 def test_crash_at_every_op_replays_to_identical_outcome(backend):

@@ -33,12 +33,33 @@ class Minted:
 
 
 @dataclass(frozen=True)
+class Named:
+    """Asks the handler to key a step's tool call by the business fact its effect is about, handed
+    to the tool in its args under `idempotency_key`.
+
+    Every run that names one fact reaches the receiver under one key, so a receiver that remembers
+    keys performs the effect once across runs as well as across a crash's re-runs. The key names
+    the fact and never a placement: an effect retried as a new attempt names its attempt. A fact
+    is an address, so one carrying an occurrence or opening with an op's arm is refused."""
+
+    fact: Key
+
+    def __post_init__(self) -> None:
+        stored = self.fact.stored()
+        if parse(stored).occurrence is not None or leads_with_an_arm(stored):
+            raise CompositionRefused(
+                f"a fact names what an effect is about, and {stored!r} names an occurrence or an "
+                "op: compose it from the business identities alone"
+            )
+
+
+@dataclass(frozen=True)
 class Step[T]:
     """Run a domain operation as a durable, checkpointed step."""
 
     name: str
     op: DomainOp[T]
-    idempotency_key: Minted | None = None
+    idempotency_key: Minted | Named | None = None
 
 
 class Addressing(Enum):
@@ -217,9 +238,25 @@ class LedgerRow(BaseModel):
 
 @dataclass(frozen=True)
 class AppendLedgerRow:
-    """Append one row to the append-only decision ledger."""
+    """Append one row to the append-only decision ledger; resolves to the row on record under its
+    id.
+
+    | `claim` | an earlier row under the id                                       |
+    |---------|-------------------------------------------------------------------|
+    | `False` | from another task: answered; from this task's other op: refused   |
+    | `True`  | from any writer: answered, since a claim expects to lose its id   |"""
 
     row: LedgerRow
+    claim: bool = False
+
+
+@dataclass(frozen=True)
+class ReadLedgerRow:
+    """Read the append-only decision ledger's row under `event_id`; resolves to its payload, or
+    `None` when no row holds the id. The answer is recorded, so a replay reads what the first
+    attempt read."""
+
+    event_id: Key
 
 
 @dataclass(frozen=True)
@@ -447,6 +484,7 @@ type WorkflowOp = (
     Step[Any]
     | AwaitEvent[Any]
     | AppendLedgerRow
+    | ReadLedgerRow
     | StoreArtifact[Any]
     | SleepUntil
     | Gather
@@ -458,6 +496,11 @@ type WorkflowOp = (
 
 class Unretryable(Exception):
     """An error a retry would raise again, so its task fails on the attempt that raised it."""
+
+
+class UnreadLedger(Unretryable):
+    """A ledger read where no ledger is held, which an answer of `None` would report as a row
+    absent."""
 
 
 def leaves(raised: BaseException) -> Iterator[BaseException]:
@@ -566,6 +609,20 @@ class PlacedWriterCollision(CompositionRefused):
     Raised AT THE STORE, after the conflict is observed, which is the only place that can tell a
     collision from the idempotency it must not break: the discriminator is the writer already on
     the row, and nothing above the store has read it."""
+
+
+class LineageCollision(Unretryable):
+    """An append whose id a row of the other lineage holds: a hypothetical row under a canonical
+    run's id, or the reverse. The ledger is unique by id across lineages, so the append's row is
+    not on the record, and the row that is belongs to a run the appender is not."""
+
+
+def refuse_a_lineage_collision(event_id: Key, hypothetical: bool, held: bool) -> None:
+    """Refuse an append that lost its id to the other lineage, so a claim is answered only by a
+    row its own reads can see."""
+    if hypothetical != held:
+        lineage = "a hypothetical" if held else "a canonical"
+        raise LineageCollision(f"{lineage} row already holds {event_id.display()!r}")
 
 
 def refuse_placed_writer_collision(

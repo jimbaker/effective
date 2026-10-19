@@ -26,7 +26,17 @@ from effective.keys.grammar import (
     parse,
 )
 
-ARM_TAGS = ("step", "event", "ledger", "artifact", "sleep", "gather", "race", "monitor")
+ARM_TAGS = (
+    "step",
+    "event",
+    "ledger",
+    "ledger-read",
+    "artifact",
+    "sleep",
+    "gather",
+    "race",
+    "monitor",
+)
 """The CLOSED set of op arms: the tags the substrate puts at the head of an op's own key.
 
 Closed is what makes a rule over this set structural rather than a denylist: it is the op set
@@ -93,7 +103,7 @@ Six of the thirty single-hole variants, and every one an ordinary English word a
 for. `code:action,{},{};tool:{}` and `code:seg,{},{}` carry a second term or a literal, so neither
 can be hit by accident. Which of the six to rule out is an open decision."""
 
-ADDRESS_ARMS = ("event", "ledger", "emit")
+ADDRESS_ARMS = ("event", "ledger", "ledger-read", "emit")
 """The bare qualifiers whose payload is a WIRE ADDRESS — the arms a reachability rule can read.
 
 An await's payload is the event name an emitter delivers to; a ledger's is an `event_id`; an

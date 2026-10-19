@@ -130,7 +130,7 @@ Otherwise it transforms, re-invokes or observes one call, and it is a domain-sea
 
 | routing | ops |
 |---|---|
-| `layered` | `Step`, `SleepUntil`, `AppendLedgerRow`, `StoreArtifact` |
+| `layered` | `Step`, `SleepUntil`, `AppendLedgerRow`, `ReadLedgerRow`, `StoreArtifact` |
 | `layered-durable-only` | `AwaitEvent`: the recording core decides park or resume before the stack, because parking mid-layer would need a captured continuation |
 | `unlayered` | `Gather`, `Race`, `Scoped`, `Respawn`: their layers apply within each branch or body |
 

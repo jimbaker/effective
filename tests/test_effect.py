@@ -20,6 +20,7 @@ from effective.ops import (
     Gather,
     LedgerRow,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -43,6 +44,7 @@ PAIRS: dict[type, tuple[WorkflowOp, WorkflowOp]] = {
         AppendLedgerRow(LedgerRow(event_id=Key.parse("e1"), kind="charge", amount=5)),
         AppendLedgerRow(LedgerRow(event_id=Key.parse("e1"), kind="charge", amount=6)),
     ),
+    ReadLedgerRow: (ReadLedgerRow(Key.parse("e1")), ReadLedgerRow(Key.parse("e2"))),
     StoreArtifact: (StoreArtifact("a", "text/plain"), StoreArtifact("b", "text/plain")),
     SleepUntil: (SleepUntil(WHEN), SleepUntil(WHEN.replace(day=11))),
     Respawn: (

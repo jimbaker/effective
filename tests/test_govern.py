@@ -11,6 +11,9 @@ asks, and ONE resolution must answer both. Two sequential parks would price two 
 questions and make a human answer twice for one decision.
 """
 
+from functools import partial
+from typing import Any
+
 import pytest
 from _gate import at_spend
 
@@ -28,6 +31,7 @@ from effective.govern import (
     Refuse,
     Refused,
     Resolution,
+    answers_for,
     as_resolution,
     combine,
     fuse_prompt,
@@ -37,10 +41,12 @@ from effective.govern import (
     routable,
 )
 from effective.handlers.base import step_key
-from effective.keys import Key, compose_key
-from effective.layers import drive_through
-from effective.ops import AppendLedgerRow, AwaitEvent, LedgerRow
+from effective.handlers.durable import _load
+from effective.keys import Index, Key, Segment, compose_key
+from effective.layers import drive_through, placement_scope
+from effective.ops import AppendLedgerRow, AwaitEvent, CompositionRefused, LedgerRow, WorkflowOp
 from effective.permission import Allow, Deny, Escalate
+from effective.ruling import AuthorityRuling
 
 OP = AppendLedgerRow(row=LedgerRow(event_id=Key.parse("e1"), kind="commitment"))
 RUN = "run-g"
@@ -155,6 +161,32 @@ def test_as_resolution_accepts_the_shapes_a_handler_can_deliver():
         as_resolution(object())
 
 
+@pytest.mark.parametrize(
+    ("payload", "answers"),
+    [
+        ({"answers": {"b": 1}}, {"b": 1}),
+        ({"b": 1}, {"b": 1}),
+        ({}, {}),
+        ({"answers": {"b": 1}, "c": 2}, None),
+        ({"answers": 1}, None),
+    ],
+    ids=["wrapper", "bare", "empty", "wrapper-beside-a-key", "answers-not-a-mapping"],
+)
+def test_the_durable_and_in_process_decoders_read_one_payload_alike(payload, answers):
+    def decoded(decode: Any) -> dict[str, Any] | None:
+        try:
+            return decode(payload).answers
+        except ValueError:
+            return None
+
+    assert (decoded(partial(_load, Resolution)), decoded(as_resolution)) == (answers, answers)
+
+
+def test_no_policy_asks_under_the_key_that_wraps_the_answers():
+    with pytest.raises(CompositionRefused, match="answers"):
+        Ask("answers", "approve the charge?")
+
+
 # --- the driver ---------------------------------------------------------------------------
 
 
@@ -235,6 +267,60 @@ def test_announce_puts_the_fused_ask_in_the_recorded_stream_before_suspending():
     assert isinstance(announced, AppendLedgerRow)
     assert announced.row.get("ask") == "1. [p] may I?"
     assert isinstance(generator.send(None), AwaitEvent)  # then, and only then, the park
+
+
+def _ruling(op: WorkflowOp) -> tuple[str, Any]:
+    match op:
+        case AppendLedgerRow(row=row):
+            return row.event_id.stored(), row.get("by")
+    raise AssertionError(f"not a ruling's row: {op!r}")
+
+
+def test_ruled_records_each_answer_under_the_state_its_park_was_asked_under():
+    """A policy that parks until it holds two answers: each ruling pairs with its ask by pass."""
+
+    def twice(op, state):
+        return Proceed() if len(answers_for(state, "p")) == 2 else park(Ask("p", "may I?"))
+
+    def ruled(parked, state, by, answer):
+        return AppendLedgerRow(
+            row=LedgerRow(
+                event_id=compose_key(t"ruled:{Index(state.pass_n)}"),
+                kind="ruled",
+                by=by,
+                answer=answer,
+            )
+        )
+
+    generator = govern(twice, gate="g", run_id=RUN, ruled=ruled)(OP)
+    yielded = [generator.send(None)]
+    for ruler in ("ann", "bo"):
+        ruling = AuthorityRuling(by=Segment(ruler), answer={"p": ruler})
+        yielded += [generator.send(ruling), generator.send(None)]
+    asks, rulings = yielded[0::2], yielded[1::2]
+    assert [type(op) for op in asks] == [AwaitEvent, AwaitEvent, AppendLedgerRow]
+    assert [_ruling(op) for op in rulings] == [
+        ("ruled:0", "ann"),
+        ("ruled:1", "bo"),
+    ]
+
+
+@pytest.mark.parametrize("placed", ["gather:0,0;step:memo", "gather:0,1;step:memo", None])
+def test_a_policy_reads_where_the_gated_op_runs(placed):
+    """Two gather branches gating one op differ in placement alone."""
+    seen = []
+
+    def policy(op, state):
+        seen.append(state.placement)
+        return Proceed()
+
+    generator = govern(policy, gate="g", run_id=RUN)(OP)
+    if placed is None:
+        generator.send(None)
+    else:
+        with placement_scope(Key.parse(placed)):
+            generator.send(None)
+    assert seen == [None if placed is None else Key.parse(placed)]
 
 
 # --- merged park: the reason `govern` exists ----------------------------------------------

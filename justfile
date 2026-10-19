@@ -285,6 +285,17 @@ redis-down:
 redis-probe:
     EFFECTIVE_REQUIRE_REDIS=1 REDIS_URL="redis://localhost:${REDISTEST_PORT:-6379}/0" uv run pytest tests/test_redis_streams_probe.py -v --no-cov
 
+# Odoo Community for the AR firm's ERP port: a pod with its own Postgres and a `spike` database
+odoo-up:
+    bash scripts/odoo_up.sh
+
+odoo-down:
+    podman pod rm -f effective-odoo
+
+# The AR firm's suites with the live Odoo arm required, against a running `odoo-up` and `pgt-up`
+odoo-test:
+    EFFECTIVE_REQUIRE_ODOO=1 EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" uv run pytest tests/test_agent_firm_erp_port.py tests/test_agent_firm_saga.py tests/test_agent_firm_resolve.py -k odoo -v
+
 # The race suites on a free-threaded CPython, failing if the GIL comes back on
 race-free-threaded runs="3":
     uv venv --quiet --allow-existing --python cpython-3.14.7+freethreaded build/venv-ft

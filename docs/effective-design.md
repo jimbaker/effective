@@ -337,9 +337,9 @@ capability that is absent, or miss one that is already there.
 | 3 | **"Serialized writes" serializes access, not order.** The lock wraps `begin_step` and `complete_step`; the thunk, which is where a ledger append rides, runs lock-free | `absurd.py:931-939`, `:1528`, `effective/engines/sqlite.py:461-483` |
 | 4 | **An author's `await_event` inside a branch works**, given a ctx with `peek_event`, and parks the whole round. A *spawn done-event* await is refused, because it is `ABSOLUTE` and nothing may complete it. A branch **sleep** parks on the durable path and is a silent no-op on the recorder | `absurd.py:1704-1722`, `ops.py:666-697`, `recording.py:841-842` |
 
-**What fact 1's seam reaches, measured over a two-level nested gather.** Four arms arrive at the
-layer on both handlers: `Step`, `StoreArtifact`, `SleepUntil` and `AppendLedgerRow`, with
-`AwaitEvent` a fifth on the durable path alone, since the recording core decides an await before
+**What fact 1's seam reaches, measured over a two-level nested gather.** Five arms arrive at the
+layer on both handlers: `Step`, `StoreArtifact`, `SleepUntil`, `AppendLedgerRow` and
+`ReadLedgerRow`, with `AwaitEvent` a sixth on the durable path alone, since the recording core decides an await before
 its layers (`layers.LAYERED_OPS_DURABLE_ONLY`, `recording.py:440`, `absurd.py:1469`). `Gather` and
 `Scoped` reach it never, so the nesting boundaries themselves stay unschedulable. **The layer has
 to release on completion rather than on admission**, for fact 3's reason: the append rides below

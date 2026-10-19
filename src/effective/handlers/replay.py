@@ -47,6 +47,7 @@ from effective.ops import (
     AwaitEvent,
     Gather,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -206,7 +207,14 @@ class ReplayHandler:
                         run_id=op.run_id,
                         params=op.params,
                     )
-                case Step() | AwaitEvent() | AppendLedgerRow() | StoreArtifact() | SleepUntil():
+                case (
+                    Step()
+                    | AwaitEvent()
+                    | AppendLedgerRow()
+                    | ReadLedgerRow()
+                    | StoreArtifact()
+                    | SleepUntil()
+                ):
                     throw, send_value = self._leaf(op, prefix, position, racing, stopping)
                 case unreachable:
                     # A new arm of `WorkflowOp` with no answer written here, and BOUND rather

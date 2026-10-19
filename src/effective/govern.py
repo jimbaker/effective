@@ -44,12 +44,12 @@ from dataclasses import dataclass, field, replace
 from itertools import chain
 from typing import Any, Protocol, assert_never, runtime_checkable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from effective.cost import Usage
 from effective.keys import AuthorityTag, Index, Key, Name, Run, Scope, Segment, compose_key
-from effective.layers import OpLayer, current_meter, layer_run_state, op_layer
-from effective.ops import AwaitEvent, WorkflowOp, current_generation, leaves
+from effective.layers import OpLayer, current_meter, current_placement, layer_run_state, op_layer
+from effective.ops import AwaitEvent, CompositionRefused, WorkflowOp, current_generation, leaves
 from effective.ruling import ruling_schema, split_ruling
 
 GOVERN = AuthorityTag("govern", scope=Scope.SETTLEMENT)
@@ -71,6 +71,9 @@ this name and no stored row depends on its spelling."""
 
 # --- the gate's vocabulary --------------------------------------------------------------
 
+WRAPPER = "answers"
+"""The key a posted mapping wraps its answers under, so no policy asks under it."""
+
 
 @dataclass(frozen=True)
 class Ask:
@@ -83,6 +86,12 @@ class Ask:
     policy: str
     prompt: str
     detail: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.policy == WRAPPER:
+            raise CompositionRefused(
+                f"no policy asks under {WRAPPER!r}, the key that wraps the answers"
+            )
 
 
 @dataclass(frozen=True)
@@ -209,9 +218,33 @@ class Resolution(BaseModel):
 
     Deliberately an open mapping over the known payload types (a grant, an approval). The
     control shape is "an answer arrived for this gate"; what an answer *means* belongs to the
-    policy that asked, so a new policy adds a key and the shared type gains no variant."""
+    policy that asked, so a new policy adds a key and the shared type gains no variant.
+
+    The durable await and `as_resolution` both read a posted mapping here:
+
+    | the mapping holds                                  | it reads as             |
+    |----------------------------------------------------|-------------------------|
+    | `answers` alone                                    | the answers, wrapped    |
+    | no `answers` key                                   | the answers themselves  |
+    | `answers` beside another key                       | refused                 |
+    """
 
     answers: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _wrapped(cls, payload: Any) -> Any:
+        match payload:
+            case Mapping() if WRAPPER not in payload:
+                return {WRAPPER: dict(payload)}
+            case Mapping() if len(payload) > 1:
+                beside = sorted(k for k in payload if k != WRAPPER)
+                raise ValueError(
+                    "a govern resolution holds `answers` alone or the answers themselves; "
+                    f"got `answers` beside {beside}"
+                )
+            case _:
+                return payload
 
 
 @dataclass(frozen=True)
@@ -274,6 +307,10 @@ class GateState:
     ruling, which only an in-process recorder delivers."""
     run_rulers: Mapping[str, tuple[Segment | None, ...]] = field(default_factory=dict)
     """Who ruled each of `run_answers`, position for position."""
+    placement: Key | None = None
+    """Where the gated op runs: its frames, its key and its occurrence. Two gather branches gating
+    one op share a `park_name`, which the handler frames, and differ here. `None` where no walk
+    places the op."""
 
     @property
     def park_name(self) -> Key:
@@ -402,6 +439,7 @@ def govern(
     run_id: str,
     schema: type = Resolution,
     announce: Callable[[Park, GateState], WorkflowOp] | None = None,
+    ruled: Callable[[Park, GateState, Segment | None, Any], WorkflowOp] | None = None,
     max_passes: int = DEFAULT_MAX_PASSES,
 ) -> OpLayer[Any]:
     """Compose `policies` into one op-seam gate.
@@ -414,6 +452,10 @@ def govern(
     that the gate yields *before* suspending, so the fused ask reaches the recorded stream (a
     ledger row, an artifact) and `just approve` can render an informed prompt rather than a bare
     "approve?". Without it the fused asks would be a field nothing can read.
+
+    `ruled` is its counterpart once the answer arrives: a pure `(park, state, by, answer) ->
+    WorkflowOp` the gate yields before folding the answer in, with the state the park was asked
+    under, so a record of who ruled pairs with the ask it answers.
 
     **At least one policy is required.** `serve()` with no services is a defensible bypass; a
     *gate* with no policies is a gate that permits everything, which is a misconfiguration, not a
@@ -463,6 +505,7 @@ def govern(
             run_answers=dict(run_answers),
             run_rulers=dict(run_rulers),
             meter=current_meter(),
+            placement=current_placement(),
         )
         for _ in range(max_passes + 1):
             match combine([policy(op, state) for policy in policies]):
@@ -475,6 +518,8 @@ def govern(
                         yield announce(parked, state)
                     asked = AwaitEvent(name=state.park_name, schema=ruling_schema(schema))
                     by, answer = split_ruling((yield asked))
+                    if ruled is not None:
+                        yield ruled(parked, state, by, answer)
                     state = state.absorb(as_resolution(answer), by=by)
                     run_answers.update(state.run_answers)  # accrual outlives this op
                     run_rulers.update(state.run_rulers)
@@ -493,19 +538,13 @@ def policies_of(layer: OpLayer[Any]) -> tuple[Policy, ...]:
 
 
 def as_resolution(answer: Any) -> Resolution:
-    """Coerce a delivered park answer into a `Resolution`.
-
-    A handler may deliver the validated `schema` instance, a plain mapping (the JSON an operator
-    posted), or — the single-policy convenience — anything else, which is handed to the sole
-    asking policy under the key it asked with. Named rather than inlined so the error says which
-    shape arrived."""
+    """A delivered park answer as a `Resolution`: the instance itself, or a mapping read by
+    `Resolution.model_validate`, as the durable await reads it."""
     match answer:
         case Resolution():
             return answer
-        case {"answers": dict() as answers}:
-            return Resolution(answers=answers)
         case Mapping():
-            return Resolution(answers=dict(answer))
+            return Resolution.model_validate(answer)
         case _:
             raise TypeError(
                 f"a govern park resolution must be a Resolution or a mapping of "

@@ -36,7 +36,9 @@ from effective.ops import (
     Gather,
     LedgerRow,
     Minted,
+    Named,
     Race,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -50,7 +52,9 @@ from effective.ops import (
 type Effect[T] = Generator[WorkflowOp, Any, T]
 
 
-def step[T](name: str, op: DomainOp[T], idempotency_key: Minted | None = None) -> Effect[T]:
+def step[T](
+    name: str, op: DomainOp[T], idempotency_key: Minted | Named | None = None
+) -> Effect[T]:
     """The `Step` primitive, typed: every domain op reaches its handler through here.
 
     A cancelled op raises `OpCancelled` here, whichever handler recorded it."""
@@ -214,6 +218,21 @@ def append_ledger(row: LedgerRow) -> Effect[None]:
     byte-identical to the dict form it replaces."""
     yield AppendLedgerRow(row=row)
     return None
+
+
+def claim_ledger(row: LedgerRow) -> Effect[dict[str, Any]]:
+    """Append `row`, and answer the payload on record under its id: `row`, or the row another run
+    appended first. The first to append an id holds it, so every run and every branch that claims
+    one id reads the same payload."""
+    held = yield AppendLedgerRow(row=row, claim=True)
+    return cast(dict[str, Any], held)
+
+
+def read_ledger(event_id: Key) -> Effect[dict[str, Any] | None]:
+    """The payload on record under `event_id`, or `None` when no row holds it. A replay reads what
+    the first attempt read, whatever the ledger has gained since."""
+    held = yield ReadLedgerRow(event_id=event_id)
+    return cast(dict[str, Any] | None, held)
 
 
 def store_artifact[T](value: T, content_type: str) -> Effect[str]:

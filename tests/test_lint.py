@@ -160,6 +160,7 @@ WORKFLOW_ARMS = {
     "AwaitEvent",
     "Gather",
     "Race",
+    "ReadLedgerRow",
     "Respawn",
     "Scoped",
     "SleepUntil",
@@ -1719,7 +1720,7 @@ def test_each_population_is_told_apart_from_the_others(function, population, tmp
 
 
 def test_one_filter_written_twice_is_a_DUPLICATED_ENUMERATION(tmp_path):
-    """The population no `isinstance` count reveals, and the one the pilot actually found.
+    """The population no `isinstance` count reveals.
 
     A single occurrence of this predicate is a `filter` and stays out of scope; two occurrences of
     the SAME predicate in one file are one enumeration derived twice, where the fix is to build it
@@ -1875,8 +1876,8 @@ def test_a_match_that_falls_through_is_the_population_isinstance_cannot_see(
 ):
     """`ReplayHandler` mis-dispatched `Respawn` because an unmatched arm fell to the leaf path.
 
-    There is no `isinstance` in that shape, so an `isinstance` census scores it zero — which is
-    what the first version of this one did, over 23 sites in `src/`. The last two rows are the
+    There is no `isinstance` in that shape, so an `isinstance` census scores it zero. The last
+    two rows are the
     false positives the top-level rule removed: a sequence and a mapping pattern name a class
     while dispatching on something else entirely.
 
@@ -2214,7 +2215,7 @@ def test_joining_rendered_terms_is_flagged():
     assert _forged("x = TERM_SEPARATOR.join(t.render() for t in terms[i + 1 :])\n")
     assert _forged("x = TERM_SEPARATOR.join([t.render() for t in terms])\n")
 
-    # ... and the one the first version was BLIND to, which is the shape that actually shipped:
+    # ... and the one a spelling-based scan is BLIND to:
     # `_projected` appended in a loop and joined a bare name, so nothing was in the argument for a
     # spelling-based scan to find.
     assert _forged(

@@ -68,6 +68,7 @@ def test_the_unrolled_graph_is_one_node_per_execution_in_commit_order():
     [
         ("extract", "step"),
         ("ledger;r1:e1", "ledger"),
+        ("ledger-read;r1:e1", "read"),
         ("artifact:app/json:abc", "artifact"),
         ("sleep:2026-01-01", "sleep"),
         ("gather:0,1;ledger;r1:e1", "ledger"),  # a branch's ledger op is a LEDGER node

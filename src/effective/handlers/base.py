@@ -77,8 +77,10 @@ from effective.ops import (
     AwaitEvent,
     Gather,
     Minted,
+    Named,
     Race,
     RaceUndecided,
+    ReadLedgerRow,
     Respawn,
     Scoped,
     SleepUntil,
@@ -184,6 +186,7 @@ def effect_of(op: WorkflowOp) -> Any:
     | a `Step` over a tool  | the tool's name and its arguments                              |
     | a `Step` over a model | a digest of the request, and the response schema               |
     | `AppendLedgerRow`     | the row                                                        |
+    | `ReadLedgerRow`       | the id it reads                                                |
     | `StoreArtifact`       | the content type, and a digest of the value                    |
     | `SleepUntil`          | the wake time                                                  |
     | `Respawn`             | the task, run, generation, grant and params, and a state digest |
@@ -203,6 +206,8 @@ def _effect(op: WorkflowOp) -> Any:
             return _domain_effect(domain)
         case AppendLedgerRow(row=row):
             return _shown(row)
+        case ReadLedgerRow(event_id=event_id):
+            return {"event_id": event_id.stored()}
         case StoreArtifact(value=value, content_type=content_type):
             return {"content_type": content_type, "digest": content_digest(_shown(value))}
         case SleepUntil(when=when):
@@ -453,6 +458,8 @@ def op_key(op: WorkflowOp) -> Key:
             # The row's `event_id` IS a `Key`, so it splices as one — no `str()` in sight, and
             # no `.get` default to stand in for a missing id, because the model requires it.
             return compose_key(t"ledger;{row.event_id:domain=address}")
+        case ReadLedgerRow(event_id=event_id):
+            return compose_key(t"ledger-read;{event_id:domain=address}")
         case StoreArtifact():
             return artifact_key(op)
         case SleepUntil():
@@ -593,10 +600,10 @@ def placed_key(op: WorkflowOp) -> Key:
         raise
 
 
-def keyed_call(op: Step[Any], inner: DomainOp[Any]) -> CallTool[Any] | None:
-    """The tool call whose args take a minted key, `None` when the step needs none, and a
-    refusal for a key nobody but the handler may write. `idempotency_key` is reserved in every
-    tool call's args.
+def keyed_call(op: Step[Any], inner: DomainOp[Any]) -> tuple[CallTool[Any], Minted | Named] | None:
+    """The tool call whose args take a key, with the key the step asks for; `None` when the step
+    needs none; a refusal for a key nobody but the handler may write. `idempotency_key` is
+    reserved in every tool call's args.
 
     | the step asks | the call                       | answer                              |
     |---------------|--------------------------------|-------------------------------------|
@@ -605,8 +612,9 @@ def keyed_call(op: Step[Any], inner: DomainOp[Any]) -> CallTool[Any] | None:
     |               |                                | spawn and refuses a supplied one    |
     | anything      | a tool call whose args name it | refused, whatever the value         |
     | nothing       | any other                      | `None`                              |
-    | `Minted()`    | a tool call                    | the call                            |
-    | `Minted()`    | a model call                   | refused: it has no args             |"""
+    | `Minted()`    | a tool call                    | the call, and `Minted()`            |
+    | `Named(fact)` | a tool call                    | the call, and `Named(fact)`         |
+    | either        | a model call                   | refused: it has no args             |"""
     match op.idempotency_key, inner:
         case str() as supplied, _:
             raise Refused(
@@ -620,9 +628,9 @@ def keyed_call(op: Step[Any], inner: DomainOp[Any]) -> CallTool[Any] | None:
             )
         case None, _:
             return None
-        case Minted(), CallTool() as call:
-            return call
-        case Minted(), _:
+        case Minted() | Named() as asked, CallTool() as call:
+            return call, asked
+        case Minted() | Named(), _:
             raise Refused(
                 op,
                 f"an idempotency key reaches a tool through its args, and "

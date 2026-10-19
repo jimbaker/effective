@@ -54,6 +54,7 @@ from effective.ops import (
     WaitOutcome,
     Writer,
     noted,
+    refuse_a_lineage_collision,
     refuse_placed_writer_collision,
     settled_wait,
 )
@@ -750,7 +751,9 @@ class SqliteLedger:
         self._guard: AbstractContextManager[Any] = write_lock or nullcontext()
         self.hypothetical = hypothetical  # marks the whole lineage, parity with PG
 
-    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> None:
+    def append(self, row: LedgerRow, *, writer: Writer | None = None) -> dict[str, Any]:
+        """The payload on record under the row's id: the row, or the row another task appended
+        first."""
         with self._guard:
             event_id, kind = row.event_id, row.kind
             run_id, payload = self.workflow_run_id, json.dumps(to_jsonable_python(row))
@@ -768,7 +771,7 @@ class SqliteLedger:
                 )
             ).fetchone()
             if inserted is not None:
-                return
+                return json.loads(payload)
             # The append LOST a conflict. `DO NOTHING` returns no row, so read back the winner —
             # in the SAME critical section, the rule `SqliteApp.spawn` states and for the same
             # reason: split the two statements and the row you read is not the one you lost to.
@@ -784,10 +787,27 @@ class SqliteLedger:
             held = self.conn.execute(
                 *bind(
                     # lint: ledger-read-not-canonical: a lookup on the UNIQUE id, never a fold
-                    t"SELECT writer_task, writer_placement FROM ledger WHERE event_id={event_id}"
+                    t"SELECT writer_task, writer_placement, payload, hypothetical FROM ledger "
+                    t"WHERE event_id={event_id}"
                 )
             ).fetchone()
-        refuse_placed_writer_collision(row.event_id, writer, held)
+        refuse_placed_writer_collision(row.event_id, writer, None if held is None else held[:2])
+        refuse_a_lineage_collision(row.event_id, self.hypothetical, bool(held[3]))
+        return json.loads(held[2])
+
+    def read(self, event_id: Key) -> dict[str, Any] | None:
+        """The payload on record under `event_id` in this writer's lineage: a canonical reader
+        reads no hypothetical row, and a hypothetical one no canonical row."""
+        hypothetical = int(self.hypothetical)
+        with self._guard:
+            held = self.conn.execute(
+                *bind(
+                    # lint: ledger-read-not-canonical: a lookup on the UNIQUE id in one lineage
+                    t"SELECT payload FROM ledger WHERE event_id={event_id} "
+                    t"AND hypothetical={hypothetical}"
+                )
+            ).fetchone()
+        return None if held is None else json.loads(held[0])
 
 
 type TaskFn = Callable[[dict[str, Any], SqliteTaskContext], Any]

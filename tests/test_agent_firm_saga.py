@@ -1,0 +1,303 @@
+"""The AR firm's settlement saga through the ERP port, crashed at every op, on both engines, on the
+scripted Odoo and on a live one.
+
+| question | the pin                                                                            |
+|----------|------------------------------------------------------------------------------------|
+| R1       | one memo posts, and it and the payment apply once, however a crash lands           |
+| R11      | a rejected notice unapplies the memo and the payment, then reverses the memo       |
+| R12      | a saga that cannot be compensated in order is refused before it runs               |
+| R13      | a reversal whose period locked posts in the open one, matched against the original |
+
+A leg rejected before the pivot undoes only the legs that landed, a retriable leg is asked
+`RETRIES` times before the saga stops with it unlanded, and the customer hears each notice and
+collection once, however a crash lands. The R-numbers are the questions in
+`wiki/concepts/agent-firm.md`.
+"""
+
+from collections import Counter
+from collections.abc import Callable, Mapping
+from decimal import Decimal
+from typing import Any
+from uuid import uuid4
+
+import pytest
+from _conformance import Fault, FaultPosition, at_every_op
+from _odoo import ERPS, books, fresh_round
+
+from effective.api import Effect, step
+from effective.budget import Grant
+from effective.contexts import RecordingCtx
+from effective.domain import CallTool
+from effective.govern import BudgetRefused, Exceeded
+from effective.handlers.durable import DurableHandler
+from examples.agent_firm.ar import APPLY, settle, settlement
+from examples.agent_firm.cases import SLA_CAP
+from examples.agent_firm.erp.port import Apply, Erp, Kind
+from examples.agent_firm.erp.scripted import ScriptedOdoo
+from examples.agent_firm.saga import (
+    RETRIES,
+    Compensated,
+    Completed,
+    Landed,
+    Leg,
+    LegKind,
+    Outcome,
+    SagaOrder,
+    Unlanded,
+    saga,
+)
+from examples.agent_firm.world import World
+
+CREDIT = Decimal(1000)
+INVOICE, PAYMENT = SLA_CAP.invoice.id, SLA_CAP.payment.id
+OK = {"ok": True}
+
+
+def _world(erp: Erp, notify=lambda args: OK, collect=lambda args: OK) -> World:
+    return World(erp=erp, tools={"notify": notify, "collect": collect})
+
+
+def _run(backend, world: World, fault: Fault) -> Any:
+    run_id = f"r-{uuid4().hex[:8]}"
+    reason = "clause 4.2 caps service credits at $1,000 a month"
+    program = settle(SLA_CAP, CREDIT, reason, fresh_round())
+    backend.register(f"settle-{run_id}", lambda _run_id: program(), world.domain(), fault, ())
+    snapshot = backend.run_until_result(backend.spawn(f"settle-{run_id}", run_id))
+    assert snapshot.state == "completed", snapshot
+    return snapshot.result
+
+
+def _swept(backend, position: FaultPosition, world_of: Callable[[], World], check) -> int:
+    """Run unarmed, then crashed at each op the unarmed run reached, checking every run's ERP;
+    returns how many crash points there were."""
+    unarmed = Fault(None, position=position)
+    world = world_of()
+    check(_run(backend, world, unarmed), world.erp, None)
+    crashes = 0
+    for k, fault in at_every_op(unarmed):
+        world = world_of()
+        check(_run(backend, world, fault), world.erp, k)
+        crashes += 1
+    return crashes
+
+
+def _names(credit: Decimal) -> list[str]:
+    """The settlement's legs at `credit`, by name, in the order they run."""
+    return [leg.name for leg in settlement(SLA_CAP, credit, "", fresh_round())]
+
+
+def _kinds(erp: Erp) -> list[Kind]:
+    return [entry.kind for entry in erp.entries(INVOICE)]
+
+
+def _bounced(args: Mapping[str, Any]) -> dict[str, Any]:
+    return {"ok": False, "reason": "the customer's AP address bounced"}
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+@pytest.mark.parametrize("position", list(FaultPosition))
+def test_r1_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, arm):
+    erp_of = books(arm, [SLA_CAP])
+
+    def check(result, erp: Erp, k):
+        landed = Completed.model_validate(result).landed
+        assert set(landed) == {"credit-memo", APPLY, "apply-memo", "notify", "collect"}, k
+        assert _kinds(erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO], k
+        (memo,) = [e for e in erp.entries(INVOICE) if e.kind is Kind.CREDIT_MEMO]
+        assert (memo.amount, erp.keyed(INVOICE)) == (CREDIT, 1), k
+        assert (erp.residual(PAYMENT), erp.residual(memo.id), erp.residual(INVOICE)) == (
+            0,
+            0,
+            2000,
+        ), k
+
+    assert _swept(backend, position, lambda: _world(erp_of()), check) == 8
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+@pytest.mark.parametrize("position", list(FaultPosition))
+def test_r11_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_memo(
+    backend, position, arm
+):
+    erp_of = books(arm, [SLA_CAP])
+
+    def check(result, erp: Erp, k):
+        compensated = Compensated.model_validate(result)
+        undone = (compensated.rejected, compensated.undone)
+        assert undone == ("notify", ["apply-memo", APPLY, "credit-memo"]), k
+        assert _kinds(erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO, Kind.REVERSAL], k
+        *_, memo, reversal = erp.entries(INVOICE)
+        assert (reversal.reverses, reversal.amount, erp.keyed(INVOICE)) == (memo.id, CREDIT, 2), k
+        assert (erp.residual(memo.id), erp.residual(reversal.id)) == (0, 0), k
+        assert (erp.residual(PAYMENT), erp.residual(INVOICE)) == (97000, 100000), k
+
+    assert _swept(backend, position, lambda: _world(erp_of(), _bounced), check) == 10
+
+
+def _spent() -> World:
+    """A world whose payment was already applied in full to another of the customer's invoices."""
+    odoo = ScriptedOdoo.seeded([SLA_CAP])
+    customer = odoo.moves[odoo.documents[INVOICE]].partner
+    other = odoo.posted("out_invoice", customer, "2026-08-01", "INV-0999", Decimal(97000))
+    odoo.erp().perform(Apply(entry=PAYMENT, invoice=str(other)), "applied before the saga")
+    return _world(odoo.erp())
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("position", list(FaultPosition))
+def test_a_rejected_leg_undoes_only_the_legs_that_landed(backend, position):
+    def check(result, erp: Erp, k):
+        compensated = Compensated.model_validate(result)
+        assert (compensated.rejected, compensated.undone) == (APPLY, ["credit-memo"]), k
+        *_, memo, reversal = erp.entries(INVOICE)
+        assert (memo.kind, reversal.kind, reversal.reverses) == (
+            Kind.CREDIT_MEMO,
+            Kind.REVERSAL,
+            memo.id,
+        ), k
+        assert erp.residual(INVOICE) == 100000, k
+
+    assert _swept(backend, position, _spent, check) == 6
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(("rejections", "landed"), [(RETRIES - 1, True), (RETRIES, False)])
+def test_a_retriable_leg_is_asked_until_it_lands_or_runs_out(backend, rejections, landed):
+    answers = iter([{"ok": False, "reason": "AP is closed today"}] * rejections + [OK])
+    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), collect=lambda args: next(answers))
+    result = _run(backend, world, Fault(None))
+    assert world.calls["collect"] == min(rejections + 1, RETRIES)
+    if landed:
+        assert "collect" in Completed.model_validate(result).landed
+    else:
+        assert Unlanded.model_validate(result).leg == "collect"
+        assert _kinds(world.erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO]
+
+
+@pytest.mark.parametrize("granted", [True, False], ids=["granted", "not-granted"])
+def test_a_grant_extends_a_retriable_leg_past_its_attempts(backend, granted):
+    """The grantor is asked once, when the attempts run out, and not again once the leg lands."""
+    asked: list[int] = []
+
+    def one_more(depth: int) -> Effect[Grant]:
+        asked.append(depth)
+        return Grant(add_depth=1) if granted else Grant(stop=True)
+        yield  # a grantor is a generator
+
+    grantor, landed = one_more, granted
+    answers = iter([{"ok": False, "reason": "AP is closed today"}] * RETRIES + [OK])
+    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), collect=lambda args: next(answers))
+    legs = settlement(SLA_CAP, CREDIT, "r", fresh_round(), grantor=grantor)
+    run_id = f"r-{uuid4().hex[:8]}"
+    backend.register(run_id, lambda _run_id: saga(legs)(), world.domain(), Fault(None), ())
+    snapshot = backend.run_until_result(backend.spawn(run_id, run_id))
+    assert snapshot.state == "completed", snapshot
+    assert world.calls["collect"] == RETRIES + landed
+    assert ("collect" in snapshot.result.get("landed", {})) is landed
+    assert asked == [RETRIES]
+
+
+class _Refusing:
+    """A domain whose budget refuses every op's spend."""
+
+    def run(self, op: Any) -> Any:
+        raise BudgetRefused(op, Exceeded(1, 1))
+
+
+def _collects(attempt: int, _landed: Mapping[str, Any]) -> Effect[Outcome]:
+    yield from step("collect", CallTool(name="collect", args={}, result_schema=dict))
+    return Landed()
+
+
+def test_a_refused_spend_is_raised_out_of_a_retriable_leg():
+    """Every later metered op is refused the same way, so the loop does not read it as a
+    rejection to retry."""
+    leg = Leg("collect", LegKind.RETRIABLE, _collects)
+    with pytest.raises(BudgetRefused):
+        DurableHandler(RecordingCtx(), _Refusing()).run(saga([leg]))
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("position", list(FaultPosition))
+def test_the_customer_hears_once_whatever_a_crash_interrupts(backend, position):
+    heard: Counter[str] = Counter()
+
+    def tool(name: str) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
+        def told(args: Mapping[str, Any]) -> dict[str, Any]:
+            heard[name] += 1
+            return OK
+
+        return told
+
+    def world() -> World:
+        heard.clear()
+        return _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), tool("notify"), tool("collect"))
+
+    def check(result, erp: Erp, k):
+        assert heard == {"notify": 1, "collect": 1}, k
+
+    assert _swept(backend, position, world, check) == 8
+
+
+def test_r13_a_reversal_after_its_period_locked_posts_in_the_open_period(backend):
+    odoo = ScriptedOdoo.seeded([SLA_CAP])
+
+    def locks_then_bounces(args: Mapping[str, Any]) -> dict[str, Any]:
+        odoo.locked = "2026-09-30"
+        return _bounced(args)
+
+    world = _world(odoo.erp(), locks_then_bounces)
+    _run(backend, world, Fault(None))
+    *_, memo, reversal = world.erp.entries(INVOICE)
+    assert (memo.period, reversal.period, reversal.reverses) == ("2026-09", "2026-10", memo.id)
+    assert (world.erp.residual(memo.id), world.erp.residual(reversal.id)) == (0, 0)
+
+
+def _leg(name: str, kind: LegKind, undo: bool) -> Leg:
+    def act(attempt: int = 0, landed: Mapping[str, Any] | None = None):
+        yield from ()
+        return Landed()
+
+    return Leg(name, kind, act, (lambda _value: act()) if undo else None)
+
+
+COMPENSABLE = _leg("credit", LegKind.COMPENSABLE, undo=True)
+PIVOT = _leg("notify", LegKind.PIVOT, undo=False)
+RETRIABLE = _leg("collect", LegKind.RETRIABLE, undo=False)
+
+
+@pytest.mark.parametrize(
+    "legs",
+    [
+        [PIVOT, COMPENSABLE],
+        [COMPENSABLE, RETRIABLE, PIVOT],
+        [PIVOT, PIVOT],
+        [_leg("credit", LegKind.COMPENSABLE, undo=False), PIVOT],
+        [COMPENSABLE, _leg("notify", LegKind.PIVOT, undo=True)],
+    ],
+    ids=[
+        "compensable-after-pivot",
+        "pivot-after-retriable",
+        "two-pivots",
+        "no-undo",
+        "pivot-undo",
+    ],
+)
+def test_r12_a_saga_that_cannot_be_compensated_in_order_is_refused(legs):
+    with pytest.raises(SagaOrder):
+        saga(legs)
+
+
+@pytest.mark.parametrize(
+    ("credit", "legs"),
+    [
+        (CREDIT, ["credit-memo", APPLY, "apply-memo", "notify", "collect"]),
+        (Decimal(3000), ["credit-memo", APPLY, "apply-memo", "notify"]),
+        (Decimal(0), [APPLY, "notify", "collect"]),
+    ],
+    ids=["capped", "whole-gap", "no-credit"],
+)
+def test_a_settlement_credits_and_collects_only_what_it_owes(credit, legs):
+    assert _names(credit) == legs
