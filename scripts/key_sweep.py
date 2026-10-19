@@ -377,7 +377,7 @@ MOVED is the same finding and a finding that was FIXED is the only thing that di
 
 
 def load_baseline() -> dict[Entry, str]:
-    """The shared baseline and, where a tree that ships more keeps one, its private baseline."""
+    """The baseline and a second baseline, if present."""
     out: dict[Entry, str] = {}
     for line in (
         line

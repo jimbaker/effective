@@ -14,7 +14,7 @@ Each control is a row of the table in `wiki/concepts/agent-firm.md`.
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Set
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from functools import partial
@@ -25,10 +25,12 @@ from uuid import uuid4
 import pytest
 from _conformance import Fault, FaultPosition, at_every_op, branched
 from _firm import (
+    APPROVERS,
     CAPPED,
     CONTROLLER,
     FOUNDING,
     PROPOSER,
+    REVIEWER,
     Run,
     manifest,
     replayed,
@@ -44,9 +46,12 @@ from effective.api import gather
 from effective.cost import FORMAT_PARAM, Usage
 from effective.domain import OpKind
 from effective.govern import (
+    DEFAULT_MAX_PASSES,
     Ask,
     GateState,
+    Park,
     Proceed,
+    Refuse,
     Verdict,
     answers_for,
     govern,
@@ -54,13 +59,22 @@ from effective.govern import (
     refuse,
 )
 from effective.handlers.base import step_key
-from effective.keys import Index, Key, Name, Tag, compose_key
+from effective.keys import Index, Key, Name, Segment, Tag, compose_key
 from effective.keys.frame import past_frames
 from effective.layers import current_placement
 from effective.lineage import canonical, compare
 from effective.ops import AppendLedgerRow, LedgerRow, ReadLedgerRow, Step, WorkflowOp
 from effective.parked import answer
-from examples.agent_firm.ar import REMIND, TERMS, Round, Superseded, Unabsorbed, settle, settlement
+from examples.agent_firm.ar import (
+    REMIND,
+    TERMS,
+    Round,
+    Superseded,
+    Unabsorbed,
+    claim_of,
+    settle,
+    settlement,
+)
 from examples.agent_firm.cases import CLEAN, DISCOUNT, SLA_CAP, Case, Document, Payment
 from examples.agent_firm.critic import AS_CLAIMED
 from examples.agent_firm.engage import REPAIRS, WITHIN, CritiqueWire
@@ -76,6 +90,7 @@ from examples.agent_firm.resolve import (
     approval,
     bindings,
     resolve,
+    ruled,
     terms_of,
 )
 from examples.agent_firm.saga import RETRIES, Compensated, Completed
@@ -150,17 +165,24 @@ def _pairs(backend, run_id: str) -> list[tuple[str, str]]:
 
 
 def test_each_ruling_pairs_with_its_ask_across_a_re_park(backend):
-    run = _resolved(backend, _firm(), approvers=(PROPOSER, CONTROLLER))
+    run = _resolved(backend, _firm(), rulers=(PROPOSER, CONTROLLER))
     assert _rulers(backend, run.run_id) == [PROPOSER, CONTROLLER]
     pairs = _pairs(backend, run.run_id)
     assert [kind for kind, _ in pairs] == [ASKED, RULED, ASKED, RULED]
     assert pairs[0][1] == pairs[1][1] != pairs[2][1] == pairs[3][1]
 
 
-def test_the_ledger_names_the_terms_and_who_proposed_it_before_each_approval(backend):
-    run = _resolved(backend, _firm(), approvers=(PROPOSER, CONTROLLER))
+@pytest.mark.parametrize(
+    ("rulers", "named"),
+    [
+        pytest.param((PROPOSER, CONTROLLER), {"proposer": PROPOSER}, id="the-proposer"),
+        pytest.param((REVIEWER, CONTROLLER), {"ruler": REVIEWER}, id="a-reviewer"),
+    ],
+)
+def test_the_ledger_names_the_terms_and_whose_ruling_did_not_count(backend, rulers, named):
+    run = _resolved(backend, _firm(), rulers=rulers)
     terms = _terms(SLA_CAP, "1000.00", "3000.00")
-    assert _asked(backend, run.run_id) == [[terms], [terms | {"proposer": PROPOSER}]]
+    assert _asked(backend, run.run_id) == [[terms], [terms | named]]
 
 
 def test_a_gather_of_two_settlements_asks_for_each_settlement_on_the_ledger(backend):
@@ -172,7 +194,7 @@ def test_a_gather_of_two_settlements_asks_for_each_settlement_on_the_ledger(back
             yield from gather([settle(case, credit, "r", firm.round) for case, credit in credits])
         )
 
-    gate = govern(approval(PROPOSER), gate="credit", run_id=run_id, announce=announced)
+    gate = govern(approval(PROPOSER, APPROVERS), gate="credit", run_id=run_id, announce=announced)
     backend.register(f"two-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
     task_id = backend.spawn(f"two-{run_id}", run_id)
     snapshot = backend.run_until_result(task_id)
@@ -197,7 +219,9 @@ def _notice(op: WorkflowOp, state: GateState) -> Verdict:
 
 def test_a_park_the_approval_did_not_ask_for_is_announced_too(backend):
     firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
-    gate = govern(approval(PROPOSER), _notice, gate="credit", run_id=run_id, announce=announced)
+    gate = govern(
+        approval(PROPOSER, APPROVERS), _notice, gate="credit", run_id=run_id, announce=announced
+    )
     program = resolve(SLA_CAP, critic=True, round=firm.round)
     backend.register(f"two-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
     task_id = backend.spawn(f"two-{run_id}", run_id)
@@ -283,7 +307,7 @@ def test_an_unanswered_credit_holds_no_round_and_is_superseded_once_approved(bac
     """A $3,000 credit parked for approval claims nothing, so the critiqued $1,000 settles in the
     round; approved later, the $3,000 reads the round's $1,000 and does nothing."""
     firm = _firm()
-    waiting = _resolved(backend, firm, critic=False, approvers=())
+    waiting = _resolved(backend, firm, critic=False, rulers=())
     assert backend.parked(waiting.task_id)
     assert "notify" in Completed.model_validate(_resolved(backend, firm).result).landed
     (park,) = backend.parked(waiting.task_id)
@@ -318,7 +342,9 @@ def _closed_for_maintenance(op: WorkflowOp, state: GateState) -> Verdict:
 @pytest.mark.adversarial
 def test_a_refusal_other_than_the_approvals_fails_the_resolution(backend):
     firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
-    gate = govern(approval(PROPOSER), _closed_for_maintenance, gate="credit", run_id=run_id)
+    gate = govern(
+        approval(PROPOSER, APPROVERS), _closed_for_maintenance, gate="credit", run_id=run_id
+    )
     program = resolve(SLA_CAP, critic=True, round=firm.round)
     backend.register(f"shut-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
     snapshot = backend.run_until_result(backend.spawn(f"shut-{run_id}", run_id))
@@ -541,7 +567,7 @@ def test_two_resolutions_of_one_case_gathered_settle_once_and_ask_twice(backend)
             yield from gather([resolve(SLA_CAP, critic=True, round=firm.round) for _ in range(2)])
         )
 
-    gate = govern(approval(PROPOSER), gate="credit", run_id=run_id, announce=announced)
+    gate = govern(approval(PROPOSER, APPROVERS), gate="credit", run_id=run_id, announce=announced)
     backend.register(f"two-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
     task_id = backend.spawn(f"two-{run_id}", run_id)
     snapshot = backend.run_until_result(task_id)
@@ -555,7 +581,7 @@ def test_two_resolutions_of_one_case_gathered_settle_once_and_ask_twice(backend)
     _settled_once(firm)
 
 
-APPROVERS: dict[str, list[tuple[int, ...]]] = {"one-at-a-time": [(0,), (1,)], "together": [(0, 1)]}
+BATCHES: dict[str, list[tuple[int, ...]]] = {"one-at-a-time": [(0,), (1,)], "together": [(0, 1)]}
 """How an approver rules on the two asks, a batch at a time, each batch before a resume. A gathered
 park wakes on its lowest branch's ask alone, so ruling the other first only defers the resume."""
 
@@ -580,7 +606,7 @@ def _ruled(backend, task_id, run_id: str, batches: list[tuple[int, ...]]) -> Non
 
 
 @pytest.mark.adversarial
-@pytest.mark.parametrize("approver", APPROVERS)
+@pytest.mark.parametrize("approver", BATCHES)
 def test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule(backend, approver):
     """Every schedule within two switches, across the approval park both resolutions take: each
     asks once and the case settles once. Ruled one at a time, the first branch owns the round,
@@ -591,14 +617,16 @@ def test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule(back
         firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
         resolutions = [resolve(SLA_CAP, critic=True, round=firm.round) for _ in range(2)]
         program, domain = partial(gather, turns.gathered(resolutions)), firm.world.domain()
-        gate = govern(approval(PROPOSER), gate="credit", run_id=run_id, announce=announced)
+        gate = govern(
+            approval(PROPOSER, APPROVERS), gate="credit", run_id=run_id, announce=announced
+        )
         layers, fresh = (turns.layer(), gate), turns.claiming(domain)
         backend.register(
             f"two-{run_id}", lambda _, run=program: run(), domain, Fault(), layers, fresh=fresh
         )
         task_id = backend.spawn(f"two-{run_id}", run_id)
         backend.run_until_result(task_id)
-        _ruled(backend, task_id, run_id, APPROVERS[approver])
+        _ruled(backend, task_id, run_id, BATCHES[approver])
         snapshot = backend.run_until_result(task_id)
         turns.settle()
         assert snapshot.state == "completed", (snapshot, turns.choices)
@@ -608,14 +636,14 @@ def test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule(back
         superseded = [i for i, r in enumerate(snapshot.result) if "held" in r]
         assert len(superseded) == 1, ("one owner of the round", turns.choices)
         owners.add(1 - superseded[0])
-    first = APPROVERS[approver][0]
+    first = BATCHES[approver][0]
     assert owners == ({0, 1} if len(first) == 2 else set(first))
 
 
 def test_two_announcing_gates_on_one_op_write_a_row_each(backend):
     firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
     gates = tuple(
-        govern(approval(PROPOSER), gate=name, run_id=run_id, announce=announced)
+        govern(approval(PROPOSER, APPROVERS), gate=name, run_id=run_id, announce=announced)
         for name in ("credit", "treasury")
     )
     program = resolve(SLA_CAP, critic=True, round=firm.round)
@@ -674,25 +702,169 @@ def _memos(firm: Firm) -> list[Any]:
 
 @pytest.mark.adversarial
 @pytest.mark.parametrize(
-    ("approvers", "parks", "memos"),
+    ("rulers", "parks", "memos"),
     [
-        ((PROPOSER,), 1, []),
-        ((PROPOSER, PROPOSER), 2, []),
-        ((PROPOSER, CONTROLLER), 2, [1000]),
-        ((CONTROLLER,), 1, [1000]),
+        pytest.param((PROPOSER,), 1, [], id="proposer"),
+        pytest.param((PROPOSER, PROPOSER), 2, [], id="proposer-twice"),
+        pytest.param((PROPOSER, CONTROLLER), 2, [1000], id="then-controller"),
+        pytest.param((CONTROLLER,), 1, [1000], id="controller"),
+        pytest.param((REVIEWER,), 1, [], id="reviewer"),
+        pytest.param((REVIEWER, CONTROLLER), 2, [1000], id="reviewer-then-controller"),
     ],
-    ids=["proposer", "proposer-twice", "then-controller", "controller"],
 )
-def test_an_approval_by_the_proposer_does_not_count(backend, approvers, parks, memos):
+def test_an_approval_counts_from_an_approver_other_than_its_proposer(
+    backend, rulers, parks, memos
+):
     firm = _firm()
-    run = _resolved(backend, firm, approvers=approvers)
+    run = _resolved(backend, firm, rulers=rulers)
     assert _memos(firm) == memos
     assert run.parks == parks
     if memos:
         assert Completed.model_validate(run.result).landed.keys() >= {"credit-memo", REMIND}
-        assert run.passed[-1] == approvers
+        assert run.passed[-1] == rulers
     else:
         assert backend.parked(run.task_id), "the settlement waits for another approver"
+
+
+@pytest.mark.adversarial
+def test_a_denial_from_outside_the_approvers_parks_again(backend):
+    firm = _firm()
+    run = _resolved(backend, firm, rulers=(REVIEWER,), decision="deny")
+    assert _memos(firm) == []
+    assert backend.parked(run.task_id), "the settlement waits for an approver"
+
+
+def test_a_replay_walks_the_rulings_the_run_walked_past_an_outsider(backend):
+    run = _resolved(backend, _firm(), rulers=(REVIEWER, CONTROLLER))
+    walked: list[tuple[Segment | None, ...]] = []
+    assert replayed(backend, run, walked=walked) == run.result
+    assert run.parks == 2
+    assert walked == run.passed == [(REVIEWER, CONTROLLER)]
+
+
+@pytest.mark.parametrize("position", [FaultPosition.BEFORE_OP, FaultPosition.AFTER_THUNK])
+def test_an_outsiders_re_park_survives_a_crash_at_every_op(backend, position):
+    unarmed = Fault(position=position)
+    _resolved(backend, _firm(), fault=unarmed, rulers=(REVIEWER, CONTROLLER))
+    for k, fault in at_every_op(unarmed):
+        firm = _firm()
+        run = _resolved(backend, firm, fault=fault, rulers=(REVIEWER, CONTROLLER))
+        assert (_memos(firm), run.parks) == ([1000], 2), k
+        assert _rulers(backend, run.run_id) == [REVIEWER, CONTROLLER], k
+        assert replayed(backend, run) == run.result, k
+
+
+def test_an_outsiders_ruling_on_one_gathered_settlement_parks_that_one_again(backend):
+    firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
+    credits = [(SLA_CAP, Decimal(1000)), (DISCOUNT, Decimal(400))]
+
+    def program():
+        return (
+            yield from gather([settle(case, credit, "r", firm.round) for case, credit in credits])
+        )
+
+    gate = govern(
+        approval(PROPOSER, APPROVERS),
+        gate="credit",
+        run_id=run_id,
+        announce=announced,
+        ruled=ruled,
+    )
+    backend.register(f"two-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
+    task_id = backend.spawn(f"two-{run_id}", run_id)
+    snapshot, names, rulers = backend.run_until_result(task_id), [], iter([REVIEWER])
+    while parked := backend.parked(task_id):
+        for waiting in parked:
+            names.append(waiting.wake_event)
+            by = next(rulers, CONTROLLER)
+            answer(backend.engine, waiting, ruling(backend, run_id, waiting), by=by)
+        snapshot = backend.run_until_result(task_id)
+    assert snapshot.state == "completed", snapshot
+    assert len(set(names)) == len(names) == 3
+    memos = [
+        [amount for kind, amount, *_ in _entries(firm, case) if kind is Kind.CREDIT_MEMO]
+        for case, _ in credits
+    ]
+    assert memos == [[credit] for _, credit in credits]
+    asked = [row for row in backend.ledger_payloads(run_id) if row["kind"] == ASKED]
+    (again,) = [row for row in asked if "ruler" in row["detail"][0]]
+    invoice = again["detail"][0]["invoice"]
+    (first,) = [
+        row for row in asked if row is not again and row["detail"][0]["invoice"] == invoice
+    ]
+    assert again["binds"] == first["binds"]
+
+
+def test_an_outsider_ruling_on_every_park_fails_the_run_at_the_gates_pass_bound(backend):
+    firm = _firm()
+    run = _resolved(backend, firm, rulers=(REVIEWER,) * (DEFAULT_MAX_PASSES + 2))
+    assert _memos(firm) == []
+    assert run.parks == DEFAULT_MAX_PASSES + 1
+    assert run.snapshot.state == "failed"
+
+
+def test_an_approver_set_is_a_set_and_a_name_is_refused():
+    name: Any = str(CONTROLLER)
+    with pytest.raises(TypeError):
+        approval(PROPOSER, name)
+
+
+@dataclass(frozen=True)
+class _Directory(Set[Segment]):
+    """An approver set the host keeps outside the run, as a directory of role holders would."""
+
+    held: tuple[Segment, ...]
+
+    def __contains__(self, ruler: object) -> bool:
+        return ruler in self.held
+
+    def __iter__(self) -> Iterator[Segment]:
+        return iter(self.held)
+
+    def __len__(self) -> int:
+        return len(self.held)
+
+
+CLAIM = AppendLedgerRow(
+    row=LedgerRow(
+        event_id=claim_of(SLA_CAP, Round("main")),
+        kind=TERMS,
+        invoice=SLA_CAP.invoice.id,
+        credit="1000",
+        deducted="3000",
+        broken=["paid-in-full"],
+    ),
+    claim=True,
+)
+
+RULINGS = {
+    "unanswered": (None, None, Park),
+    "the-controller-approves": ("approve", CONTROLLER, Proceed),
+    "the-controller-denies": ("deny", CONTROLLER, Refuse),
+    "the-proposer-approves": ("approve", PROPOSER, Park),
+    "a-reviewer-approves": ("approve", REVIEWER, Park),
+    "a-reviewer-denies": ("deny", REVIEWER, Park),
+    "nobody-named-approves": ("approve", None, Park),
+}
+"""An approval's answer to a claim and who ruled it, and the verdict, where the proposer and the
+controller may both approve."""
+
+
+def _answered(decision: str | None, ruler: Segment | None) -> GateState:
+    answers = {} if decision is None else {APPROVAL: ({"decision": decision},)}
+    rulers = {} if decision is None else {APPROVAL: (ruler,)}
+    return GateState(run_id="r", gate="credit", op_key="settle", answers=answers, rulers=rulers)
+
+
+@pytest.mark.parametrize(
+    "approvers",
+    [frozenset({PROPOSER, CONTROLLER}), _Directory((PROPOSER, CONTROLLER))],
+    ids=["a-set", "a-directory"],
+)
+def test_an_approval_counts_from_a_ruler_the_approvers_hold_other_than_its_proposer(approvers):
+    policy = approval(PROPOSER, approvers)
+    verdicts = {name: type(policy(CLAIM, _answered(d, r))) for name, (d, r, _) in RULINGS.items()}
+    assert verdicts == {name: verdict for name, (*_, verdict) in RULINGS.items()}
 
 
 def test_a_zero_credit_on_a_deduction_is_asked_with_what_the_customer_deducted(backend):
@@ -723,7 +895,7 @@ def test_another_customers_payment_in_full_is_approved_before_it_settles(backend
     )
     case = SLA_CAP.model_copy(update={"payment": stray})
     firm = _firm(proposal=AS_CLAIMED.model_copy(update={"credit": Decimal(0)}))
-    run = _resolved(backend, firm, case, critic=False, approvers=())
+    run = _resolved(backend, firm, case, critic=False, rulers=())
     assert backend.parked(run.task_id), "the settlement waits for its approval"
     assert _asked(backend, run.run_id) == [[_terms(case, "0.00", "0.00")]]
 

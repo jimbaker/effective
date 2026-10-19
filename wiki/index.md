@@ -69,14 +69,13 @@ models cite none, and state their invariants in their own words. Numbers with no
 | [concepts/bounded-wait](concepts/bounded-wait.md) | what decides a wait that names a deadline: the ordered arms, the wake's lifetime, the slot, and where it is refused |
 | [concepts/forced-schedules](concepts/forced-schedules.md) | what a schedule instrument can decide and what it cannot, and why a race is outside it |
 | [concepts/witness-quotient](concepts/witness-quotient.md) | the admission witness as a quotient of what a checkpoint keeps, its one runtime obligation, and the classes it merges |
-| [concepts/enforcer-domain](concepts/enforcer-domain.md) | a gate is bounded by what it scans, with worked cases and what a zero really means |
+| [concepts/enforcer-domain](concepts/enforcer-domain.md) | a gate is bounded by what it scans: where its domain falls short, and what a green licenses |
 | [concepts/testing](concepts/testing.md) | testing a workflow: an instrument per question, replay as the strict judge, why production resume is lenient, the test roles |
-| [concepts/evidence](concepts/evidence.md) | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
 | [concepts/key-order](concepts/key-order.md) | `Key.covers` as a partial order that injectivity makes antisymmetric, the allow-set's canonical form, and the lift to attenuation |
 | [concepts/agent-firm](concepts/agent-firm.md) | the AR firm: its combinators, its ERP port's contract, and the questions its tests answer |
 | [concepts/template-shape](concepts/template-shape.md) | a processor reads a template's structure once per call site: the statics plus each hole's expression, conversion and evaluated spec, the spec being the part that looks static and is not |
 | [concepts/authority](concepts/authority.md) | the verdict fold as a join over kinds, what a ruling's binding to its effect establishes, and attenuation and conservation as proposed |
-| [concepts/claims](concepts/claims.md) | each law the agent firm rests on: what it observes, where it holds, what it assumes, and whether it is proved, model-checked, tested, sampled or proposed |
+| [concepts/claims](concepts/claims.md) | each law the agent firm rests on: what it observes, where it holds, what it assumes, and whether it is proved, model-checked, tested, sampled or not built |
 | [concepts/context](concepts/context.md) | context engineering as seams: channels as the prompt's regions, cache order, skills, code and files, memory and MCP as open |
 | [concepts/evals](concepts/evals.md) | what evaluates a workflow: judgments, `improve` over a Pareto frontier, the benches, fork as a counterfactual, and what is not built |
 | [concepts/rosetta](concepts/rosetta.md) | DSPy, Pydantic AI and LangGraph mapped term by term onto Effective, with a DSPy module ported and pinned |

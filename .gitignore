@@ -18,13 +18,9 @@ htmlcov/
 .env
 *.env
 
-# Claude Code: shared skills, agents, hooks and settings are committed; the rest is local
-.claude/*
-!.claude/skills/
-!.claude/agents/
-!.claude/hooks/
-!.claude/settings.json
-.claude/delegation-ledger.jsonl
+# A coding agent's local settings and logs
+.claude/settings.local.json
+.claude/*.jsonl
 
 # Generated: the key registry and other derived build output
 build/

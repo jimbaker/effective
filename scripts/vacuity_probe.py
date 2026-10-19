@@ -41,8 +41,7 @@ and classifies each test by what its keys were allowed to do:
 **WHERE IT ATTACHES, AND WHY THAT LINE.** `SqliteTaskContext.step` qualifies a repeated name to
 ``name#N`` at `engines/sqlite.py:411`, *before* the SELECT. A probe attached above that line sees
 one key where the store holds two rows, so the occurrence count is read back off the ctx and
-recorded beside the key. This is the same nominal-vs-structural trap the rest of the arc is about,
-one level down.
+recorded beside the key. This is the nominal-vs-structural trap, one level down.
 
 **WHAT IT IS BLIND TO — a gate is bounded by what it SCANS.**
 
@@ -127,7 +126,7 @@ def _text(name: object) -> str:
     annotates `name: str` and is handed a `Key` by at least one caller — an unenforced
     annotation is a claim about a value, never the value. Unwrapping through `.stored()`
     rather than `str()` matters for the same reason it does everywhere else here: `str(key)`
-    is the repr, and a repr in a durable name is the defect this arc keeps finding."""
+    is the repr, and a repr in a durable name is a defect."""
     stored = getattr(name, "stored", None)
     return stored() if callable(stored) else str(name)
 

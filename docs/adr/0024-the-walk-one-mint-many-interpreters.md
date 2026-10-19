@@ -5,8 +5,8 @@
   steps are built: `handlers.base.walk_run`, `layers.layer_routing`, total dispatch in the replay
   and recording handlers, `ReplayHandler`'s `Respawn` arm, and `keys.gather_prefix` (§4). A
   principal's steer (§8) is built as `effective.steering.SteeringCtx`, below the walk.
-- **Relates to:** [ADR-0020](0020-key-composition-one-grammar.md) (key composition; its gather-prefix trigger is what §4 discharged, and
-  it owns `FramePosition`), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (gather as structure, whose branch coordinate is the frame
+- **Relates to:** [ADR-0020](0020-key-composition-one-grammar.md) (key composition; it owns `FramePosition`,
+  and §4's `gather_prefix` is the sibling of its `scope_prefix`), [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (gather as structure, whose branch coordinate is the frame
   this ADR unifies), [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md) (the two engines whose conformance suite is one axis of the safety
   net; [`tests/_walks.py`](../../tests/_walks.py) is the other), [ADR-0021](0021-dynamic-graphs-as-projections.md) §6 (promote-a-fork-to-canonical, which will not
   be built; §7 shows adding a `gather` branch is the same back edge), [ADR-0022](0022-dashboard-projections-the-read-side.md) §4a (the span join),
@@ -16,8 +16,8 @@
 
 **Every interpreter of the op language is a legitimate handler; every re-implementation of the
 WALK is not.** The walk is op dispatch, frame descent and ordinal placement. It becomes one shared
-mechanism that interpreters drive, reached in three sequenced steps: the first two are
-independently valuable, and the third is what they add up to.
+mechanism that interpreters drive. The pieces beneath it are built (§9) and each stands on its
+own; the unified walk (§5) is designed and not built.
 
 Many interpreters is the thesis and is not in question. One op language with many handlers is what
 algebraic effects buy: the loops differ in where a leaf's result comes from, how they park, how
@@ -50,18 +50,16 @@ bounded by what it scans, on the census itself.
 or was about to. The walk is being unified incrementally, and each increment was paid for after
 the fact.
 
-The counter-argument is the reason this is sequenced rather than immediate: [`tests/_walks.py`](../../tests/_walks.py)
+The counter-argument: [`tests/_walks.py`](../../tests/_walks.py)
 already asserts the enrolled walks agree. Its own docstring states the limit: it catches
 divergence and is silent on a defect that is uniform across walks. The hand-spelled gather frames
 that §4 replaced were exactly that blind spot: they agreed with each other and would have been
 wrong together.
 
-## 4. Step 1: `gather_prefix` (built)
+## 4. `gather_prefix` (built)
 
-[ADR-0020](0020-key-composition-one-grammar.md) set the trigger for a `gather_prefix(branch)` sibling to `scope_prefix`: a sixth mint, or
-any reader that has to learn the shape. Both fired: there were six hand-spelled mints
-(`absurd._branch_handler`, three in `absurd._join`, `recording.run_branch`, `replay._drive`), and
-`graphview.strip_branches` is the reader.
+`gather_prefix(branch)` is the sibling of [ADR-0020](0020-key-composition-one-grammar.md)'s `scope_prefix`, the one mint for a gather
+branch's frame, and `graphview.strip_branches` is the reader that learns its shape.
 
 `keys.gather_prefix(g, i)` is the fragment form, composed by `compose_key` and ending in the term
 separator, and every handler site calls it. `race_prefix(r, i)` is its sibling for a race branch
@@ -69,7 +67,7 @@ separator, and every handler site calls it. `race_prefix(r, i)` is its sibling f
 the fragment. `frame_path` cannot take a gather, since `op_key(Gather)` raises and there is no atom
 to pass.
 
-## 5. Step 3: the unified walk (designed, not built)
+## 5. The unified walk (designed, not built)
 
 The substrate's own thesis applied to itself: reify the walk as a generator yielding typed
 descriptions, and let a swappable interpreter drive it. The proposed shape, in which `walk`,
@@ -188,7 +186,7 @@ the declared result type, and the raw checkpoint encoding of `Steer.value`. Only
 await's answer arrives by `emit_event` and is a different mechanism. The walk-level `Steered`
 answer (§6) is what would let the walk check the schema itself.
 
-## 9. Sequence
+## 9. What is built
 
 **Built:**
 
@@ -198,26 +196,25 @@ answer (§6) is what would let the walk check the schema itself.
 | `layers.layer_routing` | the three layer-visibility tuples as one total decision; [`tests/test_layers.py`](../../tests/test_layers.py) pins that they are disjoint and cover every arm |
 | total dispatch | the replay and recording tables end in `case unreachable: assert_never(unreachable)` |
 | `ReplayHandler`'s `Respawn` arm | a `Respawn` has its own arm: it ends the run at the generation boundary, and is refused inside a gather branch |
-| `keys.gather_prefix` | step 1 (§4) |
+| `keys.gather_prefix` | the hand-spelled gather frames (§4) |
 
-**Proposed, in order:**
+**Not built:**
 
-1. **Frame state on the stack.** Replay already passes `prefix` and `position` as parameters; the
-   recorder and the durable handler keep them on the handler (`self._prefix`, `self._position`).
-   Two sites cannot simply drop that state: `recording.ScopedSuspended`, which re-installs its
-   `prefix` around each resume, and the durable handler's ctx swap. A stack local cannot survive a
-   park, so this is stack state while live plus an explicit resume record while parked.
-2. **The unified walk.** Build `walk()` and its protocol, with [`tests/_walks.py`](../../tests/_walks.py) extended to assert
-   it agrees with every enrolled walk before any handler adopts it, and `replay_prefix` enrolled.
-   Then migrate `ReplayWalk` (no layers, no park, smallest), `RecordingWalk` and the durable walk,
-   then the fork drivers. Each old loop is deleted only when its walk passes conformance.
+- **Frame state on the stack.** Replay already passes `prefix` and `position` as parameters; the
+  recorder and the durable handler keep them on the handler (`self._prefix`, `self._position`).
+  Two sites cannot simply drop that state: `recording.ScopedSuspended`, which re-installs its
+  `prefix` around each resume, and the durable handler's ctx swap. A stack local cannot survive a
+  park, so this is stack state while live plus an explicit resume record while parked.
+- **The unified walk.** `walk()` and its protocol (§5). `replay_prefix` (`effective.fork`) is not
+  enrolled in [`tests/_walks.py`](../../tests/_walks.py). A handler adopts the walk once that file asserts it agrees
+  with every enrolled walk.
 
 **Skipped: extracting the generator pump.** It is identical in three loops and has never been a
 defect source; it disappears inside the unified walk anyway.
 
 ## 10. Consequences
 
-**Step 3 touches the operational semantics**, where a defect is a durability defect. The loops are
+**The unified walk touches the operational semantics**, where a defect is a durability defect. The loops are
 small because the extractions in §3 happened, so unification removes little code and adds a
 protocol whose control flow is harder to read than `while True`. The per-loop comments are an
 asset and must survive the move: `RecordingHandler._run_scoped` drives a scoped body with `_drive`

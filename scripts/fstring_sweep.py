@@ -48,10 +48,10 @@ from collections.abc import Callable, Iterator
 
 BASELINE = pathlib.Path("scripts/fstring-baseline.txt")
 PRIVATE_BASELINE = pathlib.Path("scripts/fstring-private-baseline.txt")
-"""A tree that ships more than this repository keeps its own entries here; the gate reads both."""
+"""A second baseline, if present; the gate reads both."""
 MANIFEST = pathlib.Path("scripts/public-manifest.txt")
-"""What such a tree ships, read by its `sync_public.py`; a site in a file it does not ship is a
-private entry. A tree that ships everything has neither file."""
+"""The files a tree ships, if present; a site in a file it does not list belongs to the second
+baseline. Without it, every file ships."""
 
 RAISE = "raise -> structured exception"
 

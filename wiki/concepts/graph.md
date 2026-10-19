@@ -18,7 +18,7 @@ counted node; a 300-node agent trace is a 6-node cycle graph with counts on the 
 **Commit order is the edge relation**, so the quotient's nodes are tape-independent and the edges
 between concurrent branches are not. Branches with different ops draw as a chain, and branches
 folded into one node draw as a self-edge, which [concepts/building-with-effective](building-with-effective.md) shows on real
-runs (`draw-concurrent-branches-as-a-fan-task`).
+runs.
 
 | renderer      | draws                                                                         |
 |---------------|-------------------------------------------------------------------------------|
@@ -28,10 +28,3 @@ runs (`draw-concurrent-branches-as-a-fan-task`).
 
 `states=` **cannot introduce a node**: it is consulted per key, so it can only re-state one
 already there. A parked node arrives through `from_keys(pending=…)` or not at all.
-
-## Why this matters beyond the dashboard
-
-An evidence graph queried by family (security, architecture, duplication) is the same algebra one
-layer out: a selection over rows annotated with where the evidence came from. The vocabulary
-(`Node`, `Edge`, `RunGraph`, `dropped`, `hidden`) is the one to reuse rather than reinvent, with
-the caveat that this graph's rows are executions and a program graph's rows are not.

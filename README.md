@@ -251,10 +251,15 @@ All under `src/effective/` unless noted.
 | `uv run python examples/smol_durable.py` | the same house agent, durable and interruptible, with a judge guarding the door ([`examples/smol_door.py`](examples/smol_door.py)) | nothing: offline without keys; `OPENAI_API_KEY` and `JEV_API_KEY` for a real model and judge |
 | `uv run python -m examples.coder <dir> "<task>"` | a small coding agent whose test suite decides when the work is done ([`src/examples/coder/README.md`](src/examples/coder/README.md)) | `OPENAI_API_KEY`, Podman |
 | `uv run python -m examples.deep_research "<question>" cell="..."` | a frontier search over web leads, stopped when two hosts agree on every cell ([`src/examples/deep_research/README.md`](src/examples/deep_research/README.md)) | `BRAVE_SEARCH_API_KEY`, `JEV_API_KEY`, the `claude` CLI |
-| `uv run python -m examples.agent_firm sla-cap` | an accounts-receivable firm: a payment short of its invoice is explained, critiqued against the contract, approved by someone other than its proposer, and settled by saga through an ERP port ([`wiki/concepts/agent-firm.md`](wiki/concepts/agent-firm.md)) | nothing; `--odoo` settles on Odoo Community, after `just odoo-up` |
+| `uv run python -m examples.agent_firm sla-cap` | an accounts-receivable firm: a payment short of its invoice is explained, critiqued against the contract, approved by an approver other than its proposer, and settled by saga through an ERP port ([`wiki/concepts/agent-firm.md`](wiki/concepts/agent-firm.md)) | nothing; `--odoo` settles on Odoo Community, after `just odoo-up` |
 | `just tui-demo`, `just dashboard` | the terminal viewer and the run dashboard over a demo run | the `tui` extra for the viewer |
 
 ## The agent firm
+
+A firm exists, Coase argued in 1937, because some coordination costs less by authority than by
+negotiating each exchange: work that repeats, and commitments someone must answer for. Agents
+doing a firm's work face the same trade, so an agent firm gives them an organization: roles that
+decide, approvals that bind, and a record that outlives any one run.
 
 `src/examples/agent_firm/` is an accounts-receivable function run by agents under controls a
 finance team uses: every action has an owner, an approval where policy requires one, and a record
@@ -267,7 +272,7 @@ short of its invoice is an exception, and goes through these stages:
 | observe | `reconcile` holds each case to the firm's invariants |
 | explain | a model proposes a credit through a `Gated` channel: within the shortfall, citing the case's documents |
 | engage | an outside critic reviews the proposal against the contract |
-| authorize | a `govern` policy parks the claim until someone other than its proposer approves it; the ruling names the digest of the terms, which carry the digest of the settlement's plan, and a changed plan is refused |
+| authorize | a `govern` policy parks the claim until an approver the host names, other than its proposer, approves it; the ruling names the digest of the terms, which carry the digest of the settlement's plan, and a changed plan is refused |
 | act | a `saga` posts the memo and applies it and the payment through an ERP port, unwinding on a rejection |
 | settle the books | `firm`, a `fixpoint`, repeats the stages over every open case until two passes agree, and reports what stays open and why |
 
@@ -279,8 +284,8 @@ runs the firm over the books. The decisions are [ADR-0027](docs/adr/0027-the-fir
 
 The settlement is a saga. Each posting carries its undo, and a rejected step unwinds the steps that
 landed, latest first, so the memo is unapplied before it is reversed and no posted entry is
-deleted. A rejected reversal fails the run with that reversal named, and leaves the posted entries
-it did not reach for a person. Otherwise the run ends one of three ways: completed, compensated (and resolved again in the next round), or unlanded (a
+deleted. A rejected reversal fails the run with that reversal named; the entries it did not reach
+stay posted, and the run assigns them to no one. Otherwise the run ends one of three ways: completed, compensated (and resolved again in the next round), or unlanded (a
 reminder that ran out of attempts, continued on the next pass).
 
 ```mermaid

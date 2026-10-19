@@ -3,7 +3,7 @@
 - **Date:** 2026-09-18
 - **Status:** Accepted. `race`, `quorum` and the deadline (§10) are built on the recorder, replay
   and both engines (`effective.api.race`, `effective.api.quorum`, `effective.choice`); a race
-  branch may not yet park (§5).
+  branch may not park (§5).
 - **Relates to:** [ADR-0008](0008-dynamic-workflows-as-ops-applicative-parallelism.md) (gather as structure, whose barrier a race keeps), [ADR-0018](0018-measured-spend-accrual.md) (the meter a
   loser's spend reaches), [ADR-0020](0020-key-composition-one-grammar.md) (key composition, which the race's frame and records join),
   [ADR-0024](0024-the-walk-one-mint-many-interpreters.md) (the walk).
@@ -166,10 +166,9 @@ A stop is a value at the barrier. It escapes the layer driver without being thro
 and every layer generator is closed, so a layer's `finally` runs. Nothing preempts a thread, so a
 stop is never an unwound stack, which is the no-continuations invariant.
 
-A race branch may not park yet: an await or a sleep is refused by its kind. When parking is built,
-a parked loser sees the choice when it is next driven and stops without waking. A race never
+A race branch may not park: an await or a sleep is refused by its kind. A race never
 stops its loser mid-op. [ADR-0026](0026-in-flight-cancellation.md)'s in-flight cancel records a distinct `Cancelled` result for an op a face
-stops; a loser's started op does not use it, and that extension is deferred.
+stops; a loser's started op does not use it.
 
 **Falsified if:** a loser runs an effect after it observes a stored choice naming it a loser, an
 op a layer injects included; a stopped loser takes a step past its horizon; an op started by the
@@ -182,7 +181,7 @@ layers, so the two checks, the horizon and the step budget are not modeled.
 
 At the barrier, once every loser has stopped and no loser op is in flight, as `gather` does. Its
 latency is the longest in-flight started op of any loser, and its record is sealed on return.
-Returning at the choice while losers drain is deferred.
+Returning at the choice while losers drain is not built.
 
 **Falsified if:** the race returns while a loser has an op in flight or can still start one.
 **Checked by** `returnsQuiescent`.
@@ -321,4 +320,4 @@ free-threaded CPython with the GIL off.
 |---|---|
 | the arrivals bridge | subscriptions, delivery and acknowledgement, and formulas over outside evidence |
 | per-branch budget partition | how a budget is shared among a race's branches; a budgeted race waits on it |
-| deferred designs | returning before quiescence, stopping mid-stream, racing several parked events, and branch-and-bound and best-first |
+| not built | returning before quiescence, stopping mid-stream, racing several parked events, and branch-and-bound and best-first |

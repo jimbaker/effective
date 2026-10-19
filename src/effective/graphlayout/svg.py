@@ -183,7 +183,7 @@ def _midpoint(section: EdgeSection) -> tuple[float, float]:
     """Halfway ALONG the polyline, not the middle point of the list.
 
     An orthogonal route's vertices are not evenly spaced, so `points[len // 2]` can land on the
-    arrowhead — which is exactly where the first version put the traversal count."""
+    arrowhead, which is the wrong place for the traversal count."""
     segments = list(pairwise(section.points))
     spans = [hypot(end.x - start.x, end.y - start.y) for start, end in segments]
     target = sum(spans) / 2
@@ -216,10 +216,9 @@ def _shape(node: LayoutNode, box: Rect) -> Template:
     `graphview.to_mermaid`'s `_SHAPES`, so the two renderers do not teach a reader two languages:
     hexagon = the run can stop here, parallelogram = an artifact, stadium = a sleep, rect = a step.
 
-    `ledger` is the one kind still drawn as a rect — `to_mermaid` gives it a cylinder (`[( )]`) and
-    the honest counterpart here is an arc path this does not yet build; it is distinguished by a
-    graphite *tint* (`--ev-fill-sunken`) rather than a hue in the meantime, so the disjointness
-    rule holds even though the vocabularies are not yet at parity. That gap is the follow-up."""
+    `ledger` is the one kind the two vocabularies draw apart: `to_mermaid` gives it a cylinder
+    (`[( )]`), and here it is a rect with a graphite tint (`--ev-fill-sunken`) in place of a hue,
+    so the disjointness rule holds for it too."""
     match node.kind:
         case kind if kind in HEXAGONAL:
             return t'<polygon points="{_hexagon(box)}"></polygon>'

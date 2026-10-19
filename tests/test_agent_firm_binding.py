@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault, FaultPosition, failure_kind
-from _firm import CONTROLLER, FOUNDING, PROPOSER, gate, manifest, resolved, ruling
+from _firm import APPROVERS, CONTROLLER, FOUNDING, PROPOSER, gate, manifest, resolved, ruling
 from _odoo import fresh_round
 from pydantic import ValidationError
 
@@ -217,7 +217,9 @@ def _closed_as_unapproved(op: WorkflowOp, state: GateState) -> Verdict:
 @pytest.mark.adversarial
 def test_another_policys_refusal_in_the_approvals_words_is_no_denial(backend):
     firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
-    gated = govern(approval(PROPOSER), _closed_as_unapproved, gate="credit", run_id=run_id)
+    gated = govern(
+        approval(PROPOSER, APPROVERS), _closed_as_unapproved, gate="credit", run_id=run_id
+    )
     program = resolve(SLA_CAP, critic=True, round=firm.round)
     backend.register(run_id, lambda _: program(), firm.world.domain(), Fault(), (gated,))
     snapshot = backend.run_until_result(backend.spawn(run_id, run_id))
@@ -235,7 +237,7 @@ def test_a_denial_names_its_ruler(backend):
 @pytest.mark.adversarial
 def test_an_approval_naming_no_effect_is_refused(backend):
     firm = _firm()
-    waiting = resolved(backend, firm, manifest(FOUNDING, firm.round), approvers=())
+    waiting = resolved(backend, firm, manifest(FOUNDING, firm.round), rulers=())
     (park,) = backend.parked(waiting.task_id)
     answer(backend.engine, park, UNBOUND, by=CONTROLLER)
     _refused_by_the_approval(backend.run_until_result(waiting.task_id))

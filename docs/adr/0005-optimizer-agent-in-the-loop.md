@@ -10,8 +10,8 @@
 
 ## Context
 
-[ADR-0001](0001-channel-processor.md) deferred categorical strategy seams until an optimizer exists, picturing the optimizer
-as a separate subsystem to be built later. That framing is too narrow. GEPA (reflective prompt
+[ADR-0001](0001-channel-processor.md) leaves categorical strategy seams unbuilt and pictures the optimizer as a separate
+subsystem. That framing is too narrow. GEPA (reflective prompt
 evolution that selects on a Pareto frontier and learns from natural-language traces) has four
 ingredients, and the substrate already supplies three:
 

@@ -14,7 +14,7 @@ Usage::
 
     just cov-contexts                       # writes .coverage-contexts
     uv run python scripts/cov_contexts.py handlers/durable.py 341 400
-    uv run python scripts/cov_contexts.py effective/keys.py            # whole file
+    uv run python scripts/cov_contexts.py effective/keys/grammar.py    # whole file
 
 `--db` points at a different coverage file. Exits non-zero if the region has no contexts at all,
 which is itself the interesting answer.

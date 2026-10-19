@@ -6,7 +6,7 @@
 | explain   | the firm's model proposes a resolution of an exception                   |
 | engage    | an outside critic reviews the proposal, when the firm has one            |
 | decide    | the critique's credit stands over the proposal's; a refused answer stops |
-| authorize | `approval` parks the credit for a principal other than the proposer      |
+| authorize | `approval` parks the credit for an approver other than the proposer      |
 | act       | `settle` posts the credit and the payment by saga                        |
 
 A matched case settles with no credit and asks nobody. A refused approval is the resolution's
@@ -14,7 +14,7 @@ answer, `Denied`. Every model call is a step, so a resolution resumed after its 
 them all and asks none again.
 """
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Set
 from decimal import Decimal
 from enum import StrEnum
 from string.templatelib import Template
@@ -217,10 +217,34 @@ def terms_of(op: WorkflowOp) -> dict[str, str] | None:
             return None
 
 
-def approval(proposer: Segment) -> Policy:
-    """A policy that parks a settlement's claim of its credit for approval. An approval
-    `proposer` gave does not count, so the claim parks again for another approver; an answer that
-    does not approve is refused, which ends the resolution with its round unclaimed."""
+class NotAnApproverSet(TypeError):
+    """An approver set given as something other than a set, such as one name, whose `in` would
+    match any part of it."""
+
+    def __init__(self, given: str) -> None:
+        super().__init__(given)
+        self.given = given
+
+    def __str__(self) -> str:
+        return f"approvers must be a set of rulers, and {self.given} is not one"
+
+
+def approval(proposer: Segment, approvers: Set[Segment]) -> Policy:
+    """A policy that parks a settlement's claim of its credit for approval. `approvers` holds who
+    may approve, by whatever scheme the host keeps, and must answer a replay as it answered the
+    run.
+
+    | the latest answer | its ruler                 | the claim                        |
+    |-------------------|---------------------------|----------------------------------|
+    | none              |                           | parks                            |
+    | any               | `proposer`                | parks again, naming the proposer |
+    | any               | unnamed                   | parks again                      |
+    | any               | outside `approvers`       | parks again, naming the ruler    |
+    | approve           | in `approvers`            | proceeds                         |
+    | any other         | in `approvers`            | is refused, its round unclaimed  |
+    """
+    if not isinstance(approvers, Set):
+        raise NotAnApproverSet(type(approvers).__name__)
 
     def approve(op: WorkflowOp, state: GateState) -> Gating:
         if (terms := terms_of(op)) is None:
@@ -232,6 +256,12 @@ def approval(proposer: Segment) -> Policy:
             case _, ruler if ruler == proposer:
                 prompt = "approve this settlement? its proposer's approval does not count"
                 return park(Ask(APPROVAL, prompt, terms | {"proposer": proposer}, binds))
+            case _, None:
+                prompt = "approve this settlement? an unnamed ruling does not count"
+                return park(Ask(APPROVAL, prompt, terms, binds))
+            case _, Segment() as ruler if ruler not in approvers:
+                prompt = "approve this settlement? only an approver's ruling counts"
+                return park(Ask(APPROVAL, prompt, terms | {"ruler": ruler}, binds))
             case [*_, {"decision": "approve"}], _:
                 return Proceed()
             case _, ruler:

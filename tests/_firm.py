@@ -33,6 +33,9 @@ from examples.agent_firm.resolve import (
 from examples.agent_firm.world import World
 
 PROPOSER, CONTROLLER = Segment("ar-clerk"), Segment("controller")
+REVIEWER = Segment("reviewer")
+APPROVERS = frozenset({CONTROLLER})
+"""Who may approve a settlement in these suites."""
 FOUNDING = Pinned(height=0, digest=NO_RULES.digest)
 CAPPED = {"verdict": "revise", "credit": "1000", "cites": ["MSA-NW-2025"], "reason": "4.2 caps"}
 
@@ -122,7 +125,7 @@ def manifest(
 
 def gate(run_id: str, policy: Policy | None = None):
     return govern(
-        policy or approval(PROPOSER),
+        policy or approval(PROPOSER, APPROVERS),
         gate="credit",
         run_id=run_id,
         announce=announced,
@@ -152,11 +155,11 @@ def resolved(
     *,
     hypothetical: bool = False,
     fault: Fault | None = None,
-    approvers: tuple[Segment, ...] = (CONTROLLER,),
+    rulers: tuple[Segment, ...] = (CONTROLLER,),
     decision: str = "approve",
 ) -> Run:
     """Resolve what `admission` admits, answering each park with
-    `decision` as each of `approvers` in turn."""
+    `decision` as each of `rulers` in turn."""
     run_id = f"r-{uuid4().hex[:8]}"
     passed: list[tuple[Segment | None, ...]] = []
 
@@ -168,14 +171,14 @@ def resolved(
         program,
         scripted.world.domain(),
         fault or Fault(None),
-        (gate(run_id, watched(approval(PROPOSER), passed)),),
+        (gate(run_id, watched(approval(PROPOSER, APPROVERS), passed)),),
         admitted=True,
         hypothetical=hypothetical,
         budget_limit=None if admission.budget is None else float(admission.budget),
     )
     task_id = backend.spawn(run_id, run_id, params=admission.params())
     snapshot = backend.run_until_result(task_id)
-    asked, parks, waiting = None, 0, list(approvers)
+    asked, parks, waiting = None, 0, list(rulers)
     while waiting and (parked := backend.parked(task_id)):
         asked = asked or dict(scripted.world.asked)
         (park,) = parked
@@ -191,9 +194,16 @@ def _unasked(op: Any) -> Any:
     raise AssertionError(f"a replay called the world: {op!r}")
 
 
-def replayed(backend, run: Run, program: Callable[[], Effect[Any]] | None = None) -> Any:
+def replayed(
+    backend,
+    run: Run,
+    program: Callable[[], Effect[Any]] | None = None,
+    walked: list[tuple[Segment | None, ...]] | None = None,
+) -> Any:
     """`run` replayed with an interpreter that refuses every call, from the program it ran: an
-    admitted resolution unless `program` says otherwise."""
+    admitted resolution unless `program` says otherwise. Each pass the approval lets through
+    appends its rulers to `walked`."""
+    passed = [] if walked is None else walked
     raw = backend.unclaimed_ctx(run.task_id)
     try:
         ctx = raw
@@ -207,7 +217,7 @@ def replayed(backend, run: Run, program: Callable[[], Effect[Any]] | None = None
             viewer,
             unasked,
             ledger=None,
-            op_layers=(gate(run.run_id),),
+            op_layers=(gate(run.run_id, watched(approval(PROPOSER, APPROVERS), passed)),),
         )
         return handler.run(program or admitted(Manifest.admitted(run.params)))
     finally:

@@ -330,20 +330,18 @@ its own parameter rather than smuggled into the recorded key sequence.
 An `exclude=()` view is not comparable across engines (on the same resumed workflow, Absurd holds a
 delivered `$awaitEvent:` row that SQLite never writes), so it stays out of the conformance suite.
 
-## 11. Build order
+## 11. What is built
 
-### 11.0 The shortest path
+### 11.0 The park path
 
 Park reader, pending-node bridge, a minimal local page that draws the run and posts an answer with
-a drain. Built: `effective.parked`, `from_keys(pending=…)`, `effective.dashboard`.
+a drain: `effective.parked`, `from_keys(pending=…)`, `effective.dashboard`.
 
 ### 11.1 to 11.5
 
 1. **The live feed** (§6). Not built; §12a says what specifies it.
 2. **The interactive surface**, a Shiny `Slot` or comparable, and the choice of which graph shapes
-   are worth showing. One candidate lifts a coding-agent session into an Effective program on the
-   control axis, as `effective/session_telemetry.py` lifts a transcript's token counts into `Usage` and
-   `Span` on the cost axis. Not built.
+   are worth showing. Not built.
 3. **Node states.** Two of four have producers (§4).
 4. **The telemetry mapping.** Built (§4a). It needed no seam change: once `traced` read
    `layers.current_placement()`, the work was a fold.
@@ -378,14 +376,12 @@ interpretations of one node by the handler and the layer stack. The node count i
 effect the author wrote, the shape a chain with occasional fan-outs, which layered layout handles
 without tuning, and the cycle fold covers the long loop (§9a).
 
-**Where layout will get hard:** a fleet view, N runs on one canvas. The likely answer is many small
-graphs, a card per run, decided when the fleet view is built.
+**Not built:** a fleet view, N runs on one canvas.
 
 ## 12. Dispositions
 
 The criterion: as simple as possible, and no simpler. A disposition puts a seam where later
-exploration can enrich it without relocating it, and a deferred item carries a trigger rather than
-a date.
+exploration can enrich it without relocating it.
 
 | # | decision | disposition | why |
 |---|---|---|---|
@@ -394,24 +390,22 @@ a date.
 | 3 | where the dashboard code lives | **`effective`** | it reads only substrate records (§7) |
 | 4 | the page's shape | **one local FastAPI app, one process, SQLite** | `SqliteApp` holds engine, registry and connection together, so a click drains in-process. An injected-drain seam would be a parameter with one legal argument |
 | 5 | fork placement | **`effective.fork`**, with `effective.sandbox`; `SPAWN_TOOL` and `SpawnResult` in `effective.domain` beside the `CallTool` they type | the view and the fork read the same runs |
-| 6 | the preregistered latency experiment | **void by design change** | §12a |
-| 7 | park-kind classification | **shape decided, code deferred** | §12b |
-| 8 | `parked_since` on SQLite | **`None`** | the engine records no park timestamp, and a column is engine schema for a field no consumer has asked for. Trigger: the first consumer that wants elapsed time |
+| 6 | the answer-to-resume gap | **none: one process emits and drains** | §12a |
+| 7 | park-kind classification | **shape decided, not built** | §12b |
+| 8 | `parked_since` on SQLite | **`None`** | the engine records no park timestamp, and a column is engine schema for a field no consumer has asked for |
 | 9 | the `KINDS` vocabulary | **`event;` and `$awaitEvent:` both map to `await`** | one shape, one word, and the word matches the domain; mapping both keeps an `exclude=()` view from drawing a delivered await as a rectangle |
 | 10 | moving the branch coordinate outermost in a pending key | **no** | `pending_key` is a pure function of the raw registration; reshaping mints a second identity function. The engines prefix the coordinate onto the event name (`_PrefixedCtx.await_event`), so a parked branch's key is `event;gather:0,0;{name}` |
 | 11 | `decision_wf`'s await scoping | **scope it on a subject the fork inherits** | §12d |
 | 12 | the exemplars of `test_graphview.py` and the fork tests | **aligned: fork-clean** | the run you look at and the run you fork are the same run |
 
-### 12a. The latency experiment is void
+### 12a. Latency on the local page
 
-Two predictions were preregistered for the shortest path: the answer-to-resume gap would dominate
-felt latency, and a run parking while the page is open would not show until the next poll.
-Disposition 4 voids both: emit-then-drain in one process has no answer-to-resume gap, and with no
-polling a page load is the refresh. Whatever feels dead on an interactive surface is the live
+Disposition 4 leaves no answer-to-resume gap: emit-then-drain in one process resumes the run in the
+request that answered it, and with no polling a page load is the refresh. Whatever feels dead on an interactive surface is the live
 feed's specification. The instrument invariant: the page renders the run's actual current
 position on every load, never a cached one.
 
-### 12b. The authority classifier: shape decided, code deferred
+### 12b. The authority classifier: shape decided, not built
 
 The park reader is unfiltered by design. A consumer that filters parks will need one question
 answered: *which authority namespace is this park in?* It is computed from
@@ -420,8 +414,8 @@ answered: *which authority namespace is this park in?* It is computed from
 than adding a denylist. It does not answer what a park means, who may answer it, or what payload it
 takes.
 
-**Trigger:** the first board that narrows the parks it offers. Not before: a board narrowed by a
-prefix match that offers a `budget-grant:` park is the bug this prevents.
+No board narrows the parks it offers. A board narrowed by a prefix match that offers a
+`budget-grant:` park is the bug this classifier prevents.
 
 ### 12c. Where the read side lives
 

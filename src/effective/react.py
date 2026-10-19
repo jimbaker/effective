@@ -541,11 +541,10 @@ class Tool[A, R]:
     observation. Checked here, it is an observation the loop routes around. The tool-side half, a
     tool that ran and refused, is a different mechanism.
 
-    **No `key` property, and not because it was forgotten.** `step_key` wraps every `Step` in its
-    own arm, so a `call_tool`'s letter is `step;tool:{name}`; and the substrate decouples the
-    dispatch name from the durable key on purpose (`activate_skill` keys under `skill:{name}
-    ,activate` while its `CallTool` name is `skill-disclose`). A name-derived key would match
-    neither. `docs/repertoire-axis.md` §6b holds that question and declares it unowned."""
+    **No `key` property.** `step_key` wraps every `Step` in its own arm, so a `call_tool`'s letter
+    is `step;tool:{name}`, and the dispatch name and the durable key are separate on purpose
+    (`activate_skill` keys under `skill:{name},activate` while its `CallTool` name is
+    `skill-disclose`). A key derived from the name would match neither."""
 
     name: str
     args: type[A]

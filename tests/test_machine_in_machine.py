@@ -97,8 +97,7 @@ def inner_worker(ctx: Ctx) -> Any:
 
     A worker that returns without yielding mints no op, so its state frame never reaches the tape
     at all — and every assertion about where the inner machine's keys land would then hold of an
-    empty set. The first version of this file did exactly that and its nesting assertion failed
-    honestly; had it been written as "no key lands outside the frames" it would have passed
+    empty set, and an assertion written as "no key lands outside the frames" would pass
     vacuously."""
     run: CommandRun = yield from call_tool("run_suite", {}, CommandRun)
     return Evidence(summary=f"the inner machine measured exit {run.exit_code}", measured=run)

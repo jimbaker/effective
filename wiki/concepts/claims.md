@@ -11,7 +11,7 @@ below names what it observes, where it holds, what it assumes, and how it is kno
 | model-checked | a Quint model whose whole reachable graph TLC explores, within the bounds it states |
 | tested | pins and property tests over the cases or the generated domain they name |
 | sampled | an assumption checked on cases and never discharged |
-| proposed | designed, with the test that would accept it, and not built |
+| not built | designed, with the test that would accept it |
 | open | stated, with its domain and its acceptance test still to define |
 
 ## The inventory
@@ -34,12 +34,12 @@ below names what it observes, where it holds, what it assumes, and how it is kno
 | a race chooses once | a stopped branch admits no op after the choice, and the choice survives a crash | race and quorum on both engines | the flag is published after the choice is saved | model-checked ([`race.qnt`](../../formal/quint/race.qnt)); the race suites run with the GIL off |
 | a recorded result is never re-executed | a resume replays a recorded op's result and sends nothing | every op that recorded | an effect completed and not yet recorded may run again; exactly-once beyond that is the receiver's, by its keys | tested by a crash at every op on both engines ([`tests/test_shape_conformance.py`](../../tests/test_shape_conformance.py)) |
 | the firm stops | two passes leave the same open cases for the same reasons, none unlanded or compensated, or the pass budget runs out | the firm over one book | `Converged` reports the caller's predicate; a stopped case is asked again and can close later | tested ([`tests/test_agent_firm_fixpoint.py`](../../tests/test_agent_firm_fixpoint.py)) |
-| the allow-set is an order | `Key.covers` is a partial order, and a policy depends only on what it permits | the keys a small grammar generates | the generated domain reaches the corners | tested ([`tests/test_allow_set_laws.py`](../../tests/test_allow_set_laws.py)); the Lean proof proposed |
+| the allow-set is an order | `Key.covers` is a partial order, and a policy depends only on what it permits | the keys a small grammar generates | the generated domain reaches the corners | tested ([`tests/test_allow_set_laws.py`](../../tests/test_allow_set_laws.py)); the Lean proof not built |
 | the frontier is the menu | a nonempty input has a nonempty frontier, membership is order-free, every point left off is dominated by one kept, and no point kept is dominated; a missing objective or a number that is not finite is refused by name | `pareto.frontier` | values finite numbers, every objective present; the first three laws take `dominates` as their oracle, and the fourth checks it independently | tested over every small input of a tied grid ([`tests/test_pareto_laws.py`](../../tests/test_pareto_laws.py)) |
 | the interaction is computed | the contrast below, one outcome per cell | four scripted runs | the worlds are scripted, so the test checks the arithmetic and says nothing of the firm | tested ([`tests/test_agent_firm_interaction.py`](../../tests/test_agent_firm_interaction.py)) |
-| attenuation and conservation | a spawned child holds no more authority or budget than its parent | proposed in [concepts/authority](authority.md) | | proposed |
+| attenuation and conservation | a spawned child holds no more authority or budget than its parent | designed in [concepts/authority](authority.md) | | not built |
 | linearizations agree | two valid linearizations of one history project to one ledger | a history's valid linearizations and the projection, both to define | | open |
-| dispatch is total | no dispatch by `if` chains or `isinstance` | | | proposed: a gate with a baseline that can only shrink |
+| dispatch is total | no dispatch by `if` chains or `isinstance` | | | not built |
 
 ## Totality
 
@@ -119,7 +119,7 @@ which shows as $I < 0$.
 
 ## Related
 
-- [concepts/authority](authority.md): the fold, the binding, and the proposed attenuation.
+- [concepts/authority](authority.md): the fold, the binding, and attenuation, which is not built.
 - [concepts/agent-firm](agent-firm.md): the firm's controls, each with the test that checks it.
 - [concepts/testing](testing.md): how the substrate is verified, by instrument.
-- [concepts/evidence](evidence.md): why a claim is not evidence.
+- [concepts/enforcer-domain](enforcer-domain.md): what a green licenses.

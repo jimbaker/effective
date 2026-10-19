@@ -17,7 +17,7 @@
 
 An agent orchestration script (a fleet of subagents run by `pipeline`, `parallel` and
 schema-typed agent calls) and an Effective workflow sit at different altitudes. The script is the
-exploration layer: fan-out, fresh-eyes subagents, a distilled artifact at the end. Effective is
+exploration layer: fan-out, independent subagents, a distilled artifact at the end. Effective is
 the durable execution, replay and optimization substrate. Every property the script lacks
 (durability, mid-run HITL, an append-only canonical record, model-free replay, metered Pareto
 optimization) is what makes a learning loop compound across runs where a transient script

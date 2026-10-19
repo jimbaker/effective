@@ -17,7 +17,7 @@ script answers every model call and the approval, so the run needs no keys.
 
 import argparse
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from functools import partial
 from pathlib import Path
@@ -46,6 +46,8 @@ from .resolve import APPROVAL, ASKED, admitted, announced, approval, bindings, r
 from .world import World, scripted
 
 PROPOSER, CONTROLLER = Segment("ar-clerk"), Segment("controller")
+APPROVERS = frozenset({CONTROLLER})
+"""Who may approve a settlement in this script."""
 MAIN = Round("main")
 """The first round of the scripted books, which each run opens afresh."""
 
@@ -84,10 +86,16 @@ def books(case: Case, odoo: bool) -> tuple[Erp, Round]:
     return OdooErp(transport, seed(transport, [case], tag)), Round(tag)
 
 
-def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Path) -> Any:
+def run(
+    admit: Callable[[Pinned], Manifest],
+    world: World,
+    kept_in: str,
+    db: Path,
+    rulers: Sequence[Segment] = (CONTROLLER,),
+) -> Any:
     """Resolve what `admit` admits at the head of the firm's knowledge kept in the books
-    `kept_in`, durably on SQLite, answering each approval park as the controller. The run is
-    spawned under the v1 contract, so its tape records each model call's usage."""
+    `kept_in`, durably on SQLite, answering each approval park as the next of `rulers`. The run
+    is spawned under the v1 contract, so its tape records each model call's usage."""
     app = SqliteApp(str(db))
     manifest = admit(head(SqliteLedger(app.conn, None, app.write_lock).read, kept_in))
 
@@ -95,7 +103,11 @@ def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Pat
     def task(params: dict[str, Any], ctx: Any) -> Any:
         run_id, admission = params["run_id"], Manifest.admitted(params)
         gate = govern(
-            approval(PROPOSER), gate="credit", run_id=run_id, announce=announced, ruled=ruled
+            approval(PROPOSER, APPROVERS),
+            gate="credit",
+            run_id=run_id,
+            announce=announced,
+            ruled=ruled,
         )
         ledger = SqliteLedger(app.conn, run_id, app.write_lock)
         budget = None
@@ -114,16 +126,17 @@ def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Pat
         run_id = str(uuid4())
         params = {"run_id": run_id} | manifest.params()
         task_id = app.spawn("resolve", params)
-        done = app.run_until_result(task_id)
-        while parked := [p for p in app.parked() if p.task_id == task_id]:
+        done, waiting = app.run_until_result(task_id), list(rulers)
+        while waiting and (parked := [p for p in app.parked() if p.task_id == task_id]):
             rows = sqlite_payloads(app.conn, run_id)
             asked = [row for row in rows if row["kind"] == ASKED]
             print("asked:    ", asked[-1]["ask"], *asked[-1]["detail"])
-            for park in parked:
+            for park in parked[: len(waiting)]:
                 effect = bindings(rows, park.wake_event)[APPROVAL]
-                print("approved: ", park.wake_event, effect, "by", CONTROLLER)
+                ruler = waiting.pop(0)
+                print("approved: ", park.wake_event, effect, "by", ruler)
                 ruling = {"decision": "approve", "effect": effect}
-                answer(app, park, {"answers": {APPROVAL: ruling}}, by=CONTROLLER)
+                answer(app, park, {"answers": {APPROVAL: ruling}}, by=ruler)
             done = app.run_until_result(task_id)
         if done is None or done.state != "completed":
             raise RuntimeError(f"the run ended {done}")

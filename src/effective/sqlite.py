@@ -1,5 +1,4 @@
-"""The SQLite engine's former path: re-exports the public names of `effective.engines.sqlite`
-while consumers outside this repository move (`retire-the-engine-shims-task`).
+"""Re-exports the public names of `effective.engines.sqlite`.
 
 At run time this name is the defining module itself, so a patch through it reaches the engine."""
 

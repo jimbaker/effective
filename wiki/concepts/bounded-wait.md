@@ -62,7 +62,7 @@ invariant.
 
 `_claim_locked`'s `CASE` is the one expression that has to know this, and the claim is the right
 home for it because a claim is the event that decides: a list of park-ending writers is bounded by
-what it enumerates, and the lease reclaim was outside it.
+what it enumerates, and the lease reclaim falls outside such a list.
 
 **A reader of the column asks a state as well**, since a park is a state and the column
 outlives one. The three readers ask two different questions and the difference is deliberate.
@@ -73,9 +73,8 @@ outlives one. The three readers ask two different questions and the difference i
 | `bridge_sqlite.park_name` | the same, of one task | it PROJECTS that relation rather than restating it |
 | `runs.read_sqlite_runs` | what is this run parked on? | `waiting` and a name. A run whose deadline is running out is parked on that event right up to the claim that ends it |
 
-Two of them once read the column raw and reported a sleeping task as parked on an event nobody
-was waiting for; `park_name` then asked the state alone and named parks the first relation
-excludes.
+A reader that reads the column raw reports a sleeping task as parked on an event nobody is
+waiting for, and one that asks the state alone names parks the first relation excludes.
 
 ## What the deadline's precision actually is
 
@@ -113,7 +112,7 @@ engine's. Emit under a held clock and the tie is exact: an event a microsecond b
 arrives, one AT the deadline and one after expire, which is the race's tie rule (a timeout and a winner decided by one authority, at one instant) read
 at the resolution the engine stores. [`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py).
 
-Punctuality is a floor of its own and a different one. The instant is now the one the workflow
+Punctuality is a floor of its own and a different one. The instant is the one the workflow
 named; how soon a worker NOTICES it is the driver's business, and nothing here establishes a
 bound. The SDK's own worker loop polls every 0.25 s by default and this repo does not run it:
 tests drive `work_batch` by hand, and a deployment drives its own worker loop. So the page states the
@@ -137,9 +136,6 @@ an hour on, with the run still `sleeping` after the clock was advanced TO the de
 absolutely it lands 0.000000 s off and that same advance expires it. So a rule about the instant
 itself costs no wall-clock time to pin, which is what the race's tie rule needs.
 [`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py).
-
-Found by the table, not by a case: every per-history pin happened to use numbers outside the
-window, which is what an enumeration is for.
 
 ## The slot, which is a different axis
 

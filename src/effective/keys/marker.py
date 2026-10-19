@@ -201,13 +201,11 @@ class Segment(str):
                 f"template does not declare. Two coordinates are written as two holes."
             )
         if OCCURRENCE_SIGIL in text:
-            # The fifth fence, and the one the grammar had not yet grown when the other four were
-            # written. `#N` is a suffix, so `#` joined the set of
-            # bytes that mean something, and this constructor did not hear about it —
-            # `Segment("ask#2")` branded a name-plus-occurrence as one atom. Same shape as `,`
-            # above and the same remedy: fence it where the value is CREATED, not where it is
-            # composed. The general rule this pair now evidences: a new metacharacter in the
-            # grammar is a new fence here, and the fences are what make the brand mean anything.
+            # The fifth fence. `#N` is an occurrence suffix, so `#` is a byte that means
+            # something, and without this fence `Segment("ask#2")` would brand a name plus its
+            # occurrence as one atom. Like `,` above, it is fenced where the value is created.
+            # Each metacharacter in the grammar is a fence here, and the fences are what make
+            # the brand mean anything.
             raise ValueError(
                 f"Segment({text!r}) contains the occurrence sigil {OCCURRENCE_SIGIL!r}, which "
                 f"marks a REPEAT of a whole key and may appear only at the very end. A `Segment` "

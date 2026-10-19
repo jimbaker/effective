@@ -86,8 +86,8 @@ flowchart LR
   in a guardrailed `Gated` seam, its output contract statically visible.
 - The capability surface is a typed, diffable manifest: one file shows every channel, `ty`
   enforces it, and a change shows as a stub diff.
-- An L1 upgrade is open: generated name-to-output-type overloads make `ask_llm("setpoint", ...)`
-  infer `Effect[Setpoint]`. Deferred until re-passing the model is friction.
+- An L1 upgrade is open and not built: generated name-to-output-type overloads would make
+  `ask_llm("setpoint", ...)` infer `Effect[Setpoint]`.
 - The pattern extends across packages: namespace packages and `importlib.metadata` entry points
   let a third party contribute channels or ops, with the stub as the cross-package contract.
 
@@ -109,7 +109,7 @@ flowchart LR
 | filename identity and a bare conventional symbol | the name lives nowhere in the file, a rename silently changes behavior, the op is untyped, and a discovery typo is silent |
 | discovery as an import side effect | the reader cannot see where the capability set is built |
 | a bespoke lint alone, no stub | it reports in a parallel checker, CI only, with no editor completion and no type flow; the lint stays for the directory facts `ty` cannot see |
-| an L2 generated facade (`channels.setpoint`) | real codegen, a runtime surface to maintain; deferred |
+| an L2 generated facade (`channels.setpoint`) | real codegen, a runtime surface to maintain; not built |
 | discover tools first | channels carry the data-axis thesis and are already `Prompt[S]`-typed, so they are the easier case to make legible |
 
 ## Open questions

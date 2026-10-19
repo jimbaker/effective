@@ -442,16 +442,14 @@ def _require_pg_if_asked() -> None:
     """`EFFECTIVE_REQUIRE_PG=1` turns every Postgres skip into a refusal to start.
 
     A lane that skips its own subject reports success for a run that never happened:
-    `just pgt-test` is 266 passed / 2 skipped against the container and 127 passed /
-    144 skipped with nothing listening, exit 0 both times. Counting skips afterwards
-    was the first answer and it measured the wrong thing — the claim is *the Absurd arm
-    executed*, not *few tests skipped*, and the count moves whenever the authority
-    census grows a row. This asserts the claim itself, once, before collection.
+    `just pgt-test` exits 0 both against the container and with nothing listening, so
+    counting skips afterwards measures the wrong thing: the claim is *the Absurd arm
+    executed*, and a skip count moves whenever the authority census grows a row. This
+    asserts the claim itself, once, before collection.
 
     Six functions in this tree answer "is Postgres ready" (`_conformance.pg_ready`,
     `_durable.pg_ready`, and four private spellings), so a per-guard check would be a
-    domain enumerated as spellings of one referent — the shape
-    `wiki/concepts/enforcer-domain.md` is about. The session is the one place that is
+    domain enumerated as spellings of one referent. The session is the one place that is
     upstream of all six.
     """
     if os.environ.get("EFFECTIVE_REQUIRE_PG") not in ("1", "true", "yes"):

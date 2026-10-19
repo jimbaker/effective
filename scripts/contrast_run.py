@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run the RLM-vs-structured contrast pilot.
+"""Run the RLM-vs-structured contrast.
 
 Resumable: a cell with a clean trial.json is skipped; errored cells re-run.
 Reads OPENAI_API_KEY from the env or ./api.env — VALIDATED (the stale-env

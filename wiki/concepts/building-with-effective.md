@@ -379,10 +379,10 @@ likely to reach for and not find:
 |---|---|
 | race losers rolled back | a loser stops at its next op admission; an op already admitted runs to its end and its effects stand |
 | branch and bound | the bound threaded through the recursion's own state, as a `frontier` merge or an `unfold`, with no cancellation ([`tests/test_pruned_search.py`](../../tests/test_pruned_search.py)) |
-| memoized recursion, generic sharing | classified, waiting on an author-supplied semantic key |
+| memoized recursion, generic sharing | classified, not built: it needs an author-supplied semantic key |
 | generic saga / compensation | classified; the ledger forbids UPDATE and DELETE, so a committed row is undone only by a later row, and compensation is domain code |
-| best-first search | built as a `frontier` policy (`pick` the top k); deferred only as a race |
-| mutual recursion across durable tasks | deferred; `mutual` is in-task |
+| best-first search | built as a `frontier` policy (`pick` the top k); not built as a race |
+| mutual recursion across durable tasks | not built; `mutual` is in-task |
 
 A composition error that looks like a successful run is the dangerous kind, so the design
 preference is to compose correctly, refuse loudly, or state the cost.

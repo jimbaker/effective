@@ -1,7 +1,7 @@
 """VOI probe deliverables: the informed grant prompt and the informed-vs-blind DoE that scores
 prediction P1.
 
-P1 (preregistered): informed grants beat a fixed policy over a mixed, headroom-stratified batch
+P1: informed grants beat a fixed policy over a mixed, headroom-stratified batch
 **only when `probe ≪ grant`**; when the probe costs as much as the grant it informs, informed is
 dominated. Scored here on a synthetic task family driven through the REAL fork driver
 (`effective.fork`/`effective.voi`): the (quality, cost) come from actual `ForkTail.usage` and an

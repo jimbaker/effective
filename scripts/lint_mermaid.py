@@ -112,9 +112,8 @@ def check_block(path: Path, index: int, block: str) -> list[Finding]:
         if not is_sequence and (m := NODE_RE.search(line)):
             # Only a label that is BOTH unquoted AND carries a bracket is fatal:
             # `id(Proceed (WF-B))` dies on the inner `(`, while `n2[("text")]` is a
-            # quoted cylinder and parses fine. The first version of this rule flagged
-            # the cylinder — a false positive found by rendering it, which is why the
-            # negative case is pinned in the tests alongside the positive one.
+            # quoted cylinder and parses fine, so the tests pin the cylinder as a
+            # negative case alongside the positive one.
             label = m.group(2)
             if label[:1] not in {'"', "'"} and BRACKET & set(label):
                 out.append(

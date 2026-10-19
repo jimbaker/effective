@@ -73,4 +73,4 @@ question the others cannot.
 
 [concepts/tapes](tapes.md) says what a checkpoint holds and why replay can serve it;
 [concepts/forced-schedules](forced-schedules.md) covers what a schedule instrument can decide;
-[concepts/evidence](evidence.md) covers how a green test can be weaker than it looks.
+[concepts/enforcer-domain](enforcer-domain.md) covers what a green licenses.

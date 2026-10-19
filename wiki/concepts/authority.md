@@ -3,7 +3,7 @@
 A governed op is asked of every policy at its gate, and the answers fold into one verdict. A park
 waits for a principal's ruling, which records who ruled and, when the ask binds an effect, which
 effect the ruling is about. What is built here is the fold, the typed ruling and the binding; the
-laws a delegated organization would need beyond them, attenuation and conservation, are proposed.
+laws a delegated organization would need beyond them, attenuation and conservation, are not built.
 
 ## The vocabulary
 
@@ -56,7 +56,9 @@ nothing and is read as before.
 | a refusal names its policy and its ruler | the ruler is a name the answering surface asserts; authenticating it is the host's |
 
 Binding is matching. It is necessary for an approval and short of authenticated authority: it
-does not say the ruler was entitled to rule, and it implements no expiry or revocation. In the
+does not say the ruler was entitled to rule, and it implements no expiry or revocation. Entitlement
+is the policy's: the agent firm's approval counts a ruling only from a ruler the host's approver
+set holds. In the
 agent firm the bound effect is the settlement's terms row, which carries the digest of its plan, so
 a credit and a plan nobody approved run nothing ([concepts/agent-firm](agent-firm.md),
 [ADR-0028](../../docs/adr/0028-an-approval-binds-its-effect.md)).
@@ -67,7 +69,7 @@ a credit and a plan nobody approved run nothing ([concepts/agent-firm](agent-fir
 | an ordinary answer cannot settle an authority park, and a ruling records who ruled | `tests/test_authority_rulings.py` |
 | a ruling on another effect is refused before the policy reads it | `tests/test_govern.py`, `tests/test_agent_firm_binding.py` |
 
-## Proposed: attenuation and conservation
+## Not built: attenuation and conservation
 
 Neither law is built; each is stated with the test that would establish it.
 

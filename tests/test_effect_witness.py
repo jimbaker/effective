@@ -1,7 +1,6 @@
 """`scripts/effect_witness.py`'s own pins: the instrument must find a planted path before its zeros
-mean anything. Each is a P0 prediction in the effect-witness preregistration report, or a finding
-from a review of the instrument. `scripts/effect_witness_mutants.py` runs this file against named
-mutants of the script; set `EFFECT_WITNESS_SOURCE` to a copy's path to load that copy instead."""
+mean anything. `scripts/effect_witness_mutants.py` runs this file against named mutants of the
+script; set `EFFECT_WITNESS_SOURCE` to a copy's path to load that copy instead."""
 
 import importlib.util
 import json

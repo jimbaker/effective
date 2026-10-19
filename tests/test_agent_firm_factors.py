@@ -62,9 +62,7 @@ def test_a_crash_after_a_steps_effect_loses_only_a_model_calls_record(backend):
 
 def test_the_factors_name_each_ruler_from_the_ledger_alone(backend):
     firm = briefed()
-    run = resolved(
-        backend, firm, manifest(FOUNDING, fresh_round()), approvers=(PROPOSER, CONTROLLER)
-    )
+    run = resolved(backend, firm, manifest(FOUNDING, fresh_round()), rulers=(PROPOSER, CONTROLLER))
     rows = backend.ledger_payloads(run.run_id)
     assert factors(run.params, rows, {}).rulers == (PROPOSER, CONTROLLER)
 

@@ -1,6 +1,6 @@
 """Drive the de-essaying machine over one region, and serve its one mechanical gate.
 
-    uv run python scripts/prose_run.py start src/effective/keys.py --subject keys-module
+    uv run python scripts/prose_run.py start src/effective/keys/grammar.py --subject key-grammar
     uv run python scripts/prose_run.py drain --watch
     uv run python scripts/prose_run.py status
 

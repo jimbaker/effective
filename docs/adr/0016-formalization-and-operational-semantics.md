@@ -298,7 +298,7 @@ $j$ by example.
 | **I3 liveness** | Quint `gather.qnt` `liveness` (TLC, fairness implies termination, non-vacuity guarded by `nonVacuityWitness`) | partial: checks the suspend-in-gather instance. Expired-lease reclaim on Absurd is pinned by [`tests/test_absurd_lease_reclaim.py`](../../tests/test_absurd_lease_reclaim.py) and has no formal node |
 | **I4 termination of observers** | none | out of scope: no op carries an observer; watching a run is telemetry |
 | **I5 two bookkeepers** | Lean `ledger_monotone`, `ledger_idem`, `advance_nodup`, `L_not_function_of_C`, `C_not_function_of_L`; Quint `effective.qnt` `ledgerNodup` | partial by design: non-derivability is the modest direction; the architectural seal (the append-only trigger) is held by tests |
-| **I6 determinism** | Lean `step_deterministic` (for a fixed oracle ω), `replay_stable`; Quint assumes it (`assume T2_determinism`) | partial: covers step, await and ledger; gather determinism is deferred in `Step.lean`, and the index-ordered join is pinned by [`tests/test_gather.py`](../../tests/test_gather.py) |
+| **I6 determinism** | Lean `step_deterministic` (for a fixed oracle ω), `replay_stable`; Quint assumes it (`assume T2_determinism`) | partial: covers step, await and ledger; gather determinism is not modeled in `Step.lean`, and the index-ordered join is pinned by [`tests/test_gather.py`](../../tests/test_gather.py) |
 
 ## Consequences
 

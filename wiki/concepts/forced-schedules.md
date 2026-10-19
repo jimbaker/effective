@@ -177,7 +177,7 @@ turnstile's in three ways a row has to know.
 
 ## The corollary
 
-[concepts/enforcer-domain](enforcer-domain.md) asks what a gate SCANS. This is its twin one level over: **ask what an
+[concepts/enforcer-domain](enforcer-domain.md) asks what a gate scans. This is its twin one level over: **ask what an
 instrument can FORCE.** A schedule that runs green over a race is not evidence the race followed
 it, and the failure is silent in the useful direction, since the order the index already agrees
 with passes every time. The move that finds it is the same one: reverse what the instrument
@@ -185,7 +185,7 @@ describes and see whether the verdict follows.
 
 The general form is a forced input, and its observation-side twin is two hypotheses with one
 reading: there two hypotheses look alike THROUGH the instrument, here the instrument sets something
-the outcome does not depend on ([concepts/evidence](evidence.md)).
+the outcome does not depend on.
 
 Some race and quorum shapes are still unwritten; [concepts/recursion-shapes](recursion-shapes.md)
 classifies them, and its "How a shape is tested" holds for every shape but a cancelling one.

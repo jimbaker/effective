@@ -313,6 +313,27 @@ odoo-down:
 odoo-test:
     EFFECTIVE_REQUIRE_ODOO=1 EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" uv run pytest tests/test_agent_firm_erp_port.py tests/test_agent_firm_saga.py tests/test_agent_firm_resolve.py -k odoo -v
 
+# The agent firm's evidence from a checkout: the services first, then the example, every suite the
+# firm's claims cite with Postgres and Odoo required, and both formal lanes. A skipped test fails
+# it. Once per machine before it: `just formal-setup` and `just formal-image`.
+evidence:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just pgt-up
+    just odoo-up
+    uv run python -m examples.agent_firm sla-cap
+    uv run python -m examples.agent_firm.gaps
+    mkdir -p build
+    EFFECTIVE_REQUIRE_ODOO=1 EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" uv run pytest \
+      tests/test_agent_firm_*.py tests/test_govern_conformance.py \
+      tests/test_enforce_measured_conformance.py tests/test_pareto_laws.py tests/test_effect.py \
+      tests/test_shape_conformance.py tests/test_conformance.py tests/test_telemetry_otlp.py \
+      tests/test_span_key_joins_the_tape.py -q -rs --no-cov -p no:cacheprovider | tee build/evidence.log
+    if grep -q '^SKIPPED' build/evidence.log; then echo "evidence: a test skipped" >&2; exit 1; fi
+    just formal
+    just formal-verify
+    echo "evidence: the example, every cited suite with no skip, and both formal lanes"
+
 # The race suites on a free-threaded CPython, failing if the GIL comes back on. The venv holds the
 # core, the `judge` extra and the `race` group, whole, so the import census runs against what a
 # consumer installs.

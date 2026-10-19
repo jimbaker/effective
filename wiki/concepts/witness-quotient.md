@@ -28,8 +28,7 @@ Let `W` be `witness`, and let `E = keep ∘ encode` be what the store holds.
 That is the whole runtime obligation, and it implies the half of fidelity that matters. If two
 values are stored alike then they are loaded alike, so they witness alike: **`ker(E) ⊆ ker(W)`**,
 the witness is never finer than the store. A witness that were finer would fail a retry that was
-handed the same input, which is the defect this arc started from, on Postgres, for any branch
-handed a dict.
+handed the same input: on Postgres, any branch handed a dict.
 
 So `W` factors through `E`: there is a `w` with `W = w ∘ load ∘ decode ∘ E`. The codec is a
 function of what durability records: the rule that a branch's identity is what the store keeps,
@@ -63,8 +62,8 @@ Three outcomes sit outside the quotient, and only the third is about the codec.
 
 [`scripts/witness_sweep.py`](../../scripts/witness_sweep.py) builds a product of leaves and positions and measures every cell against
 both engines, so a shape nobody recalled is in the space by construction. Its declared classes are
-pinned as properties W1 to W3, and a shape an earlier round found by hand
-is pinned present, since a sweep licenses a claim only over what it covered
+pinned as properties W1 to W3, and a shape the product does not generate is pinned by a test of
+its own, since a sweep licenses a claim only over what it covered
 ([concepts/enforcer-domain](enforcer-domain.md)).
 
 Two things it does not reach. It measures one process, so a witness that followed this process's
@@ -72,8 +71,5 @@ hash seed is a separate subject, not the sweep's. And it measures a leaf op's va
 also handed refusals, a race's own choice and its children's digests, which take the same codec by
 other call paths.
 
-**It is an instrument, so it was itself wrong first** ([concepts/evidence](evidence.md)). Its first version
-witnessed the live domain value and reported ninety-three failures against a codec that was
-correct, because a handler hands a branch an encoded value on both attempts. A pinned test had the
-same defect: a measurement of a call path nothing takes. The rule it teaches is to derive what the
-code hands the function under test, rather than what the prose around it says the function is for.
+**The sweep witnesses the encoded value**, because a handler hands a branch an encoded value on
+both attempts. A sweep of the live domain value would measure a call path nothing takes.

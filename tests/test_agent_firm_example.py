@@ -28,6 +28,8 @@ from examples.agent_firm.__main__ import (
 )
 from examples.agent_firm.cases import CASES
 from examples.agent_firm.factors import factors
+from examples.agent_firm.gaps import REVIEWER, UNCAPPED
+from examples.agent_firm.gaps import main as gaps
 from examples.agent_firm.world import scripted
 
 pytestmark = pytest.mark.journey
@@ -57,6 +59,17 @@ def test_the_example_resolves_each_case(capsys, monkeypatch, name):
     ]
     assert amounts == ([critique.credit] if critique else [])
     assert owed == case.gap - (critique.credit if critique else 0)
+
+
+def test_the_gaps_example_parks_a_reviewers_approval_and_posts_an_uncapped_credit(capsys):
+    gaps()
+    lines = [line.split() for line in capsys.readouterr().out.splitlines()]
+    rulers = [line[-1] for line in lines if line[0] == "approved:"]
+    asked = [" ".join(line) for line in lines if line[0] == "asked:"]
+    credited = [Decimal(line[1]) for line in lines if line[0] == "scored:"]
+    assert rulers == [str(REVIEWER), str(CONTROLLER), str(CONTROLLER)]
+    assert len(asked) == len(rulers), "each approval was asked for, the reviewer's asked again"
+    assert credited == [CRITIQUES["sla-cap"].credit, UNCAPPED.credit]
 
 
 @pytest.mark.parametrize(

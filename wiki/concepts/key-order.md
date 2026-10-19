@@ -2,8 +2,8 @@
 
 The key grammar was built for injectivity: two distinct names never render to one string, and a
 string parses to one structure. Keys also turn out to be partially ordered, by `Key.covers`, and
-that order is what an allow-set is read in. The result was not designed for; it fell out of the
-grammar when `PermitPolicy` stopped matching on text.
+that order is what an allow-set is read in. The order follows from the grammar, and
+`PermitPolicy` reads it where a text match would alias.
 
 ## The order
 

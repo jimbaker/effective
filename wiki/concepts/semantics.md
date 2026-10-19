@@ -76,7 +76,7 @@ sequence is one linear extension of it. [`docs/effective-design.md`](../../docs/
 reader obligation it puts on every fold, and the cases where a handler realizes strictly less. Two
 of those cases matter here: `ReplayHandler` keeps no ledger, and a repeated event id completes with
 two rows under `RecordingHandler` while both engines refuse it. The agreement is tested for the
-rows' multiset; their precedence is intended and not yet defended.
+rows' multiset; their precedence is intended and untested.
 
 ## Two refusals that follow
 

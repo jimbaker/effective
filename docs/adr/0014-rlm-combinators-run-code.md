@@ -110,8 +110,7 @@ mechanism inside one segment, and nothing durable records it.
 A **prewarmed interpreter** is a different thing: dumping Monty at a well-known init state (host
 functions registered, a skill prelude evaluated) and starting every run from that image is
 memoized initialization with no mid-computation control state, so it raises no invariant
-tension. It is deferred as an optimization until sandbox init cost shows in the meter, which is
-unlikely beside the cost of starting a segment's own worker pool.
+tension. It is not built.
 
 ### 5. Monty first, behind an engine seam
 
@@ -124,16 +123,15 @@ and leaves no worker, and no pool state, shared across segments or threads. A wo
 as replay always does. `effective.code`
 never imports the engine, so the op contract owns the semantics and the engine owns execution; a
 second engine (a Pyodide subprocess) would join behind the same reserved tool and earn a
-cross-interpreter conformance suite in the shape of [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)'s cross-backend one. A
-container or microVM tier for hostile code is deferred until untrusted third-party code runs:
+cross-interpreter conformance suite in the shape of [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)'s cross-backend one. No
+container or microVM tier confines hostile code:
 the worker is an ordinary subprocess with the host's user, filesystem and network: Monty's capability model confines what code can name, and no OS mechanism confines the worker. Firejail is rejected (a SUID-root
 escalation surface).
 
 Monty 1.1.0 parses a subset: `match` and generator `yield` raise a located
 `NotImplementedError` at parse time, while classes, comprehensions, the walrus and f-strings
 work. Skill
-scripts stay inside the subset, so sandbox scripts are exempt from the repo's `match` preference
-until Monty grows.
+scripts stay inside the subset, so sandbox scripts are exempt from the repo's `match` preference.
 
 ### 6. Skill scripts are pinned code; provenance is a key frame
 

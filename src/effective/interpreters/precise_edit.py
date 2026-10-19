@@ -122,7 +122,7 @@ def make_precise_editor(
 
     ``snapshot`` is the recorded file content at edit time — in a live loop it arrives
     via a ``read_file`` op each turn; here it is passed in, which keeps this module the
-    pure emission guardrail (the read-op threading is the loop-wiring follow-up)."""
+    pure emission guardrail."""
     price = resolve_price(model, price)
     extra = extra if extra is not None else {"reasoning_effort": "low"}
 

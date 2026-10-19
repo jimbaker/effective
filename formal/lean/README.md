@@ -26,9 +26,8 @@ while Quint owns reachability and interleavings.
 
 Tracks: `Keys.lean` (names / I1), `Scopes.lean` (names / I1, the string layer),
 `Step.lean` (rules / I6), `Ledger.lean` (rules / I5).
-Next: L1.9 (compose gather frames × scope atoms in `Key`); extend T2/T3 to
-compound ops; stand up the Quint model that imports L1.5 + T2 + T3 (and Quint
-Connect against the real handler).
+Not modeled: gather frames composed with scope atoms in `Key`, and compound ops
+in T2/T3.
 
 ## Build
 

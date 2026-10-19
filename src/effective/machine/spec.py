@@ -151,11 +151,10 @@ class Report[V: StrEnum, R: Measured = CommandRun]:
     def of[V2: StrEnum, R2: Measured](cls, verdict: V2, evidence: Evidence[R2]) -> Report[V2, R2]:
         """Lift a worker's evidence and a judge's verdict into one report — STRUCTURALLY.
 
-        `fuse` hand-enumerated the copy, and a reviewer showed what that costs: three of the four
-        assignments could be DELETED with all 3857 tests still passing, so a fifth `Evidence`
-        field would have vanished in silence. Reading the field list off `Evidence` means the copy
-        cannot fall behind the type — and if `Evidence` grows a field `Report` lacks, this raises
-        at the call rather than dropping it."""
+        A hand-enumerated copy drops a new `Evidence` field in silence, and no test notices.
+        Reading the field list off `Evidence` means the copy cannot fall behind the type, and
+        if `Evidence` grows a field `Report` lacks, this raises at the call rather than
+        dropping it."""
         return cast(
             "Report[V2, R2]",
             cls(verdict, **{f.name: getattr(evidence, f.name) for f in fields(Evidence)}),

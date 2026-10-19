@@ -18,7 +18,7 @@ with machine state. So:
 - Failures here are real; **absences are not** informative at these sample sizes.
 - Do not pin a seed as a regression test. Adding any test reshuffles the lane.
 
-Three things that are *not* the trigger, ruled out the same day so nobody re-derives them:
+Three things that are *not* the trigger:
 
 - **Not the ordering.** Replaying a failing seed's order verbatim through explicit node ids
   under `-p no:randomly` collects byte-identically and passes.

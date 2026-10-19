@@ -73,7 +73,7 @@ model request; its Temporal and Absurd engines need a service and were not run.
 | `deps`, `RunContext` | a workflow's arguments, and the interpreter's own state | the workflow holds no handle to the world |
 | `Hooks` (`before_model_request`, `wrap_tool_execute`) | layers: generators around each op ([`examples/hooks_as_layers.py`](../../examples/hooks_as_layers.py)) | |
 | `requires_approval`, `DeferredToolRequests` | `await_event`, or a `govern` policy that parks | the run parks and resumes by replay, where Pydantic AI ends the run and starts a new one with the approvals |
-| `UsageLimits`, Harness `SpendLimits` | budgets under `govern` | Effective, like `SpendLimits`, lets the call that crosses a spend ceiling complete, then refuses or parks the next call; the verdict is recorded, so a resumed run meets the same one |
+| `UsageLimits`, Harness `SpendLimits` | budgets under `govern` | Effective, like `SpendLimits`, lets the call that crosses a spend ceiling complete, then refuses or parks the next call; a resumed run evaluates the budget again over the spend its tape recorded |
 | Harness guardrails (`allow`, `block`, `retry`, `approve`) | `govern`'s verdict: proceed, park or refuse | |
 | `TemporalDurability`, `AbsurdDurability` | `DurableHandler` on Absurd or SQLite | |
 | `pydantic_graph` | a generator; a branch is `match` | |

@@ -353,8 +353,8 @@ def test_the_maintained_layer_is_scanned():
     rels = {p.relative_to(lc.REPO).as_posix() for p in lc.sources()}
     assert "docs/effective-101.md" in rels
     assert "docs/README.md" in rels
-    assert not any(p.startswith("external-docs/") for p in rels), (
-        "third-party input is not ours to grade"
+    assert all(p.startswith(("wiki/", "docs/")) or "/" not in p for p in rels), (
+        "only the maintained layer is ours to grade"
     )
 
 

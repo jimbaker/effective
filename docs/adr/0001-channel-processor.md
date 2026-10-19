@@ -33,13 +33,13 @@ function over `Template`. Six parts:
 | A5 the DSL tooling | a volatile-last cache check and a channel/signature validator |
 | A6 per-prompt choice | a flat prompt and a composed one use the same channels, so the choice falls out of A1 to A5 with nothing to build |
 
-Deferred, with a reserved surface each:
+Not built, with the surface each would use:
 
-| deferred | trigger | reserved surface |
-|---|---|---|
-| categorical strategy seams for an automated optimizer | an optimizer that enumerates seam values ([ADR-0005](0005-optimizer-agent-in-the-loop.md) stage 3) | `Prompt.seams`, the `{expression: rendered text}` map |
-| priority and budget-aware pruning | the first prompt that overruns its budget | none yet: channels carry no `priority` field |
-| an auto-rendered output contract | categorical strategy seams | the author writes the JSON-key lines; the processor fills only `<<name>>` |
+| not built | reserved surface |
+|---|---|
+| categorical strategy seams for an automated optimizer ([ADR-0005](0005-optimizer-agent-in-the-loop.md) stage 3) | `Prompt.seams`, the `{expression: rendered text}` map |
+| priority and budget-aware pruning | none: channels carry no `priority` field |
+| an auto-rendered output contract | the author writes the JSON-key lines; the processor fills only `<<name>>` |
 
 ## Architecture
 
@@ -135,7 +135,7 @@ across nested templates and a static rule sees one literal.
 |---|---|
 | legibility lost under composition | `Prompt[S]` and the signature validator; A2 is required |
 | cache discipline | the volatile-last check is enforced, not advisory |
-| combinatorial blow-up | categorical seams deferred; named skills preferred to arbitrary nesting |
+| combinatorial blow-up | categorical seams not built; named skills preferred to arbitrary nesting |
 | DSL surface creep | directives stay role, cache and data; no render-strategy DSL |
 | expectations of editor tooling | the tooling validates scaffolding; prose cannot be highlighted |
 | turns leaking into templates | `IndependenceError` draws the line in code |

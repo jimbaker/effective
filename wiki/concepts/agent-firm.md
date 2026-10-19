@@ -1,11 +1,15 @@
 # The agent firm
 
 An agent firm is a top-down organization of agents whose substrate keeps the tape, the budget and
-the verdict. Its worked example is an accounts-receivable firm, `src/examples/agent_firm/`: a
+the verdict. It applies the theory of the firm (Coase, 1937): coordination that repeats, and
+commitments someone must answer for, cost less under authority than negotiated one exchange at a
+time, so the firm assigns roles, binds each approval to its effect, and keeps a record every run
+answers to. Its worked example is an accounts-receivable firm, `src/examples/agent_firm/`: a
 customer pays short of an invoice, and the firm explains the gap, has an outside critic check
 the explanation against the contract, parks the settlement for an approver other than its
 proposer, and settles the case by saga through an ERP port. `uv run python -m
-examples.agent_firm sla-cap` runs one case; the module docstring has the others.
+examples.agent_firm sla-cap` runs one case; the module docstring has the others. `uv run python -m
+examples.agent_firm.gaps` runs a control the firm holds beside one it lacks.
 
 ## The composition
 
@@ -17,7 +21,7 @@ examples.agent_firm sla-cap` runs one case; the module docstring has the others.
 | explain | an ask through a `Gated` channel: a credit within the shortfall, on the case's documents and the firm's rules | `engage.py`, `resolve.py` |
 | engage | an outside critic's review of the proposal, re-asked with the reason when a citation is not held: a `fixpoint` under `repair:engage`, one level per ask | `engage.py`, `critic.py` |
 | claim | the round, read and then claimed on the ledger by the settlement's claimant, a name minted from its task and placement that replay reads back: a settlement whose round another holds ends `Superseded` whatever its credit, before it asks when the read finds the holder and at the claim when the holder claimed after the read | `ar.py` |
-| authorize | a `govern` policy parking the claim on any case that breaks an invariant, a $0 credit included, until a principal other than its proposer approves it; the ask names the credit and the deduction and binds the digest of the terms row, which carries the digest of the settlement's plan, and the ruling names that digest, so a credit nobody approved holds no round and a plan nobody approved runs no leg (ADR-0028); each ask and each ruling is a ledger row, paired by pass | `resolve.py` |
+| authorize | a `govern` policy parking the claim on any case that breaks an invariant, a $0 credit included, until an approver the host names, other than its proposer, approves it; the ask names the credit and the deduction and binds the digest of the terms row, which carries the digest of the settlement's plan, and the ruling names that digest, so a credit nobody approved holds no round and a plan nobody approved runs no leg (ADR-0028); each ask and each ruling is a ledger row, paired by pass | `resolve.py` |
 | act | `saga` over the legs built from the settlement's plan, which is data: compensable legs, at most one pivot, then retriable legs, checked at construction; a retriable leg is a `fixpoint` under `retry:{leg}`, one level per attempt, which a grantor may extend | `saga.py`, `ar.py` |
 | end | how the settlement ended, appended to the ledger once its saga does: completed, compensated or unlanded; a round after the first opens only once the round before it ended compensated | `ar.py` |
 | settle the books | `firm`: a `fixpoint` under `firm:{books}` whose passes advance every open case concurrently by what the ledger says of its rounds, until two passes leave the same cases open in the same rounds for the same reasons, none of them unlanded or compensated, or the pass budget runs out (ADR-0027) | `firm.py` |
@@ -274,7 +278,8 @@ protocol.
 | evidence doesn't move money | the firm's committed effects do not read the notes and tickets, over generated variants of them | `tests/test_agent_firm_resolve.py` |
 | a review acts through its answer | a critique changes the run at its own result and nowhere else; an uncited one posts nothing | `tests/test_agent_firm_resolve.py` |
 | deduction review | a critic finds the contract's cap on the customer's deduction, and its run replays without asking a model | `tests/test_agent_firm_engage.py` pins the program, and replays the three haiku runs `src/examples/agent_firm/deduction_review.py` banked from a live model, each finding the cap |
-| separation of duties | an approval by the proposer does not count, and the memo parks again | `tests/test_agent_firm_resolve.py` |
+| separation of duties | an approval by the proposer does not count, and the claim parks again | `tests/test_agent_firm_resolve.py` |
+| an approver holds the role | a ruling counts only from a ruler the host's approver set holds; any other ruling, approval or denial, parks the claim again, naming its ruler, and a replay walks the same rulings. The set is a `Set` of rulers and must answer a replay as it answered the run. Every ruling takes one of the gate's passes, so a run an outsider answers past the pass bound fails, posting nothing | `tests/test_agent_firm_resolve.py` |
 | approved as asked and planned | a resume deriving other terms, or under a plan with a step added, removed or changed, is refused before any leg, and so is a continuation under a changed plan; another policy's refusal in the approval's words is no denial. `formal/quint/plan_license.qnt` checks that every leg sent is the plan the ruling named and the claim recorded, across two workers, two rounds and a deploy at each crash ([concepts/claims](claims.md)) | `tests/test_agent_firm_binding.py` |
 | approved as proposed | the attempt resumed after the approval replays the recorded proposal and review, and asks no model | `tests/test_agent_firm_resolve.py` |
 | rejection unwinds | a rejected notice unapplies the memo and the payment, then reverses the memo, every entry posted and matched | `tests/test_agent_firm_saga.py` |

@@ -284,30 +284,9 @@ Nine regions of the key module went through it this way. What the loop looks lik
   an artifact you can select and read.
 
 **The drain is a separate process on purpose.** This surface registers no task, so
-`SqliteApp._claim` refuses a name it did not register — which is what makes the incident behind
-the drain/client split structurally unreachable here. Answering marks a task claimable; something
+`SqliteApp._claim` refuses a name it did not register, so this surface cannot run a task it
+answers. Answering marks a task claimable; something
 holding the registry runs it.
-
-## Next: a model drives the transitions, a judge still rules
-
-Everything above was driven by an agent typing into a terminal. The next step is to keep the
-judgment and hand over the *stepping*: a model (Luna over the API, or `claude -p` / codex in the
-same configuration) performs the state transitions — read the park, do the mechanical work, submit
-the answer — while a judge with more context rules the ones that need ruling.
-
-The seam already exists and needs nothing new. `effective.machine`'s `StateSpec` has ONE slot, a
-`Run`, and `specs.fuse` is the worker/judge pair as a construction an embodiment may decline —
-which `effective.prose` currently declines, because every state is one park. Splitting it is
-per-state: give `DRAFT` and `RELOCATE` a model worker and keep `CLASSIFY` and `REVIEW` parked, and
-the tape records which was which. The machine core never learns about it.
-
-Two things this surface would then owe, and neither is built:
-
-- **the parks are answered by two different kinds of agent**, so a reader wants to know which. That
-  is a per-park attribute the substrate does not carry.
-- **`REVIEW` is the author** when the author also drafted, and an author cannot check a premise
-  it wrote. A model-driven `DRAFT` makes the judge a genuinely different reader, which is the
-  point; nothing enforces the split.
 
 ## Driving it without a human
 
@@ -332,4 +311,4 @@ rather than an error.
 
 For assertions that do not need a terminal at all, `App.run_test()` is faster and is what
 `tests/test_tui.py` uses — it drives the same app with a pilot and no tmux. Use tmux when what you
-are checking is the *rendering*; use the pilot when it is the behaviour.
+are checking is the *rendering*; use the pilot when it is the behavior.

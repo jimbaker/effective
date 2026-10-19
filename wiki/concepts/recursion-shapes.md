@@ -35,9 +35,9 @@ needs it; the rest stay rows here.
 | repeated bracket | tree search (MCTS), minimax, beam search | `tree_search`, rounds of `unfold`; `search.mcts` over it, and `search.beam` as a `search.frontier` search, itself a `descend` judge. Rounds refill through a `round-grant` park, and a budget refusal ends a search with what it has whole: `tree_search` its earlier rounds, `beam` its last scored frontier. A refusal while the roots are scored has no frontier to answer with, so `beam` raises it, where `tree_search` in the same position returns its initial state |
 | cycle to convergence | fixpoint / iterative refinement, worklist / chaotic iteration | `fixpoint`, a `descend` judge answering `Converged` or `Unconverged` with the budget that stopped it; a worklist is `fixpoint` over what is pending and what is known, whose pass must make equality mean nothing is pending |
 | sharing | memoized recursion / dynamic programming | classified |
-| cancellation | race / hedge, quorum, branch and bound, best-first | `race` and `quorum` are built, with cooperative cancellation inside them and no cancel op. Branch and bound is built with no cancellation, its bound threaded through the recursion's own state ([`tests/test_pruned_search.py`](../../tests/test_pruned_search.py)); as a race it is refuted. Best-first is built as a `search.frontier` policy that picks the top k, and as a race it is deferred. Meets reversal in one cell, below |
+| cancellation | race / hedge, quorum, branch and bound, best-first | `race` and `quorum` are built, with cooperative cancellation inside them and no cancel op. Branch and bound is built with no cancellation, its bound threaded through the recursion's own state ([`tests/test_pruned_search.py`](../../tests/test_pruned_search.py)); as a race it is refuted. Best-first is built as a `search.frontier` policy that picks the top k, and as a race it is not built. Meets reversal in one cell, below |
 | reversal | saga / compensation | classified, and **forced rather than chosen**: the ledger trigger forbids UPDATE and DELETE, so a committed row is undone only by a later row |
-| cross-task | mutual recursion across tasks, supervisor tree, blackboard / agenda | mutual recursion across tasks deferred |
+| cross-task | mutual recursion across tasks, supervisor tree, blackboard / agenda | mutual recursion across tasks not built |
 
 **Cancellation and reversal are orthogonal, and they intersect in one cell.** Cancellation asks how
 a loser learns to stop and when it is quiescent; reversal asks what forward event restores the
@@ -65,8 +65,8 @@ control half already, as `Refused` routed around as a value; the compensating ev
 Sharing is the inverse of the aliasing defect: two paths *should* reach one durable result. A
 naming rule where placement always separates footprints cannot express it, so a sharing combinator
 names its subproblem by a semantic key the author supplies. Settling many grants or approvals with
-one answer, an inbox over parks and agents on a message board are the same case; they wait on one
-design, not yet taken.
+one answer, an inbox over parks and agents on a message board are the same case; they share one
+design, which is not built.
 
 ## Error kinds
 

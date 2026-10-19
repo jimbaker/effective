@@ -80,6 +80,16 @@ events from independent tasks, which are incomparable by construction and never 
 revision is the exception, spawned only after the decision it revises committed, so those two are
 causally ordered, and a last-write-wins fold over revisions is sound by exactly that order.
 
+## The recorded format
+
+A run's checkpoints are read under the format its spawn params mark, `RecordedFormat`
+([`src/effective/cost.py`](../../src/effective/cost.py)). This release reads `V1`: a step's key
+names its op's kind, a model call's step records `{result, usage}`, and a schema is named by its
+module and its class. A run whose params mark no format, or a format this release does not read,
+is refused with `UnreadFormat`; finish it under the release that spawned it. Until the first
+release, `V1` is the only format and it can still change, so a tape recorded at an earlier
+commit is recorded again rather than replayed.
+
 ## The telemetry format
 
 A span file is OTLP/JSON: each line is one complete `TracesData` object, the format the OTLP file
@@ -101,5 +111,4 @@ that sends spans to a collector is not built.
 ## See also
 
 [concepts/graph](graph.md) for the projection algebra, [concepts/machine](machine.md) for why a replay re-serves the
-checkpoint tape rather than resuming a frame, [concepts/evidence](evidence.md) for why a built join still owes
-an anti-vacuity count. [`docs/effective-design.md`](../../docs/effective-design.md) §3.3 and §3.5 carry the partial-order semantics.
+checkpoint tape rather than resuming a frame. A built join still owes an anti-vacuity count. [`docs/effective-design.md`](../../docs/effective-design.md) §3.3 and §3.5 carry the partial-order semantics.

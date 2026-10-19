@@ -143,7 +143,7 @@ def test_the_generation_grant_name_DISTINGUISHES_generations():
     assert len(names) == 5, names
 
     # The overall grant deliberately does NOT vary by generation — it addresses the RUN, which
-    # is the whole distinction. Its trip counter is what must become chain-wide (build item 4).
+    # is the whole distinction. Its trip counter is carried across generations with the spend.
     run_wide = enforce_measured(
         20.0, MeasuredBudget(run_id="r1", overall=1.0, on_exhaust="park"), 0.0, 0, {}
     )

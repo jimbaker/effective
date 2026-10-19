@@ -395,10 +395,10 @@ def _render_record(value: Any) -> str:
     """A recorded result, laid out so a reader can actually read it.
 
     `json.dumps` escapes every newline, so a multi-line field arrives as one long line and the
-    pane truncates it. That defeated the first thing it was pointed at: the prose machine's READ
-    state runs a caller query so a human can inventory against evidence, and the evidence rendered
-    as `"output": "src/effective/keys.py:160  class Key:\\n  711 syntactic candidate(s) for` and
-    stopped. A long or multi-line field gets its own block; everything else stays on one line."""
+    pane truncates it: the prose machine's READ state runs a caller query so a human can
+    inventory against evidence, and the evidence renders as
+    `"output": "src/effective/keys/grammar.py:1068  class Key:\\n  711 syntactic candidate(s) for`
+    and stops. A long or multi-line field gets its own block; everything else stays on one line."""
     if not isinstance(value, dict):
         return "```json\n" + json.dumps(value, indent=2, default=str) + "\n```"
     blocks = []

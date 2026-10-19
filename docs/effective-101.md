@@ -184,8 +184,7 @@ print(len({t(enclosing_frames(*c)) for c in pairs()}),
       len({t(enclosing_frames(*c)) for c in triples()}))"
 ```
 
-Do **not** repeat the retired claim that a pair cannot reach
-`gather(scoped(gather(…)))`: `recurse ∘ gather` does.
+A pair reaches `gather(scoped(gather(…)))`: `recurse ∘ gather` does.
 
 ### 4.7 Dispositions, and the absence that is the law
 
@@ -310,7 +309,7 @@ This is where the DX doctrine gets concrete instead of asserted.
 |---|---|---|
 | `fork ∘ respawn` | **LOUD** | **promotion**: every fence that makes a counterfactual a counterfactual is per-*task*, and a respawn ends the task |
 | `respawn ∘ respawn` | **LOUD** | the **product carry**: one task, one lifecycle; nesting is mis-factored, not missing |
-| `respawn ∘ fork` | **OK**, *ruled, not yet exercised* | the order that composes. The three LOUD cells each have an executed refusal; this one is backed by the ruling in [`src/effective/ops.py`](../src/effective/ops.py) and by the refusal message that names it, not by a test that runs a fork inside a generation |
+| `respawn ∘ fork` | **OK**, *ruled; no test runs it* | the order that composes. The three LOUD cells each have an executed refusal; this one is backed by the ruling in [`src/effective/ops.py`](../src/effective/ops.py) and by the refusal message that names it, not by a test that runs a fork inside a generation |
 | `fork ∘ fork` | **LOUD** | the parked grandchild (§4.8) |
 
 The pattern to imitate: **a refusal that only says "no" has failed at its job.**
