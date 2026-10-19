@@ -70,7 +70,7 @@ def _run(app, answerer: Answerer, store: FileStore, urls: tuple[str, ...], sink=
     interpreter = MeteredInterpreter(
         answerer.llm, answerer.tools, domain_layers=layers, cache=cache
     )
-    handler = DurableHandler(SqliteTaskContext(app.conn, task), interpreter)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task, clock=app.clock), interpreter)
     return handler.run(_workflow(urls)), handler.meter
 
 

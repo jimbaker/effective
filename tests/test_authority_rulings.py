@@ -8,7 +8,6 @@ ruling is out of this model; audit across independent records is what detects on
 """
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -149,7 +148,7 @@ def test_a_ruling_settles_the_grant_at_every_await_site(backend, site):
 
 def test_a_task_cannot_emit_an_unruled_answer_on_an_authority_name(sqlite_app):
     app = sqlite_app(":memory:")
-    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None, clock=app.clock)
     name = depth_grant_name("r1", generation=0, depth=1).stored()
 
     with pytest.raises(UnruledAnswer):
@@ -190,12 +189,11 @@ def test_a_minting_name_read_outside_its_modules_is_found(tmp_path, source):
 
 
 def test_only_the_park_answer_constructs_a_ruling():
-    from effective.lint import check_ruling_mint_file
+    from effective.lint import _expanded, check_ruling_mint_file
 
     offenders = [
         str(v)
-        for root in ("src", "scripts", "examples")
-        for path in sorted(Path(root).rglob("*.py"))
+        for path in _expanded(("src", "scripts", "examples"))
         for v in check_ruling_mint_file(path)
     ]
     assert offenders == []

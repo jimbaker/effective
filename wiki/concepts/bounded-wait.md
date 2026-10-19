@@ -1,8 +1,7 @@
 # What decides a bounded wait
 
-`await_until` has two endings where `await_event` has one, and every arm of that choice has been
-wrong at least once. Four review rounds each found a defect of the same shape: a state the two
-engines answered differently, in a cell nobody had written down. This page writes them down.
+`await_until` has two endings where `await_event` has one. Each arm of that choice is a state the
+two engines could answer differently, and this page writes down every cell.
 
 **Absurd is the reference and SQLite conforms**, so every row below is one answer, not two, and
 the cross-engine pin is what says so. `ops.WaitOutcome` is the union; `SqliteTaskContext.await_until`
@@ -105,11 +104,9 @@ Postgres they do not share one and it widens by the skew. Recompute it with:
 uv run python -c "import time,psycopg;c=psycopg.connect('postgresql://effective:effective@localhost:5432/effective',autocommit=True);b=time.time();p=float(c.execute('select extract(epoch from absurd.current_time())').fetchone()[0]);print(f'{(p-(b+time.time())/2)*1000:.3f} ms')"
 ```
 
-A cross-engine history that turns on the clock waits `PAST_THE_SKEW` (0.2 s), which is three
-orders above that gap and small enough to fail the timer this replaced: at that margin the
-reference answered `arrived` three times of three before the correction landed. It is an
-empirical allowance on a shared host, not a bound anyone has demonstrated for a loaded CI runner
-or for a managed Postgres.
+A cross-engine history that turns on the clock holds one clock for the engine it runs on
+(`held_backend`, `tests/conftest.py`), so both the deadline and the instant compared to it are
+the engine's, and the gap between the two clocks never enters the answer.
 
 **A rule about the instant itself does not take the allowance**, because both instants can be the
 engine's. Emit under a held clock and the tie is exact: an event a microsecond before the deadline
@@ -133,7 +130,7 @@ answered by the one transaction;
 [`tests/test_absurd_deadline_park.py`](../../tests/test_absurd_deadline_park.py) pins it with an emit racing the park on its own connection.
 
 **An absolute park is also what makes a deadline testable.** `absurd.fake_now` is the hook the
-engine ships for holding its clock, and `tests/_durable.clock_at` holds both clocks a park
+engine ships for holding its clock, and `tests/_clock.py`'s `HeldClock` holds both clocks a park
 consults. A park registered RELATIVE to the claim lands at `fake_now + ceil(...)`, which carries
 however far the fake clock was moved: measured at 3600.000000 s past the deadline for a clock held
 an hour on, with the run still `sleeping` after the clock was advanced TO the deadline. Registered

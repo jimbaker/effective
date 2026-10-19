@@ -21,7 +21,9 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from _clock import HeldClock
 from _conformance import private
+from _witness import WatchedLock
 
 from effective.api import append_ledger, ask_llm, call_tool, gather, quorum, race, scoped
 from effective.checkpoints import keys, read_sqlite_conn
@@ -39,7 +41,7 @@ from effective.cost import MeteredInterpreter, RecordedFormat, Usage
 from effective.domain import CallTool, DomainOp
 from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.govern import Refused
-from effective.handlers import base
+from effective.handlers.base import Stop
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
@@ -117,6 +119,9 @@ class _Settled:
 
     def sleep_until(self, when: Any, /, *, name: Key) -> None:
         return self._ctx.sleep_until(when, name=name)
+
+    def clock(self) -> float:
+        return self._ctx.clock()
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
@@ -505,7 +510,7 @@ def test_D8_a_losers_spend_and_ledger_row_reach_the_record(sqlite_app):
         return _described((yield from race([lambda: ask_llm("w", "w", str), loser])))
 
     handler = DurableHandler(
-        _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled),
+        _Settled(app.context(app.spawn("run", {})), settled),
         MeteredInterpreter(llm=llm, tools=lambda op: None),
         ledger=SqliteLedger(app.conn, "r1", app.write_lock),
     )
@@ -528,7 +533,7 @@ def _metered_race(
         return _described((yield from race([lambda: ask_llm("w", "w", str), loser])))
 
     handler = DurableHandler(
-        _Settled(SqliteTaskContext(app.conn, task, app.write_lock), settled),
+        _Settled(app.context(task), settled),
         MeteredInterpreter(llm=llm, tools=lambda op: None),
     )
     return handler.run(program), handler.meter.cost
@@ -584,9 +589,7 @@ def test_D4_a_loser_stops_only_for_a_choice_the_store_holds(sqlite_app):
     def program():
         return (yield from race([_calls("a"), _calls("b0", "b1")]))
 
-    ctx = _SaveFails(
-        SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), threading.Event()
-    )
+    ctx = _SaveFails(app.context(app.spawn("run", {})), threading.Event())
     with pytest.raises(RuntimeError, match="refused the choice"):
         DurableHandler(ctx, tools).run(program)
     assert sorted(tools.calls) == ["a", "b0", "b1"]
@@ -606,7 +609,9 @@ def test_a_park_a_layer_injects_in_a_race_branch_is_refused(concurrent, sqlite_a
     where it would otherwise park the branch and let a gated op that never ran win the race."""
     app = sqlite_app()
     tools = _Tools()
-    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock if concurrent else None)
+    ctx = SqliteTaskContext(
+        app.conn, app.spawn("run", {}), app.write_lock if concurrent else None, clock=app.clock
+    )
 
     def program():
         return (yield from race([_calls("a")]))
@@ -623,7 +628,9 @@ def test_a_branch_refused_an_injected_park_loses_to_its_sibling(concurrent, sqli
     the gated op never runs."""
     app = sqlite_app()
     tools = _Tools()
-    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock if concurrent else None)
+    ctx = SqliteTaskContext(
+        app.conn, app.spawn("run", {}), app.write_lock if concurrent else None, clock=app.clock
+    )
 
     def program():
         return _described((yield from race([_calls("a"), _calls("b")])))
@@ -660,7 +667,7 @@ def test_a_losers_value_survives_a_retry_that_stops_it(sqlite_app):
         def program():
             return _described((yield from race([_calls("a"), loser])))
 
-        ctx = _Settled(SqliteTaskContext(app.conn, task, app.write_lock), settled)
+        ctx = _Settled(app.context(task), settled)
         return DurableHandler(ctx, tools).run(program)
 
     first = attempt()
@@ -677,9 +684,9 @@ def test_a_viewer_reads_a_race_without_writing_it(sqlite_app):
     def program():
         return _described((yield from race([_calls("a"), _refuses("no")])))
 
-    ran = DurableHandler(SqliteTaskContext(app.conn, task, app.write_lock), _Tools()).run(program)
+    ran = DurableHandler(app.context(task), _Tools()).run(program)
     tape = {Key.parse(name) for name in keys(read_sqlite_conn(app.conn, task))}
-    viewer = ViewingCtx(SqliteTaskContext(app.conn, task, app.write_lock), tape)
+    viewer = ViewingCtx(app.context(task), tape)
     assert DurableHandler(viewer, _Tools()).run(program) == ran
 
 
@@ -707,7 +714,7 @@ def test_a_race_answers_with_values_that_have_no_json_form(sqlite_app):
 
     task = app.spawn("run", {})
     for _ in range(2):
-        ctx = SqliteTaskContext(app.conn, task, app.write_lock)
+        ctx = app.context(task)
         assert DurableHandler(ctx, _Tools()).run(program) == ["_Opaque"]
     recorder = RecordingHandler(responses={"tool:a": "a"})
     assert recorder.run(program) == ["_Opaque"]
@@ -751,7 +758,7 @@ def test_a_refusal_survives_a_crash_before_the_endings(sqlite_app, source):
 
     def attempt(app: Any, task: Any, wrap: Callable[[Any], Any]) -> Any:
         tools, layers = _refusing_b0(source, threading.Event())
-        ctx = wrap(SqliteTaskContext(app.conn, task, app.write_lock))
+        ctx = wrap(app.context(task))
         return DurableHandler(ctx, tools, op_layers=layers).run(program)
 
     app = sqlite_app()
@@ -802,7 +809,7 @@ def test_a_gates_refusal_keeps_its_type_across_a_retry(sqlite_app):
 
     def attempt(wrap: Callable[[Any], Any]) -> Any:
         tools = _Tools()
-        ctx = wrap(SqliteTaskContext(app.conn, task, app.write_lock))
+        ctx = wrap(app.context(task))
         try:
             return DurableHandler(ctx, tools, op_layers=[vetoing]).run(program)
         finally:
@@ -845,7 +852,7 @@ def test_a_served_refusal_keeps_the_count_of_its_name(sqlite_app):
     def attempt() -> Any:
         tools = _Tools({"b": refused_first})
         try:
-            ctx = SqliteTaskContext(app.conn, task, app.write_lock)
+            ctx = app.context(task)
             return DurableHandler(ctx, tools).run(program)
         finally:
             calls.extend(tools.calls)
@@ -881,7 +888,7 @@ def test_a_gate_that_decides_differently_on_a_retry_fails_before_the_call(sqlite
     def attempt() -> Any:
         tools = _Tools()
         try:
-            ctx = SqliteTaskContext(app.conn, task, app.write_lock)
+            ctx = app.context(task)
             return DurableHandler(ctx, tools, op_layers=[flipping]).run(program)
         finally:
             calls.extend(tools.calls)
@@ -906,7 +913,7 @@ def test_an_op_a_layer_yields_runs_in_a_race_branch(sqlite_app):
         return _described((yield from race([_calls("a")])))
 
     app = sqlite_app()
-    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None, clock=app.clock)
     tools = _Tools()
     assert DurableHandler(ctx, tools, op_layers=[announces]).run(program) == [
         "chosen",
@@ -932,37 +939,45 @@ def test_a_transient_error_after_the_choice_retries_the_attempt(sqlite_app):
         def program():
             return _described((yield from race([_calls("a"), _calls("b0")])))
 
-        ctx = wrap(SqliteTaskContext(app.conn, task, app.write_lock))
+        ctx = wrap(app.context(task))
         return DurableHandler(ctx, tools).run(program)
 
     held = _Tools({"a": lambda: started.wait(10), "b0": fails_after_the_choice})
     with pytest.raises(ExceptionGroup) as raised:
         attempt(held, lambda ctx: _Settled(ctx, settled))
     assert [type(leaf) for leaf in leaves(raised.value)] == [TimeoutError]
-    ctx = SqliteTaskContext(app.conn, task, app.write_lock)
+    ctx = app.context(task)
     assert ctx.peek_step(race_endings(0)) == (False, None)
     retry = _Tools()
     assert attempt(retry, lambda ctx: ctx) == ["chosen", [["won", 0, "a"], ["stopped", 1, None]]]
     assert retry.calls == []
 
 
-def test_an_inner_races_save_in_flight_lands_before_the_outer_flag(sqlite_app):
-    """The inner race has decided and its save is slow; the
-    outer race decides meanwhile. The race tree's lock holds the outer race's save until the inner
-    save is done, so an inner choice, when one is saved, is saved before the outer one."""
-    inner_saving, outer_saved = threading.Event(), threading.Event()
+def test_an_inner_races_save_in_flight_lands_before_the_outer_flag(sqlite_app, monkeypatch):
+    """The inner race has decided and its save is slow; the outer race decides meanwhile. The race
+    tree's lock holds the outer race's save until the inner save is done, so an inner choice, when
+    one is saved, is saved before the outer one. The inner save finishes once the outer one has
+    blocked on the tree's lock or, with no lock to block it, saved."""
+    inner_saving, outer_reached = threading.Event(), threading.Event()
     order: list[str] = []
     inner_choice = race_prefix(0, 1) + race_choice(0).stored()
+    monkeypatch.setattr(
+        Stop,
+        "tree_lock",
+        lambda stop: (
+            WatchedLock(threading.Lock(), outer_reached) if stop.tree is None else stop.tree
+        ),
+    )
 
     class _SlowInnerSave(_Settled):
         def settle(self, name: Key, value: Any) -> Any:
             if name.stored() == inner_choice:
                 inner_saving.set()
-                outer_saved.wait(0.5)  # returns at once without the lock; times out with it
+                assert outer_reached.wait(10), "the outer save never reached the lock"
             stored = self._ctx.settle(name, value)
             order.append("inner" if name.stored() == inner_choice else name.stored())
             if name == race_choice(0):
-                outer_saved.set()
+                outer_reached.set()
             return stored
 
     def inner():
@@ -973,9 +988,7 @@ def test_an_inner_races_save_in_flight_lands_before_the_outer_flag(sqlite_app):
 
     tools = _Tools({"won": lambda: inner_saving.wait(10)})
     app = sqlite_app()
-    ctx = _SlowInnerSave(
-        SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), threading.Event()
-    )
+    ctx = _SlowInnerSave(app.context(app.spawn("run", {})), threading.Event())
     DurableHandler(ctx, tools).run(program)
     choices = [name for name in order if name in ("inner", race_choice(0).stored())]
     assert choices[0] == "inner" or "inner" not in choices, choices
@@ -1004,10 +1017,10 @@ def test_a_viewer_reads_a_race_whose_branch_caught_a_domain_refusal(sqlite_app):
     def program():
         return _described((yield from race([retrying])))
 
-    ctx = SqliteTaskContext(app.conn, task, app.write_lock)
+    ctx = app.context(task)
     ran = DurableHandler(ctx, _Tools({"r": refused_first})).run(program)
     tape = {Key.parse(name) for name in keys(read_sqlite_conn(app.conn, task))}
-    viewer = ViewingCtx(SqliteTaskContext(app.conn, task, app.write_lock), tape)
+    viewer = ViewingCtx(app.context(task), tape)
     assert DurableHandler(viewer, _Tools()).run(program) == ran
 
 
@@ -1043,7 +1056,7 @@ def test_a_gate_that_flips_after_a_crash_before_the_endings_fails_the_task(sqlit
     def attempt(wrap: Callable[[Any], Any]) -> Any:
         tools = _Tools()
         try:
-            ctx = wrap(SqliteTaskContext(app.conn, task, app.write_lock))
+            ctx = wrap(app.context(task))
             return DurableHandler(ctx, tools, op_layers=[flipping]).run(program)
         finally:
             calls.extend(tools.calls)
@@ -1135,7 +1148,7 @@ def test_D26_a_deadline_already_behind_the_race_stops_it_before_a_branch_runs(
     """A race reads its deadline before it launches a branch, so one whose deadline is already
     gone stops every branch at its first admission and calls no tool. This is the restart case:
     a crash before the choice can leave the retry starting with the deadline long behind it."""
-    monkeypatch.setattr(base, "race_time", lambda: DEADLINE.timestamp() + 1.0)
+    HeldClock(DEADLINE + timedelta(seconds=1)).on_races(monkeypatch)
     tools = _Tools()
 
     def program():
@@ -1152,11 +1165,10 @@ def test_D27_a_sequential_race_records_a_late_success_as_unchosen(backend, monke
     """A branch already running when the deadline arrives finishes, which is the promise a
     sequential ctx can keep. Branch 0 moves the clock past the deadline on its way out, so its
     success is on record and late: unchosen rather than stopped, and branch 1 never starts."""
-    held = {"at": (DEADLINE - timedelta(hours=1)).timestamp()}
-    monkeypatch.setattr(base, "race_time", lambda: held["at"])
+    clock = HeldClock(DEADLINE - timedelta(hours=1)).on_races(monkeypatch)
 
     def past_the_deadline() -> object:
-        held["at"] = DEADLINE.timestamp() + 1.0
+        clock.advance_to(DEADLINE + timedelta(seconds=1))
         return None
 
     tools = _Tools({"a": past_the_deadline})
@@ -1176,17 +1188,16 @@ def test_D28_a_retry_is_served_the_timeout_with_the_deadline_ahead_of_it(
     backend, shape, monkeypatch
 ):
     """The code-side tooth for `deadlineNotExtended`: the first attempt times out and dies, and
-    the retry runs with the clock held an hour BEFORE the deadline. The stored choice stands, so
-    a handler that re-decided would reopen a race the first attempt had closed."""
-    held = {"at": DEADLINE.timestamp() + 1.0}
-    monkeypatch.setattr(base, "race_time", lambda: held["at"])
+    the retry runs on a worker whose clock reads an hour BEFORE the deadline. The stored choice
+    stands, so a handler that re-decided would reopen a race the first attempt had closed."""
+    HeldClock(DEADLINE + timedelta(seconds=1)).on_races(monkeypatch)
 
     def program():
         return _described((yield from race([_calls("a"), _calls("b")], deadline=DEADLINE)))
 
     def crash_once(ctx: Any, attempt: int) -> None:
         if attempt == 1:
-            held["at"] = DEADLINE.timestamp() - 3600.0
+            HeldClock(DEADLINE - timedelta(hours=1)).on_races(monkeypatch)
             raise RuntimeError("the worker dies after the race")
 
     kind, endings = _run(backend, shape, program, _Tools(), attempts=2, after=crash_once)
@@ -1202,12 +1213,11 @@ def test_D29_a_crash_before_the_choice_meets_its_deadline_already_gone(
     and dies before saving a choice, so nothing durable says how the race went; the retry starts
     with it an hour behind. The deadline is the workflow's own instant either way, so the retry
     times out at once and calls no tool, where D28 could have been served a stored choice."""
-    held = {"at": (DEADLINE - timedelta(hours=1)).timestamp()}
-    monkeypatch.setattr(base, "race_time", lambda: held["at"])
+    clock = HeldClock(DEADLINE - timedelta(hours=1)).on_races(monkeypatch)
     calls_by_attempt: dict[int, list[str]] = {}
 
     def die() -> object:
-        held["at"] = (DEADLINE + timedelta(hours=1)).timestamp()
+        clock.advance_to(DEADLINE + timedelta(hours=1))
         raise ZeroDivisionError("a programming error before any choice")
 
     tools = _Tools({"a": die})

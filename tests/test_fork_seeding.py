@@ -11,6 +11,8 @@ survives crash-at-every-op and replays its prefix from its OWN checkpoints, is a
 where `SeedingCtx` wraps a real engine ctx.
 """
 
+import time
+
 import pytest
 
 from effective.cost import NEWEST_FORMAT, RecordedFormat
@@ -45,6 +47,9 @@ class _SpyCtx:
 
     def sleep_until(self, when, /, *, name: Key | None = None) -> None:
         pass
+
+    def clock(self) -> float:
+        return time.time()
 
 
 def test_a_seeded_step_returns_the_raw_seed_and_never_runs_the_domain_thunk():

@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from effective.cost import NEWEST_FORMAT, RecordedFormat
+from effective.engines import wall_clock
 from effective.keys import Key
 
 _CANNOT_SUSPEND = "an in-process context cannot suspend; a workflow that waits needs an engine"
@@ -30,6 +31,10 @@ class _InProcess:
     def recorded_format(self) -> RecordedFormat:
         """The newest: a log held in memory does not outlive the release that wrote it."""
         return NEWEST_FORMAT
+
+    def clock(self) -> float:
+        """The process's clock, since no engine runs this context."""
+        return wall_clock()
 
 
 class LocalCtx(_InProcess):

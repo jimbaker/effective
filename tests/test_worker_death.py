@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import psycopg
 import pytest
+from _clock import HeldClock
 from _conformance import IMMEDIATE_RETRY, private
 from _death import DIED, ORDER, SCENARIOS, cut, program
 from _durable import DSN, pg_ready
@@ -145,10 +146,7 @@ def absurd_death(_tmp_path: Path, scenario: str) -> Death:
 
         before = record()
         # The sweeping worker reads a clock past the killed run's lease, as Absurd's claim asks it.
-        past_the_lease = datetime.now(UTC) + timedelta(minutes=5)
-        app._conn.execute(
-            "SELECT set_config('absurd.fake_now', %s, false)", (past_the_lease.isoformat(),)
-        )
+        HeldClock(datetime.now(UTC) + timedelta(minutes=5)).hold(app._conn)
         ended = None
         for _ in range(5):  # the sweep that fails the dead run need not claim its successor
             app.work_batch(claim_timeout=30)

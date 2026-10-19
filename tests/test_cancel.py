@@ -1,12 +1,14 @@
 """The cancel token, the recorded `Cancelled` result, and a turn reading a cancel as an escape."""
 
 import threading
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
 import pytest
+from _witness import WatchedEvent
 
-from effective import RecordingHandler, ReplayHandler, coroutine_api
+from effective import RecordingHandler, ReplayHandler, cancel, coroutine_api
 from effective.api import Effect, call_tool
 from effective.cancel import (
     Cancelled,
@@ -256,13 +258,21 @@ def test_a_cancel_after_a_reset_never_runs_a_stop_again():
     assert log == ["stop", "exit"]
 
 
-def test_the_block_exit_waits_for_a_stop_already_running():
+def test_the_block_exit_waits_for_a_stop_already_running(monkeypatch):
+    """The stop ends only once the block's exit is waiting for it."""
     token, log = CancelToken(), []
-    running = threading.Event()
+    running, exiting = threading.Event(), threading.Event()
+
+    class _Watched(cancel._Registration):
+        def __init__(self, stop: Callable[[], None]) -> None:
+            super().__init__(stop)
+            self.finished = WatchedEvent(exiting)
+
+    monkeypatch.setattr(cancel, "_Registration", _Watched)
 
     def stop() -> None:
         running.set()
-        threading.Event().wait(0.3)
+        exiting.wait(5)
         log.append("stop ended")
 
     with token.on_cancel(stop):

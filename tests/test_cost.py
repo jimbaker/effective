@@ -10,6 +10,7 @@ through it (via DurableHandler + a trivial in-memory ctx) meters the whole
 agent trajectory — the workflow never knows it is being measured.
 """
 
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -103,6 +104,9 @@ class _LocalCtx:
 
     def sleep_until(self, when, *, name: Key | None = None):
         raise NotImplementedError
+
+    def clock(self) -> float:
+        return time.time()
 
 
 def _turns_with_usage() -> list[tuple[AssistantTurn, Usage]]:

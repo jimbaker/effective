@@ -24,8 +24,8 @@ resident typed and answers two facts: the visitor is named, and the window is wh
 | `OPENAI_API_KEY`   | the model, `gpt-5.6-luna`; without it an offline model parses the line |
 | `JEV_API_KEY`      | the judge, Jev, capped at 200k tokens; without it an offline judge     |
 
-The offline model understands `warm it to 22`, `let Sam in for half an hour`, `Alex is at the
-door` (which it answers by sending Alex a code, for the judge to refuse), and `!cmd`, a shell
+The offline model understands `warm it to 22`, `let Alice in for half an hour`, `Mallory is at the
+door` (which it answers by sending Mallory a code, for the judge to refuse), and `!cmd`, a shell
 command, so `!sleep 30` then Esc shows a cancel.
 """
 
@@ -62,7 +62,6 @@ from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, tool_interrupt
 from effective.keys.frame import split_frames
 from effective.ops import CARRY_PARAM
-from effective.parked import read_sqlite_parked_conn
 from effective.react import (
     AssistantTurn,
     ToolRequest,
@@ -299,7 +298,7 @@ def main() -> None:
     shown = 0
     while True:
         drain_watching_esc(app, token)
-        parked = [p for p in read_sqlite_parked_conn(app.conn) if p.task_name == TASK]
+        parked = [p for p in app.parked() if p.task_name == TASK]
         if not parked:
             print("conversation over")
             return

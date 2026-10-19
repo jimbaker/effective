@@ -330,7 +330,7 @@ def test_an_emitter_composes_the_second_asks_registration_rather_than_writing_it
     app.work_batch()
     app.emit_event(GRANT.stored(), GRANT_RULING)
     app.run_until_result(task_id)
-    waiting = [park.wake_event for park in read_sqlite_parked_conn(app.conn)]
+    waiting = [park.wake_event for park in read_sqlite_parked_conn(app.conn, clock=app.clock)]
     app.emit_event(composed.stored(), GRANT_RULING)
     finished = app.run_until_result(task_id)
     app.close()

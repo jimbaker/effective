@@ -6,7 +6,7 @@ only if it stopped at an admission once the choice was saved.
 """
 
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 import pytest
@@ -16,11 +16,11 @@ from effective.choice import Chosen, Impossible, Raised, Refusal, Stopped, Won
 from effective.domain import CallTool
 from effective.govern import Refused
 from effective.handlers import recording
-from effective.handlers.base import Racing, TraceEntry
+from effective.handlers.base import BranchRaised, Racing, TraceEntry
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key
-from effective.ops import CompositionRefused, Step, leaves
+from effective.ops import CompositionRefused, RaceUndecided, Step, leaves
 
 
 class _AnyTool(Mapping[str, object]):
@@ -71,18 +71,23 @@ def _forever(name: str):
     return branch
 
 
-class _After(_AnyTool):
-    """Holds the answer to `held` until `first` has been asked, so the branch asking `held`
-    finishes only after another branch has started."""
+class _Held(_AnyTool):
+    """Answers `key` only once `until` is set, and sets each event in `marks` as its key is
+    asked."""
 
-    def __init__(self, held: str, first: str) -> None:
-        self._held, self._first, self._asked = held, first, threading.Event()
+    def __init__(
+        self,
+        key: str,
+        until: threading.Event,
+        marks: Mapping[str, threading.Event] | None = None,
+    ) -> None:
+        self._key, self._until, self._marks = key, until, marks or {}
 
     def __getitem__(self, key: str) -> object:
-        if key == self._first:
-            self._asked.set()
-        if key == self._held:
-            assert self._asked.wait(10), f"{self._first} was never asked"
+        if (asked := self._marks.get(key)) is not None:
+            asked.set()
+        if key == self._key:
+            assert self._until.wait(10), f"{key} was held and never released"
         return super().__getitem__(key)
 
 
@@ -170,7 +175,9 @@ def test_a_race_inside_a_loser_never_chooses():
     def program():
         return (yield from race([_returns("won"), inner]))
 
-    answer, handler = _recorded(program, _After(held="tool:won", first="tool:p0"))
+    inner_started = threading.Event()
+    held = _Held("tool:won", until=inner_started, marks={"tool:p0": inner_started})
+    answer, handler = _recorded(program, held)
     assert answer == Chosen((Won(0, "won"),), (Won(0, "won"), Stopped(1)))
     keys = [entry.key.stored() for entry in handler.trace]
     assert not [key for key in keys if key.startswith("race:0,1;race:0;")]
@@ -197,6 +204,22 @@ def _pure():
     yield  # a generator, which never reaches its first yield
 
 
+def _after_a_read(
+    monkeypatch: pytest.MonkeyPatch, fires: Callable[[Racing, list[int], list[Any]], bool]
+) -> threading.Event:
+    """An event set once a race's read of a batch leaves `fires` true."""
+    read, fired = Racing.read, threading.Event()
+
+    def reading(self: Racing, batch: list[int], slots: list[Any], *rest: Any) -> bool:
+        failing = read(self, batch, slots, *rest)
+        if fires(self, batch, slots):
+            fired.set()
+        return failing
+
+    monkeypatch.setattr(Racing, "read", reading)
+    return fired
+
+
 @pytest.mark.parametrize(
     "structure",
     [
@@ -208,16 +231,8 @@ def _pure():
 def test_a_flagged_loser_stops_at_a_structure(monkeypatch, structure):
     """A loser flagged before it reaches a `scoped`, `gather` or `race` stops there, on every
     interpreter: a structure is new work past its horizon, and a stopped loser starts none."""
-    decided, asked = threading.Event(), threading.Event()
-    read = Racing.read
-
-    def reading(self: Racing, *args: Any) -> bool:
-        failing = read(self, *args)
-        if self.decided():
-            decided.set()
-        return failing
-
-    monkeypatch.setattr(Racing, "read", reading)
+    asked = threading.Event()
+    decided = _after_a_read(monkeypatch, lambda race, batch, slots: race.decided())
 
     def holds(op: Any) -> Any:
         if isinstance(op, Step) and op.name == "tool:a":
@@ -247,7 +262,7 @@ def test_a_flagged_loser_stops_at_a_structure(monkeypatch, structure):
 
 
 def _raises_after(asked: str):
-    """A branch whose own code raises once its first call returns, before any choice."""
+    """A branch whose own code raises once its first call returns."""
 
     def branch():
         yield from call_tool(asked, {}, str)
@@ -256,14 +271,42 @@ def _raises_after(asked: str):
     return branch
 
 
-def test_replay_answers_a_race_whose_branch_raised_before_the_choice_as_the_recorder_did():
-    """The sibling wins past the error, and replay serves the endings the recorder settled."""
+def _read_before_the_choice(
+    monkeypatch: pytest.MonkeyPatch, raising: type[BaseException]
+) -> threading.Event:
+    """An event set once a race reads a branch's `raising` error before it chooses. The type
+    names which race: an inner race reads its own branches' errors first."""
+
+    def read_one(race: Racing, batch: list[int], slots: list[Any]) -> bool:
+        return any(
+            isinstance(slots[i], BranchRaised)
+            and slots[i].before_choice
+            and isinstance(slots[i].error, raising)
+            for i in batch
+        )
+
+    return _after_a_read(monkeypatch, read_one)
+
+
+def test_replay_answers_a_race_whose_branch_raised_before_the_choice_as_the_recorder_did(
+    monkeypatch,
+):
+    """The sibling wins past the error, and replay serves the endings the recorder settled.
+
+    branch 0               the race                   branch 1
+    calls `first`                                     calls `ok`, held
+    raises ────────────►  reads the raise
+                          before any choice ───────►  `ok` answered
+                          chooses branch 1  ◄───────  returns
+    """
 
     def program():
         return (yield from race([_raises_after("first"), _returns("ok")]))
 
-    answer, handler = _recorded(program, _After(held="tool:ok", first="tool:first"))
-    assert isinstance(answer, Chosen)
+    held = _Held("tool:ok", until=_read_before_the_choice(monkeypatch, KeyError))
+    answer, handler = _recorded(program, held)
+    ending = Raised(0, repr(KeyError("the branch's own code")))
+    assert answer == Chosen((Won(1, "ok"),), (ending, Won(1, "ok")))
     assert ReplayHandler(handler.trace).run(program) == answer
 
 
@@ -338,28 +381,24 @@ def test_an_inner_race_its_outer_choice_ends_stops_and_replays_stopped(monkeypat
 
 
 def test_an_inner_race_that_failed_before_the_outer_choice_replays_raised(monkeypatch):
-    """The winner waits until the inner race has failed, so the outer race reads it as a loss
-    ending `Raised`. Its branches' calls stay on the trace, and replay walks them."""
-    failed = threading.Event()
-    errors = recording.race_errors
+    """The inner race fails, the outer race reads that as a loss ending `Raised`, and the inner
+    branches' calls stay on the trace for replay to walk.
 
-    def reading(slots: Any) -> Any:
-        if (raised := errors(slots)) is not None:
-            failed.set()
-        return raised
-
-    monkeypatch.setattr(recording, "race_errors", reading)
-
-    class _HeldUntilFailed(_AnyTool):
-        def __getitem__(self, key: str) -> object:
-            if key == "tool:w":
-                assert failed.wait(10), "the inner race never failed"
-            return super().__getitem__(key)
+    branch 0, an inner quorum      the outer race              branch 1
+                                                              calls `w`, held
+    fails: `RaceUndecided` ────►  reads the raise
+                                  before any choice ───────►  `w` answered
+                                  chooses branch 1  ◄───────  returns
+    """
 
     def program():
         inner = lambda: quorum(3, [_refuses("no"), _raises_at_once(), _returns("a")])  # noqa: E731
         return (yield from race([inner, _returns("w")]))
 
-    answer, handler = _recorded(program, _HeldUntilFailed())
-    assert [type(ending) for ending in answer.endings] == [Raised, Won]
+    held = _Held("tool:w", until=_read_before_the_choice(monkeypatch, RaceUndecided))
+    answer, handler = _recorded(program, held)
+    failure = RaceUndecided(
+        "race branches raised", [ValueError("a programming error in the branch")]
+    )
+    assert answer == Chosen((Won(1, "w"),), (Raised(0, repr(failure)), Won(1, "w")))
     assert ReplayHandler(handler.trace).run(program) == answer

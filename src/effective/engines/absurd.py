@@ -13,7 +13,6 @@ an upgrade that moves one fails by name.
 import json
 import math
 import threading
-import time
 import weakref
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -24,7 +23,7 @@ from uuid import UUID
 from pydantic_core import to_jsonable_python
 
 from effective.cost import RecordedFormat, marked
-from effective.engines import Failure, TaskFn, TaskSnapshot, TaskState, drain
+from effective.engines import REPARK_MARGIN, Failure, TaskFn, TaskSnapshot, TaskState, drain
 from effective.handlers.base import Attempt
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, WaitOutcome, settled_wait
@@ -95,6 +94,13 @@ LONGEST_SDK_TIMEOUT = 2**31 - 1
 workflow named it."""
 
 
+def sdk_clock() -> float:
+    """The SDK's clock in epoch seconds: the one its sleeps and remainders are measured by."""
+    import absurd_sdk
+
+    return absurd_sdk._get_current_time().timestamp()
+
+
 def sdk_await_until(sdk: Any, name: Key, deadline: float, decided: Key) -> WaitOutcome[Any]:
     """Wait on the event and the clock together through the SDK, and answer once.
 
@@ -136,7 +142,7 @@ def sdk_await_until(sdk: Any, name: Key, deadline: float, decided: Key) -> WaitO
     found, stored = sdk_peek_step(sdk, decided)
     if found:
         return settled_wait(stored)
-    remaining = min(math.ceil(max(0.0, deadline - time.time())), LONGEST_SDK_TIMEOUT)
+    remaining = min(math.ceil(max(0.0, deadline - sdk_clock())), LONGEST_SDK_TIMEOUT)
     payload, parked = None, False
     try:
         # ONE transaction: the park and the deadline it ends at commit together or not at all.
@@ -294,8 +300,9 @@ class SdkCtx:
     **ARITY is part of the boundary too.** The SDK's `sleep_until(step_name, wake_at)` takes TWO
     arguments, while our `TaskContext` protocol, written to the SQLite shape, takes one; a
     one-argument forward makes every top-level durable sleep on Absurd raise `TypeError`, retry
-    to death, and fail the task. A durable sleep *inside a gather* routes to `_branch_sleep`, a
-    pure clock compare that calls neither ctx, so only a top-level sleep reaches this method.
+    to death, and fail the task. A durable sleep *inside a gather* routes to `_branch_sleep`,
+    which compares its wake time to the ctx's clock and sleeps nothing, so only a top-level sleep
+    reaches this method.
     `ConcurrentAbsurdCtx.sleep_until` makes the same call.
     """
 
@@ -331,6 +338,9 @@ class SdkCtx:
         # vendored SDK, which f-strings what it is given; a `Key` handed through would render its
         # repr into a durable name.
         return self._ctx.sleep_until(name.stored(), when)
+
+    def clock(self) -> float:
+        return sdk_clock()
 
     def peek_step(self, name: Key, /) -> tuple[bool, Any]:
         return sdk_peek_step(self._ctx, name)
@@ -442,6 +452,27 @@ def read_absurd_params(conn: Any, task_id: Any, queue: str) -> dict[str, Any]:
     )
     if row is None:
         raise LookupError(f"no task {task_id} in queue {queue} to read params from")
+    return row[0]
+
+
+def claimable_runs(
+    conn: Any, queue: str, *, task_name: str | None = None, at: datetime | None = None
+) -> int:
+    """The runs on `queue` a worker could claim at `at`, the server's `now()` when absent, and
+    of `task_name` alone when it is given.
+
+    The predicate is the candidate query of the engine's claim, `state in ('pending',
+    'sleeping') and available_at <= now` (`absurd.sql`). A run whose durable sleep has come due is
+    `sleeping` with a past `available_at` and counts; a future retry and an event park, whose
+    `available_at` is `infinity`, do not. The claim first sweeps runs whose lease expired, so a
+    dead worker's run counts once a claim has retried it."""
+    runs, tasks = queue_table("r", queue), queue_table("t", queue)
+    row = conn.execute(
+        t"SELECT count(*) FROM absurd.{runs:i} r JOIN absurd.{tasks:i} t USING (task_id) "
+        t"WHERE r.state IN ('pending', 'sleeping') "
+        t"AND r.available_at <= coalesce({at}::timestamptz, now()) "
+        t"AND ({task_name}::text IS NULL OR t.task_name = {task_name})"
+    ).fetchone()
     return row[0]
 
 
@@ -604,6 +635,9 @@ class ConcurrentAbsurdCtx:
         with self.write_lock:
             return self._ctx.sleep_until(name.stored(), when)
 
+    def clock(self) -> float:
+        return sdk_clock()
+
     def peek_step(self, name: Key, /) -> tuple[bool, Any]:
         with self.write_lock:
             return sdk_peek_step(self._ctx, name)
@@ -642,7 +676,7 @@ class ConcurrentAbsurdCtx:
         schedules the run, and raises ``SuspendTask``, the *sleeping* park, so
         the attempt counter is untouched.
 
-        The epsilon is required: a ``wake_at <= now`` makes the
+        The margin is required: a ``wake_at <= now`` makes the
         SDK return WITHOUT parking (its stale/past-time path), and the caller
         would fall through to ``GatherWakeRace``. The same return-not-park
         happens if ``name``'s checkpoint already exists with a past wake time,
@@ -652,22 +686,13 @@ class ConcurrentAbsurdCtx:
         this, keeping the occurrence counters clean: ``name`` occupies its
         own counter key, never shifting a ``$awaitEvent:`` or step name)."""
         with self.write_lock:
-            self._ctx.sleep_until(name, time.time() + _REPARK_EPSILON)
+            self._ctx.sleep_until(name, self.clock() + REPARK_MARGIN)
 
     def __getattr__(self, attr: str) -> Any:
         # Read-only attribute delegation (e.g. concurrent_safe, task_id). Writes go through the
         # locked methods above, and nothing on the gather path reaches the ctx by another route,
         # so this delegation never bypasses the write lock.
         return getattr(self._ctx, attr)
-
-
-# Strictly positive, and generously so: the SDK checks its clock only AFTER two
-# checkpoint round-trips (lookup + persist), so the epsilon must outlive that SQL
-# latency or sleep_until returns without parking and the caller falls back to
-# GatherWakeRace, which is loud and safe and costs the attempt the repark exists to save.
-# 250ms outlives that latency on a localhost and a managed Postgres, at a sub-second delay on a
-# rare path.
-_REPARK_EPSILON = 0.25
 
 
 CLAIM_TIMEOUT_SECONDS = 120

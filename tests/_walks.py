@@ -208,7 +208,7 @@ class SqliteWalk:
         # The relation, not the column: `tasks.waiting_event` outlives the park it names, so a
         # raw read reports a park for a run that is sleeping, retrying or finished — inside the
         # instrument that decides whether the two engines agree.
-        waiting = park_name(app.conn, task_id)
+        waiting = park_name(app.conn, task_id, clock=app.clock)
         app.close()
         if snapshot is not None and snapshot.state == "completed":
             return Ran(self.name, Returned(snapshot.result))

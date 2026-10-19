@@ -761,7 +761,7 @@ def ending_of(index: int, slot: Any, choice: Choice) -> Ending[Any]:
             return Stopped(index)
         case BranchRaised(error=error) if all_refusals(error):
             return Refusal(index, str(next(leaves(error))))
-        case BranchRaised(error=error):  # before the choice, or one a retry would raise again
+        case BranchRaised(error=error):  # before the choice, or after it an error a retry repeats
             return Raised(index, repr(error))
         case value if index in choice.winners:
             return Won(index, value)
@@ -1260,4 +1260,9 @@ class TaskContext(Protocol):
 
         An engine that keeps a named wake-time checkpoint (Absurd) uses it; one that keeps the
         wake time on the task row alone (the SQLite engine) ignores it."""
+        ...
+
+    def clock(self) -> float:
+        """The engine's clock in epoch seconds, which this run's sleeps and bounded waits are
+        measured by."""
         ...

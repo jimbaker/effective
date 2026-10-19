@@ -224,12 +224,11 @@ def test_read_sqlite_task_returns_decoded_python_values(tmp_path, sqlite_app):
     """Parity with Absurd's jsonb reader and `from_trace`: `Checkpoint.state` is a Python VALUE,
     not the raw JSON string — so the stage-3 seed reader can re-commit it through `ctx.step`
     without double-encoding, as Absurd's reader does."""
-    from effective.engines.sqlite import SqliteTaskContext
 
     db = tmp_path / "task.db"
     app = sqlite_app(str(db))
     envelope = {"result": {"amount": "4.50"}, "usage": {"cost": 0.01}}
-    SqliteTaskContext(app.conn, _TASK, app.write_lock).step(Key.parse("extract"), lambda: envelope)
+    app.context(_TASK).step(Key.parse("extract"), lambda: envelope)
 
     recorded = read_sqlite_task(str(db), _TASK)
     assert [c.key.stored() for c in recorded] == ["extract"]

@@ -43,7 +43,7 @@ from effective.combinators import route
 from effective.compose import code_act
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
-from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.engines.sqlite import SqliteApp
 from effective.envelope import Envelope, JsonEnvelope
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import (
@@ -915,7 +915,7 @@ def replay_structured(
                 f"replay_structured expects one task in {db_path}, found {task_ids}"
             )
         try:
-            ctx = SqliteTaskContext(app.conn, task_ids[0], app.write_lock)
+            ctx = app.context(task_ids[0])
             params = json.loads(stored[0][1])
             interp = MeteredInterpreter(llm=explode_llm, tools=explode_tool)
             traj = load_ending(
@@ -1182,7 +1182,7 @@ def replay_combinator(
                 f"replay_combinator expects one task in {db_path}, found {task_ids}"
             )
         try:
-            ctx = SqliteTaskContext(app.conn, task_ids[0], app.write_lock)
+            ctx = app.context(task_ids[0])
             params = json.loads(stored[0][1])
             interp = MeteredInterpreter(llm=explode_llm, tools=explode_tool)
             answer = DurableHandler(ctx, interp, params=params).run(

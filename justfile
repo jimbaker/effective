@@ -69,6 +69,9 @@ lint:
     # `__str__`. Every other one is counted with the processor it wants; the gate fails on a new
     # one and on a count nothing produces, so the record can only shrink.
     uv run python scripts/fstring_sweep.py --gate src
+    # Every wait names what it waits for; a sleep names only a duration. A file's count of sleeps can
+    # only shrink, and `scripts/sleep-baseline.txt` says what each remaining one stands for.
+    uv run python scripts/sleep_sweep.py --gate src tests scripts examples
     uv run python -m effective.lint --lazy-imports src/effective src/agent src/tui src/examples
     # Only the Absurd engine module reaches the SDK's private surface. Tests are unscanned, since
     # their fixtures reach the SDK directly: `python -m effective.lint --sdk-private tests` lists them.

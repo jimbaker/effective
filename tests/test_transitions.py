@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import FrameType
 from typing import Any
 
 import pytest
@@ -279,16 +280,22 @@ def test_a_read_the_table_lacks_fails_the_static_check(monkeypatch, call):
 SIGNALS = (EngineSignal, *sdk_signals())
 
 
-def _site() -> str:
-    """The handler function nearest the call, past the ctx wrappers and a race's clock read."""
+def _site_frame() -> FrameType | None:
+    """The frame of the handler function nearest the call, past the ctx wrappers and a race's
+    clock read."""
     frame = sys._getframe(2)
     while frame is not None:
         if frame.f_code.co_filename in (durable.__file__, base.__file__):
             site = frame.f_code.co_qualname.split(".<locals>")[0]
             if site.split(".")[0] not in WRAPPERS and site != "race_clock":
-                return site
+                return frame
         frame = frame.f_back
-    return "?"
+    return None
+
+
+def _site() -> str:
+    frame = _site_frame()
+    return "?" if frame is None else frame.f_code.co_qualname.split(".<locals>")[0]
 
 
 class Logged:
@@ -321,6 +328,18 @@ class Logged:
                 self._log(member, Outcome.ANSWERED)
             return attr
         return functools.partial(self._call, member, attr)
+
+    def clock(self) -> float:
+        """The engine's clock, logged as due once it reaches the `when` its reader compares it to.
+
+        A clock read decides nothing on its own: the site compares it to an instant it holds, so
+        the outcome is that comparison."""
+        now = self._ctx.clock()
+        frame = _site_frame()
+        assert frame is not None, "a clock read with no handler site"
+        when = frame.f_locals["when"]
+        self._log("clock", Outcome.DUE if now >= when.timestamp() else Outcome.UNDUE)
+        return now
 
     def _busy(self, member: str) -> None:
         if (read := (_site(), member)) in self._fail:
@@ -437,6 +456,10 @@ def a_gather_of_sleeps():
     return (yield from gather([lambda: sleep_until(FUTURE)]))
 
 
+def a_gather_of_past_sleeps():
+    return (yield from gather([lambda: sleep_until(PAST)]))
+
+
 def a_race():
     answer = yield from race([ok_branch, lambda: call_tool("refused", {}, dict)])
     return type(answer).__name__
@@ -499,6 +522,7 @@ WORKLOADS = {
     "a failing tool": (a_failing_tool, []),
     "a gather of awaits": (a_gather_of_awaits, [("gather:0,0;ev", {"ok": True})]),
     "a gather of sleeps": (a_gather_of_sleeps, []),
+    "a gather of past sleeps": (a_gather_of_past_sleeps, []),
     "a race": (a_race, []),
     "a refused race": (a_refused_race, []),
     "a past sleep": (a_past_sleep, []),
@@ -620,6 +644,20 @@ def test_every_transition_an_engine_answers_is_tabled(engine, workload):
         attempts += observe(engine, workflow, {(site, member)}, emits, name=f"{site}:{member}")
     assert seen_in(attempts) - TRANSITIONS.keys() == set()
     assert mislabeled(attempts) == []
+
+
+@pytest.mark.parametrize(
+    ("workload", "outcome"),
+    [("a gather of sleeps", Outcome.UNDUE), ("a gather of past sleeps", Outcome.DUE)],
+)
+def test_a_branch_sleep_reads_its_clock_as_due_once_its_instant_passed(engine, workload, outcome):
+    workflow, emits = WORKLOADS[workload]
+    reads = {
+        key[2]
+        for key in seen_in(observe(engine, workflow, set(), emits))
+        if key[:2] == ("DurableHandler._branch_sleep", "clock")
+    }
+    assert reads == {outcome}
 
 
 @pytest.mark.parametrize("workload", ["a race", "a refused race", "a replayed race"])

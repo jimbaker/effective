@@ -43,7 +43,6 @@ from the other.
 
 import asyncio
 import threading
-import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -846,6 +845,9 @@ class _PrefixedCtx:
         # on the recorder and outside it here, so the two interpreters would disagree.
         return self._ctx.sleep_until(when, name=name.prefixed(self._prefix))
 
+    def clock(self) -> float:
+        return self._ctx.clock()
+
     def peek_step(self, name: Key, /) -> tuple[bool, Any]:
         inner: Any = self._ctx
         return inner.peek_step(name.prefixed(self._prefix))
@@ -932,6 +934,9 @@ class RenamedAwaitCtx:
 
     def sleep_until(self, when: datetime, /, *, name: Key) -> None:
         return self._ctx.sleep_until(when, name=name)
+
+    def clock(self) -> float:
+        return self._ctx.clock()
 
     def peek_step(self, name: Key, /) -> tuple[bool, Any]:
         inner: Any = self._ctx
@@ -1180,6 +1185,9 @@ class SeedingCtx:
 
     def recorded_format(self) -> RecordedFormat:
         return self._ctx.recorded_format()
+
+    def clock(self) -> float:
+        return self._ctx.clock()
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
@@ -2289,10 +2297,10 @@ class DurableHandler:
         return name
 
     def _branch_sleep(self, when: datetime, name: Key) -> None:
-        """The sleep analog of the await peek is a pure clock compare (a sleep's
-        only durable payload is its wake time — nothing to re-bind); undue →
-        park as a value, re-armed at the barrier under `name`."""
-        if time.time() >= when.timestamp():
+        """The sleep analog of the await peek: the wake time against the engine's clock, since a
+        sleep's only durable payload is its wake time and there is nothing to re-bind. Undue, it
+        parks as a value, re-armed at the barrier under `name`."""
+        if self.ctx.clock() >= when.timestamp():
             return None
         raise _GatherPark(until=when, name=name)
 

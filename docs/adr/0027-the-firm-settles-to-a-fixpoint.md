@@ -125,7 +125,7 @@ crashed at every op, each settling a credit that leaves the invoice owing.
 
 ## 6. What this does not rule
 
-| question | where it goes |
+| question | what holds |
 |---|---|
 | binding an approval to its effect and its compensation | [ADR-0028](0028-an-approval-binds-its-effect.md): the terms row carries the digest of the settlement's plan |
 | waking a gathered park on any branch's ask | not built; no engine wakes a gathered park on any branch's ask |

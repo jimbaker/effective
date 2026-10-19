@@ -279,7 +279,7 @@ def test_A5_the_handler_acts_on_the_choice_the_store_returned(sqlite_app):
         assert isinstance(answer, Chosen)
         return [winner.index for winner in answer.winners]
 
-    ctx: Any = _Overruled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock))
+    ctx: Any = _Overruled(app.context(app.spawn("run", {})))
     assert DurableHandler(ctx, _Calls()).run(program) == [1]
     assert calls == ["a", "b"]
 
@@ -311,7 +311,9 @@ def test_A6_a_loser_looping_on_cached_answers_stops_on_every_interpreter(sqlite_
     looped[0] = 0
     app = sqlite_app()
     answer = DurableHandler(
-        SqliteTaskContext(app.conn, app.spawn("run", {}), None), _Tools(), op_layers=[_cached]
+        SqliteTaskContext(app.conn, app.spawn("run", {}), None, clock=app.clock),
+        _Tools(),
+        op_layers=[_cached],
     ).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert looped[0] < 10_000
@@ -339,7 +341,7 @@ def test_A7_an_upper_layer_looping_over_a_cache_after_the_choice_stops_at_once(s
         branches = [lambda: call_tool("won", {}, str), lambda: call_tool("loser", {}, str)]
         return _described((yield from race(branches)))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
+    ctx = _Settled(app.context(app.spawn("run", {})), settled)
     answer = DurableHandler(ctx, tools, op_layers=[upper, _cached]).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert looped[0] <= 1
@@ -511,9 +513,7 @@ def test_A8_an_ending_saved_without_an_input_digest_fails_loudly_on_a_retry(sqli
         return _described((yield from race([lambda: call_tool("cached", {}, str)])))
 
     def run() -> Any:
-        return DurableHandler(
-            SqliteTaskContext(app.conn, task, app.write_lock), _Tools(), op_layers=[cached]
-        ).run(program)
+        return DurableHandler(app.context(task), _Tools(), op_layers=[cached]).run(program)
 
     run()
     row = app.conn.execute("SELECT state FROM checkpoints WHERE name='race:0;endings'").fetchone()
@@ -579,7 +579,7 @@ def test_A9_a_horizon_holds_one_entry_per_live_loser_handler(sqlite_app, loser_d
     def program() -> Any:
         return (yield from race([lambda: call_tool("won", {}, int), loser]))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
+    ctx = _Settled(app.context(app.spawn("run", {})), settled)
     DurableHandler(ctx, _Domain()).run(program)
     horizon = _horizon(app)
     assert len(horizon) == entries
@@ -644,7 +644,7 @@ def test_A13_an_op_admitted_before_the_choice_finishes_through_its_layers(sqlite
         branches = [lambda: call_tool("won", {}, str), lambda: call_tool("held", {}, str)]
         return _described((yield from race(branches)))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
+    ctx = _Settled(app.context(app.spawn("run", {})), settled)
     answer = DurableHandler(ctx, tools, op_layers=[layer]).run(program)
     assert answer == ["chosen", [["won", 0, "won"], ["unchosen", 1, "held"]]]
     assert sorted(after) == ["held", "won"]
@@ -700,7 +700,7 @@ def test_a_finished_gathers_replay_is_capped_by_its_parents_count(sqlite_app, ch
     task = app.spawn("run", {})
 
     def attempt() -> Any:
-        ctx = _Settled(SqliteTaskContext(app.conn, task, app.write_lock), run.settled)
+        ctx = _Settled(app.context(task), run.settled)
         return DurableHandler(ctx, run, op_layers=[run.cached]).run(run.program)
 
     first = attempt()
@@ -737,7 +737,7 @@ def test_A11_a_stop_from_below_never_reaches_a_layer_above(sqlite_app, monkeypat
         return _described((yield from _injected_race()))
 
     monkeypatch.setattr(Racing, "read", reading)
-    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock)
+    ctx = app.context(app.spawn("run", {}))
     answer = DurableHandler(ctx, _Tools(), op_layers=[swallowing, injector.layer]).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert caught == []

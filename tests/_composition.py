@@ -18,7 +18,7 @@ nothing.
 
 ===========================  ==================================================
 durable sleep                `sleep ∘ gather` routes to `_branch_sleep`, which
-                             calls neither ctx, so covering that pair alone
+                             calls no ctx's sleep, so covering that pair alone
                              bypasses a defect in a ctx's own `sleep`.
 `gather ∘ respawn`           can re-execute every sibling once per generation:
                              three emails where the author wrote one.

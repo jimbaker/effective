@@ -30,16 +30,20 @@ Engine differences the record carries rather than papers over are in `ParkedTask
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from string.templatelib import Template
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from effective.engines import wall_clock
 from effective.engines.sqlite import SqliteApp, connect
 from effective.graphview import PARKED
 from effective.keys import Key, Segment, compose_key
 from effective.ruling import ruled_answer
+from effective.sql import bind
 
 if TYPE_CHECKING:
     import psycopg
@@ -137,33 +141,37 @@ def pending_key(park: ParkedTask) -> Key:
 
 # ── the 0↔1 half: the embedded SQLite engine ─────────────────────────────────
 
-_SQLITE_PARKED = (
-    "SELECT task_id, name, params, waiting_event FROM tasks "
-    "WHERE state = 'waiting' AND waiting_event IS NOT NULL "
-    "  AND (available_at = 0 OR available_at > unixepoch('subsec')) "
-    "ORDER BY rowid"
-)
-"""Every event-parked task a human can still answer, oldest first.
 
-**Three clauses and each earns its place**, which is worth saying because a second reader once
-asked only the first: `waiting` is what a park IS, a name is what an emitter aims at, and a
-deadline still ahead is what makes the answer land. `bridge_sqlite.park_name` asks the same
-question of one task and PROJECTS this relation rather than restating it.
+def _sqlite_parked(now: float) -> Template:
+    """Every event-parked task a human can still answer at `now`, oldest first.
 
-`state = 'waiting'` is the definition of the relation, not a filter over it: `SqliteApp.work_batch`
-sets exactly that state when a `_Suspend` carries an event, and `'sleeping'` when it carries a
-deadline alone. A `_Suspend` carrying both is `'waiting'` with its deadline in `available_at`, and
-the clause above keeps such a task listed while its deadline is ahead: answering it still does
-something. Once the deadline passes the task is *claimable*, and a claimable task is nobody's to
-answer, which is the same reason a `'sleeping'` task whose time has come stays out. A timed park
-with no event is out entirely: `wake_event` would have to go optional to carry it.
+    **Three clauses and each earns its place**, which is worth saying because a second reader once
+    asked only the first: `waiting` is what a park IS, a name is what an emitter aims at, and a
+    deadline still ahead is what makes the answer land. `bridge_sqlite.park_name` asks the same
+    question of one task and PROJECTS this relation rather than restating it.
 
-`ORDER BY rowid` is spawn order, which is the closest thing this engine has to "oldest first"
-(there is no timestamp; see `ParkedTask.parked_since`). Hole-free, so it stays a plain literal:
-`effective.sql.bind` composes a statement that has data to keep separate, and this one has none."""
+    `state = 'waiting'` is the definition of the relation, not a filter over it:
+    `SqliteApp.work_batch` sets exactly that state when a `_Suspend` carries an event, and
+    `'sleeping'` when it carries a deadline alone. A `_Suspend` carrying both is `'waiting'` with
+    its deadline in `available_at`, and the clause above keeps such a task listed while its
+    deadline is ahead: answering it still does something. Once the deadline passes the task is
+    *claimable*, and a claimable task is nobody's to answer, which is the same reason a
+    `'sleeping'` task whose time has come stays out. A timed park with no event is out entirely:
+    `wake_event` would have to go optional to carry it.
+
+    `ORDER BY rowid` is spawn order, which is the closest thing this engine has to "oldest first"
+    (there is no timestamp; see `ParkedTask.parked_since`)."""
+    return (
+        t"SELECT task_id, name, params, waiting_event FROM tasks "
+        t"WHERE state = 'waiting' AND waiting_event IS NOT NULL "
+        t"  AND (available_at = 0 OR available_at > {now}) "
+        t"ORDER BY rowid"
+    )
 
 
-def read_sqlite_parked(path: str | Path) -> tuple[ParkedTask, ...]:
+def read_sqlite_parked(
+    path: str | Path, *, clock: Callable[[], float] = wall_clock
+) -> tuple[ParkedTask, ...]:
     """Every event-parked task in a SQLite engine file, oldest first, opened READ-ONLY.
 
     A second process holding only the file. It opens `file:…?mode=ro` rather than constructing a
@@ -173,12 +181,14 @@ def read_sqlite_parked(path: str | Path) -> tuple[ParkedTask, ...]:
     Use `read_sqlite_parked_conn` for an `:memory:` engine, which has no path to reopen."""
     conn = connect(f"file:{Path(path)}?mode=ro", uri=True)
     try:
-        return read_sqlite_parked_conn(conn)
+        return read_sqlite_parked_conn(conn, clock=clock)
     finally:
         conn.close()
 
 
-def read_sqlite_parked_conn(conn: sqlite3.Connection) -> tuple[ParkedTask, ...]:
+def read_sqlite_parked_conn(
+    conn: sqlite3.Connection, *, clock: Callable[[], float]
+) -> tuple[ParkedTask, ...]:
     """`read_sqlite_parked` over an ALREADY-OPEN connection: the same read, minus the file.
 
     Mirrors the `read_sqlite_task` / `read_sqlite_conn` pair in `effective.checkpoints`: an
@@ -194,7 +204,9 @@ def read_sqlite_parked_conn(conn: sqlite3.Connection) -> tuple[ParkedTask, ...]:
             state=PARKED,  # normalized: this engine's own word is 'waiting'
             parked_since=None,  # this engine records none; see ParkedTask.parked_since
         )
-        for task_id, task_name, params, waiting_event in conn.execute(_SQLITE_PARKED)
+        for task_id, task_name, params, waiting_event in conn.execute(
+            *bind(_sqlite_parked(clock()))
+        )
     )
 
 

@@ -53,6 +53,7 @@ wrapping a value.
 """
 
 import re
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -633,14 +634,10 @@ def test_the_gate_scans_every_tree_that_mints_a_key():
     there trip no gate anywhere."""
     from pathlib import Path as _P
 
-    from effective.lint import build_key_registry
+    from effective.lint import _expanded, build_key_registry
 
     root = _P(__file__).parent.parent
-    files = [
-        f
-        for tree in ("src/effective", "src/agent", "examples")
-        for f in (root / tree).rglob("*.py")
-    ]
+    files = _expanded(root / tree for tree in ("src/effective", "src/agent", "examples"))
     shapes, problems = build_key_registry(files)
     assert [str(p) for p in problems] == []
     # The claim is about the SCAN PATHS, so it must not be anchored to one namespace that a
@@ -826,6 +823,9 @@ def test_an_author_cannot_forge_a_frame_on_the_await_axis():
 
         def sleep_until(self, when: datetime, /, *, name: Key | None = None) -> None:
             return None
+
+        def clock(self) -> float:
+            return time.time()
 
     from effective.ops import event_name
 

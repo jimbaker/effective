@@ -28,6 +28,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from _clock import HeldClock
 from _shapes import cut_short_by_a_race, run
 from test_race_durable import _Tools
 from test_race_shapes import _ReleasedByChoice, until
@@ -48,19 +49,6 @@ row waits for it to arrive."""
 PAST_IT = START + timedelta(seconds=2)
 """Where the timer leaves the clock. Past the instant by a second, which orders nothing: the
 comparison is between two instants the race read."""
-
-
-class _Held:
-    """The clock the races read, moved by the timer's own step."""
-
-    def __init__(self) -> None:
-        self._at = START.timestamp()
-
-    def __call__(self) -> float:
-        return self._at
-
-    def move_to(self, at: datetime) -> None:
-        self._at = at.timestamp()
 
 
 class _Sequential:
@@ -129,12 +117,12 @@ def _paths(monkeypatch) -> list[str]:
     return taken
 
 
-def _moving(clock: _Held, before: dict[str, Any]) -> _Tools:
+def _moving(clock: HeldClock, before: dict[str, Any]) -> _Tools:
     """The domain: each tool answers its own name, and `tick` leaves the clock past the bound."""
 
     def tick() -> None:
         before.get("tick", lambda: None)()
-        clock.move_to(PAST_IT)
+        clock.advance_to(PAST_IT)
 
     return _Tools({**before, "tick": tick})
 
@@ -146,8 +134,7 @@ def test_the_second_attempt_starts_at_the_instant_and_the_first_is_cut(backend, 
     The first attempt is released by the outer CHOICE rather than by the second attempt's call,
     so its next op is admitted after the choice and cannot be admitted at all. Released by the
     call, it would race the choice and could win, which is the run this row must not report."""
-    clock = _Held()
-    monkeypatch.setattr(base, "race_time", clock)
+    clock = HeldClock(START).on_races(monkeypatch)
     taken = _paths(monkeypatch)
     started, settled = threading.Event(), threading.Event()
     tools = _moving(
@@ -178,8 +165,7 @@ def test_a_sequential_ctx_runs_the_first_attempt_to_its_end(backend, monkeypatch
 
     No hold here, since there is nothing to hold: the first attempt has answered before the hedge
     arm is reached, so the timer never ticks and the second attempt never starts."""
-    clock = _Held()
-    monkeypatch.setattr(base, "race_time", clock)
+    clock = HeldClock(START).on_races(monkeypatch)
     taken = _paths(monkeypatch)
     tools = _moving(clock, {})
 

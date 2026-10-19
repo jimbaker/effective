@@ -131,7 +131,7 @@ def test_sqlite_reader_finds_the_park_and_reports_the_registration_verbatim():
     park = approve_park(Key.parse("ledger;processed:m1"))
     task_id = _sqlite_run(app, "gated", _await_wf(park), "r1")
 
-    (park,) = read_sqlite_parked_conn(app.conn)
+    (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     assert park == ParkedTask(
         task_id=task_id,
         task_name="gated",
@@ -159,20 +159,20 @@ def test_sqlite_reader_lists_every_namespace_not_just_approve():
         _sqlite_run(app, namespace, _await_wf(park), f"r{i}")
         expected.append(park.stored())
 
-    assert [p.wake_event for p in read_sqlite_parked_conn(app.conn)] == expected
+    assert [p.wake_event for p in read_sqlite_parked_conn(app.conn, clock=app.clock)] == expected
     app.close()
 
 
 def test_sqlite_reader_leaves_the_park_when_the_run_resumes():
     app = SqliteApp(":memory:")
     task_id = _sqlite_run(app, "gated", _await_wf("review:r1"), "r1")
-    assert len(read_sqlite_parked_conn(app.conn)) == 1
+    assert len(read_sqlite_parked_conn(app.conn, clock=app.clock)) == 1
 
     app.emit_event("review:r1", {"decision": "approve"})
     snap = app.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
-    assert read_sqlite_parked_conn(app.conn) == ()
+    assert read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
     app.close()
 
 
@@ -187,7 +187,7 @@ def test_sqlite_reader_excludes_a_timed_park():
         "sleeping",
         None,
     )
-    assert read_sqlite_parked_conn(app.conn) == ()
+    assert read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
     app.close()
 
 
@@ -199,12 +199,12 @@ def test_sqlite_reader_reports_one_branch_of_a_parked_gather():
     app = SqliteApp(":memory:")
     task_id = _sqlite_run(app, "multi", _two_parked_branches_wf, "r1")
 
-    (park,) = read_sqlite_parked_conn(app.conn)
+    (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     assert park.wake_event == "gather:0,0;ev0:r1"  # branch 2's park is not listed
 
     app.emit_event("gather:0,0;ev0:r1", {"n": 0})
     app.run_until_result(task_id)
-    (park,) = read_sqlite_parked_conn(app.conn)
+    (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     assert park.wake_event == "gather:0,2;ev2:r1"  # a NEW park, not a completion
     app.close()
 
@@ -225,7 +225,7 @@ def test_sqlite_path_reader_is_the_web_shape_and_opens_read_only(tmp_path):
 
 def test_sqlite_reader_on_an_engine_with_nothing_parked(tmp_path):
     app = SqliteApp(str(tmp_path / "engine.db"))
-    assert read_sqlite_parked_conn(app.conn) == ()
+    assert read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
     assert read_sqlite_parked(tmp_path / "engine.db") == ()
     app.close()
 

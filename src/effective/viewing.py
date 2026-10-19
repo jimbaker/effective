@@ -16,7 +16,7 @@ at-most-once, skips the thunks, and the appends never happen. Measured end to en
 run completed with zero ledger rows.
 
 **Both engines are exposed and neither refuses it.** SQLite hands out a public
-`SqliteTaskContext(conn, task_id, lock)`. Absurd's SQL guard
+`SqliteApp.context(task_id)`. Absurd's SQL guard
 (`absurd.set_task_checkpoint_state`) raises on a run id absent from `r_{queue}`, a cancelled task
 and a run already failed, and silently skips a stale attempt — **claim ownership is among none of
 them**, so a viewer reusing the real `owner_run_id`, which any reader obtains with one `SELECT`,
@@ -210,7 +210,7 @@ class ViewingCtx:
         if name in self._tape:
             self._ctx.sleep_until(when, name=name)
             return
-        if datetime.now(tz=when.tzinfo).timestamp() >= when.timestamp():
+        if self._ctx.clock() >= when.timestamp():
             return
         raise ReachedThePark(name)
 
@@ -247,6 +247,10 @@ class ViewingCtx:
         a pane showing nothing because the run has no record yet reads identically to one showing
         nothing because the viewer was pointed at the wrong task."""
         return tuple(self._reached)
+
+    def clock(self) -> float:
+        """The engine's clock: a read, so it is delegated."""
+        return self._ctx.clock()
 
     def recorded_format(self) -> RecordedFormat:
         """The format the viewed run records under: a read, and the one a replay needs."""

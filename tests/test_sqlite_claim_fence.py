@@ -8,10 +8,10 @@ end-of-run writes raise. On SQLite the reclaim is that sweep, so the task's row 
 
 import threading
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from _clock import HeldClock
 
 from effective.engines import sqlite
 from effective.engines.sqlite import ClaimLost, SqliteApp
@@ -155,11 +155,10 @@ def test_a_checkpoint_extends_the_claim(tmp_path: Any, monkeypatch: pytest.Monke
     """A worker that commits a checkpoint before its lease runs out keeps its task, as Absurd's
     checkpoint write extends its claim, so a second worker polling after the first lease would
     have expired finds nothing to reclaim."""
-    now = [0.0]
-    monkeypatch.setattr(sqlite, "time", SimpleNamespace(time=lambda: now[0]))
+    clock = HeldClock(datetime.now(UTC))
     monkeypatch.setattr(sqlite, "CLAIM_LEASE_SECONDS", 10.0)
     path = str(tmp_path / "lease.db")
-    live, poller = SqliteApp(path), SqliteApp(path)
+    live, poller = SqliteApp(path, clock=clock), SqliteApp(path, clock=clock)
     turns = {n: (threading.Event(), threading.Event()) for n in (1, 2)}
 
     def held(n: int) -> str:
@@ -181,10 +180,10 @@ def test_a_checkpoint_extends_the_claim(tmp_path: Any, monkeypatch: pytest.Monke
     worker.start()
     try:
         assert turns[1][0].wait(10)
-        now[0] = 8.0  # inside the first lease, which runs to 10
+        clock.advance(timedelta(seconds=8))  # inside the first lease, which runs to 10
         turns[1][1].set()
         assert turns[2][0].wait(10)  # the first checkpoint committed at 8
-        now[0] = 12.0  # past the first lease, inside the one the checkpoint extended to 18
+        clock.advance(timedelta(seconds=4))  # past the first lease, inside the extended one, to 18
         assert poller.work_batch() is False
     finally:
         for _, go in turns.values():

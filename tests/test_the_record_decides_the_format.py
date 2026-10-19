@@ -87,6 +87,9 @@ class _Forwarding:
     def sleep_until(self, when: Any, /, *, name: Key) -> None:
         return self._inner.sleep_until(when, name=name)
 
+    def clock(self) -> float:
+        return self._inner.clock()
+
 
 type Build = Callable[[dict[str, Any], Any, list[str]], DurableHandler]
 

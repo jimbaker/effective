@@ -267,7 +267,7 @@ def _parked(engine: SqliteApp) -> tuple[ParkedTask, ...]:
     `threading.Lock`, so re-entering it deadlocks.
     """
     with engine.write_lock:
-        return read_sqlite_parked_conn(engine.conn)
+        return read_sqlite_parked_conn(engine.conn, clock=engine.clock)
 
 
 def _park_of(engine: SqliteApp, task_id: UUID) -> ParkedTask | None:

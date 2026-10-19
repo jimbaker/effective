@@ -14,7 +14,7 @@ from uuid import UUID
 
 from effective.api import call_tool, race
 from effective.domain import CallTool
-from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
 from effective.keys import Key, race_choice
 from effective.ops import Step
@@ -76,7 +76,7 @@ def _program() -> Any:
 
 def main(db: str, task: str, calls: str, mode: str) -> None:
     app, chosen = SqliteApp(db), threading.Event()
-    ctx: Any = _Ctx(SqliteTaskContext(app.conn, UUID(task), app.write_lock), chosen)
+    ctx: Any = _Ctx(app.context(UUID(task)), chosen)
     try:
         DurableHandler(ctx, _Domain(calls, mode == "dying", chosen), op_layers=[_audits]).run(
             _program

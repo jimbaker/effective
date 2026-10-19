@@ -6,10 +6,7 @@ the `FaultCtx` crash injector, and ledger/result helpers. Domain-free: the canne
 domain the durable tests drive lives in ``_approval_domain.py``.
 """
 
-import contextlib
-import datetime as dt
 import os
-from collections.abc import Iterator
 from typing import Any, Protocol
 
 import psycopg
@@ -77,6 +74,9 @@ class FaultCtx:
         self._tick()
         return self._ctx.sleep_until(when, name=name)
 
+    def clock(self) -> float:
+        return self._ctx.clock()
+
     def repark(self, name):
         # The no-burn wake-race reschedule is a ctx-op touch too (kept aligned
         # with tests/_conformance.py's FaultCtx; no gather workflow runs through
@@ -95,51 +95,6 @@ def absurd() -> AbsurdEngine:
     opened = open(DSN)
     assert isinstance(opened, AbsurdEngine)
     return opened
-
-
-@contextlib.contextmanager
-def clock_at(engine: AbsurdEngine, when: dt.datetime) -> Iterator[None]:
-    """Hold BOTH clocks a durable sleep consults at `when`, so a park wakes without waiting.
-
-    A parked sleep resumes only if two independent conditions agree, and they are read by
-    different processes:
-
-    - **server**, in `absurd.claim_task`: `r.available_at <= absurd.current_time()` decides
-      whether the run is even a claim candidate. `absurd.current_time()` returns the
-      `absurd.fake_now` GUC when it is set, which is the hook Absurd ships for this.
-    - **client**, in the SDK: on resume the workflow re-executes `sleep_until`, and the SDK
-      re-derives `actual_wake_at - _get_current_time()`. A positive remainder suspends again.
-
-    **Moving one without the other is worse than moving neither**, which is why this is a
-    single context manager and not two helpers. Advance only the server clock and the run
-    does not merely fail to wake: it is claimed, re-parks, and reschedules itself to
-    `absurd.current_time() + remaining` — so `available_at` lands *beyond* the frozen fake
-    clock, and no later advance to that same instant can reach it. The run is then
-    unreachable until the fake clock is moved again, further. Measured while building this,
-    on an isolated queue.
-
-    Restores both on exit; an empty `absurd.fake_now` is how the SQL asks for the real clock
-    (`absurd.sql` tests `length(trim(v_fake)) > 0`).
-    """
-    import absurd_sdk
-
-    def frozen() -> dt.datetime:
-        return when
-
-    real = absurd_sdk._get_current_time
-    # `setattr`, not a plain assignment: patching a module-level function is a dynamic act the
-    # checker models as rebinding that exact function object, so the assignment form is an
-    # `invalid-assignment` error no signature can satisfy. The SDK invites the patch — its
-    # docstring reads "can be monkeypatched in tests" — and `frozen` matches the signature.
-    setattr(absurd_sdk, "_get_current_time", frozen)  # noqa: B010
-    engine.app._conn.execute(
-        "SELECT set_config('absurd.fake_now', %s, false)", (when.isoformat(),)
-    )
-    try:
-        yield
-    finally:
-        setattr(absurd_sdk, "_get_current_time", real)  # noqa: B010
-        engine.app._conn.execute("SELECT set_config('absurd.fake_now', '', false)")
 
 
 class Executes(Protocol):

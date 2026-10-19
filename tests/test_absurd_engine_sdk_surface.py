@@ -52,9 +52,9 @@ def _private_attributes(*, on_app: bool) -> set[str]:
     used: set[str] = set()
     for node in ast.walk(_TREE):
         match node:
-            case ast.Attribute(attr=attr, value=receiver) if attr.startswith(
-                "_"
-            ) and not attr.startswith("__"):
+            case ast.Attribute(attr=attr, value=receiver) if (
+                attr.startswith("_") and not attr.startswith("__") and not _is_sdk_module(receiver)
+            ):
                 if _is_app(receiver) == on_app:
                     used.add(attr)
             case _:
@@ -65,6 +65,14 @@ def _private_attributes(*, on_app: bool) -> set[str]:
 def _is_app(receiver: ast.expr) -> bool:
     match receiver:
         case ast.Attribute(value=ast.Name(id="self"), attr="app"):
+            return True
+        case _:
+            return False
+
+
+def _is_sdk_module(receiver: ast.expr) -> bool:
+    match receiver:
+        case ast.Name(id="absurd_sdk"):
             return True
         case _:
             return False
@@ -86,11 +94,16 @@ def _claim_keys() -> set[str]:
 
 
 def _private_imports() -> set[str]:
+    """Single-underscore names of the SDK module, imported from it or read off it."""
     names: set[str] = set()
     for node in ast.walk(_TREE):
         match node:
             case ast.ImportFrom(module="absurd_sdk", names=aliases):
                 names |= {alias.name for alias in aliases if alias.name.startswith("_")}
+            case ast.Attribute(attr=attr, value=receiver) if attr.startswith(
+                "_"
+            ) and _is_sdk_module(receiver):
+                names.add(attr)
             case _:
                 pass
     return names

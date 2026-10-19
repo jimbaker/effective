@@ -299,5 +299,5 @@ one key with at most three switches (`tests/_turns.py`). `just odoo-test` runs t
 | | why |
 |---|---|
 | another vendor | QuickBooks and Xero keep keys for a limited time; the port's contract assumes the ERP keeps them |
-| a gathered park waking on any branch | a gathered park exposes its lowest branch's ask alone, so the first approved proposal the run resumes owns a round; no engine wakes a gathered park on any branch |
-| the firm improving its own knowledge | an adoption is made by hand; `evolve`, and the complementarity of agent labor and organizational knowledge it would test, are proposed. The interaction test runs on scripted worlds, which tests the instrument and nothing about the firm |
+| a gathered park waking on any branch | a gathered park exposes its lowest branch's ask alone, so the first approved proposal the run resumes owns a round; no engine wakes a gathered park on any branch's ask |
+| the firm improving its own knowledge | an adoption is made by hand; `evolve`, and the complementarity of agent labor and organizational knowledge it would test, are not built. The interaction test runs on scripted worlds, which tests the instrument and nothing about the firm |

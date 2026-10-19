@@ -198,6 +198,36 @@ def backend(request):
     b.close()
 
 
+@pytest.fixture(params=["sqlite", "postgres"])
+def held_backend(request):
+    """The cross-engine sweep with one clock held for the engine a minute past real time, as
+    `(backend, clock)`. Absurd's runs on a queue of the test's own, so no other test's task wakes
+    when the clock moves."""
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from _clock import HeldClock
+    from _conformance import AbsurdBackend, SqliteBackend
+    from _durable import pg_ready
+
+    clock = HeldClock(datetime.now(UTC) + timedelta(minutes=1))
+    if request.param == "sqlite":
+        b = SqliteBackend(clock=clock)
+        yield b, clock
+        b.close()
+        return
+    if not pg_ready():
+        pytest.skip("no Postgres with Absurd + ledger (just pgt-up)")
+    b = AbsurdBackend(queue="held_" + uuid4().hex[:12])
+    b.app.create_queue()
+    try:
+        with clock.on_absurd(b.engine):
+            yield b, clock
+    finally:
+        b.app.drop_queue()
+        b.close()
+
+
 def _is_disposable(conn) -> bool:
     """`_durable.is_disposable`, the gate on every row this module writes."""
     from _durable import is_disposable
@@ -440,15 +470,42 @@ ROLES = ("unit", "spine", "journey", "adversarial", "conformance", "property")
 """The test roles. A marker outside them, a future `slow` say, says nothing about a pass."""
 
 
+START_FIRST = frozenset(
+    {
+        "tests/test_shape_conformance.py::test_two_crashes_in_a_tree_search_converge",
+        "tests/test_agent_firm_resolve.py::test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule",
+        "tests/test_agent_firm_resolve.py::test_the_firms_effects_do_not_read_the_notes_and_tickets",
+        "tests/test_agent_firm_resolve.py::test_two_settlements_of_one_round_gathered_hold_in_every_schedule_a_crash_interrupts",
+        "tests/test_agent_firm_erp_port.py::test_two_attempts_at_once_land_one_entry_on_odoo",
+        "tests/test_agent_firm_erp_port.py::test_an_op_lands_once_whatever_a_fault_interrupts",
+        "tests/test_watched_descent.py::test_two_crashes_converge",
+        "tests/test_agent_firm_erp_port.py::test_an_op_lands_once_when_its_replay_overlaps_it",
+        "tests/test_shape_conformance.py::test_a_crash_at_every_step_and_join_of_every_task_converges",
+        "tests/test_agent_firm_fixpoint.py::test_two_firm_runs_of_one_case_equal_one_in_every_schedule",
+        "tests/test_fixpoint.py::test_fixpoint_past_the_recursion_limit_on_both_engines",
+        "tests/test_fixpoint.py::test_a_branch_keeps_the_depth_arm_on_both_engines",
+        "tests/test_agent_firm_erp_port.py::test_two_releases_of_one_match_at_once_remove_it",
+        *(configured("start_first", "test") or ()),
+    }
+)
+"""The tests whose longest case runs 10s or more under the gate, named without their
+parameters, with those a tree declares in `[tool.effective.test].start_first`. A worker that
+takes one of them last holds the suite open after the rest finish, so they start first.
+`pytest -n auto --dist loadgroup --no-cov --durations=40` recomputes the list."""
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """A test that declares no role is a `unit` test.
+    """A test that declares no role is a `unit` test, and the tests in `START_FIRST` run first.
 
     A test that proves more than one seam in isolation declares which of `ROLES`, and every other
     test is marked `unit` here, so `-m unit` selects exactly the population whose overlap is
-    waste."""
+    waste. The order is the seed's shuffle with `START_FIRST` moved to the front, so it runs after
+    the shuffle."""
     for item in items:
         if not any(item.get_closest_marker(role) for role in ROLES):
             item.add_marker(pytest.mark.unit)
+    items.sort(key=lambda item: item.nodeid.split("[", 1)[0] not in START_FIRST)
 
 
 def pytest_configure(config) -> None:

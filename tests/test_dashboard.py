@@ -200,7 +200,7 @@ def test_a_parked_gather_says_on_screen_that_it_is_one_branch_of_N(engine, clien
     so answering it produces a NEW park instead of a completion — which reads as a bug unless the
     page says otherwise."""
     task_id = _run(engine, "multi", _two_parked_branches_wf, "r1")
-    (park,) = read_sqlite_parked_conn(engine.conn)
+    (park,) = read_sqlite_parked_conn(engine.conn, clock=engine.clock)
     assert park.wake_event == "gather:0,0;ev0:r1"  # branch 2's park is invisible
 
     page = client.get(f"/tasks/{task_id}")
@@ -284,7 +284,7 @@ def test_answering_resumes_the_run_and_the_park_leaves_the_list(engine, client):
     """The whole round trip, in one process. `follow_redirects=False` keeps this infra-free: the
     redirect target is the run page, which would want the layout container."""
     task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
-    assert len(read_sqlite_parked_conn(engine.conn)) == 1
+    assert len(read_sqlite_parked_conn(engine.conn, clock=engine.clock)) == 1
 
     posted = client.post(
         f"/tasks/{task_id}/answer",
@@ -298,7 +298,7 @@ def test_answering_resumes_the_run_and_the_park_leaves_the_list(engine, client):
     assert snapshot is not None
     assert snapshot.state == "completed", snapshot
     assert snapshot.result == {"decision": "approve"}
-    assert read_sqlite_parked_conn(engine.conn) == ()
+    assert read_sqlite_parked_conn(engine.conn, clock=engine.clock) == ()
     assert "Nothing is parked." in client.get("/").text
 
 
@@ -308,7 +308,7 @@ def test_answering_a_gather_branch_reveals_the_next_park(engine, client):
 
     client.post(f"/tasks/{task_id}/answer", data={"payload": "{}"}, follow_redirects=False)
 
-    (park,) = read_sqlite_parked_conn(engine.conn)
+    (park,) = read_sqlite_parked_conn(engine.conn, clock=engine.clock)
     assert park.wake_event == "gather:0,2;ev2:r1"  # a new park, not a completion
 
 
@@ -320,7 +320,9 @@ def test_a_payload_that_is_not_json_is_refused_by_name(engine, client):
     )
     assert refused.status_code == 400
     assert "not json" in refused.text
-    assert len(read_sqlite_parked_conn(engine.conn)) == 1  # still parked, nothing emitted
+    assert (
+        len(read_sqlite_parked_conn(engine.conn, clock=engine.clock)) == 1
+    )  # still parked, nothing emitted
 
 
 def test_answering_a_task_that_is_not_parked_is_a_404(engine, client):

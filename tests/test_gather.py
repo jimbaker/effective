@@ -10,11 +10,13 @@ reconstructing the aggregated join: the same re-execution model the durable hand
 These tests pin those semantics.
 """
 
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
+from test_race_shapes import until
 
 from effective.api import append_ledger, await_event, call_tool, gather
 from effective.cost import NEWEST_FORMAT, RecordedFormat
@@ -43,6 +45,9 @@ class _SeqCtx:
     def sleep_until(self, when: Any, *, name: Key | None = None) -> None:
         raise NotImplementedError
 
+    def clock(self) -> float:
+        return time.time()
+
 
 class _RaiseDomain:
     def run(self, op: Any) -> Any:
@@ -51,18 +56,27 @@ class _RaiseDomain:
         return "ok"
 
 
-def _branch(name: str, delay: float, counter: list[str], done: list[str] | None = None):
-    """A thunk-returning factory: sleeps `delay` (in its own thread), then one tool op.
+def _branch(
+    name: str,
+    counter: list[str],
+    done: list[str] | None = None,
+    *,
+    waits: threading.Event | None = None,
+    sets: threading.Event | None = None,
+):
+    """A thunk-returning factory: one tool op, its body run in a thread of its own.
 
-    `counter` records that the body STARTED; `done`, when a caller passes one, records that it
-    FINISHED. Only the concurrency test needs the second, and it needs it because start order
-    cannot tell overlap from serialization — both run b0 first."""
+    `counter` records that the body started and `done` that it finished. The body finishes once
+    `waits` is set, and sets `sets` as it does."""
 
     def thunk():
-        counter.append(name)  # records that this branch BODY actually ran
-        time.sleep(delay)
+        counter.append(name)
+        if waits is not None:
+            until(waits)
         if done is not None:
             done.append(name)
+        if sets is not None:
+            sets.set()
         v = yield from call_tool(name, {}, int)
         return (name, v)
 
@@ -70,27 +84,26 @@ def _branch(name: str, delay: float, counter: list[str], done: list[str] | None 
 
 
 def test_gather_joins_results_in_branch_order_not_completion_order():
-    """The join is by branch index, and the branches really did run concurrently.
-
-    Concurrency is asserted by COMPLETION ORDER, not by elapsed time. The slow branch is
-    started first, so under structured concurrency the fast one finishes first and under
-    serialization it cannot. The old form allowed 10ms over the summed time and measured the
-    machine instead: it failed at 0.1632s in a loaded gate run and passed three times alone."""
+    """The join is by branch index, and the branches ran concurrently: b0 finishes only once b1
+    has, which a serialized gather cannot do, since b1 would not start until b0 ended."""
     counter: list[str] = []
     done: list[str] = []
+    b1_done = threading.Event()
 
     def parent():
-        # b0 is slow and started first, so finishing b1 first is only possible concurrently.
         return (
             yield from gather(
-                [_branch("b0", 0.15, counter, done), _branch("b1", 0.01, counter, done)]
+                [
+                    _branch("b0", counter, done, waits=b1_done),
+                    _branch("b1", counter, done, sets=b1_done),
+                ]
             )
         )
 
     result = RecordingHandler(responses=RESPONSES).run(parent)
 
     assert result == [("b0", 100), ("b1", 200)]  # branch order, despite b1 finishing first
-    assert counter == ["b0", "b1"]  # both bodies ran, slow one first
+    assert sorted(counter) == ["b0", "b1"]
     assert done == ["b1", "b0"], f"branches did not overlap (serialized?): {done}"
 
 
@@ -98,7 +111,7 @@ def test_gather_records_leaves_by_path_and_replays_by_reexecution():
     counter: list[str] = []
 
     def parent():
-        out = yield from gather([_branch("b0", 0.0, counter), _branch("b1", 0.0, counter)])
+        out = yield from gather([_branch("b0", counter), _branch("b1", counter)])
         return {"branches": out}
 
     handler = RecordingHandler(responses=RESPONSES)
@@ -152,7 +165,7 @@ def test_gather_branch_failure_cancels_siblings_as_exception_group():
     counter: list[str] = []
 
     def parent():
-        return (yield from gather([_branch("b0", 0.0, counter), boom()]))
+        return (yield from gather([_branch("b0", counter), boom()]))
 
     # The structured-concurrency scope surfaces a branch failure as an ExceptionGroup
     # (and cancels siblings); the ValueError is aggregated inside it.
@@ -179,7 +192,7 @@ def test_gather_branch_await_parks_with_the_qualified_name():
     counter: list[str] = []
 
     def parent():
-        return (yield from gather([_branch("b0", 0.0, counter), _await_branch("ev")]))
+        return (yield from gather([_branch("b0", counter), _await_branch("ev")]))
 
     parked = RecordingHandler(responses=RESPONSES).run(parent)
     assert isinstance(parked, Suspended)
@@ -195,9 +208,7 @@ def test_gather_two_parked_branches_resume_serialized_lowest_first():
     resume completes the join."""
 
     def parent():
-        return (
-            yield from gather([_await_branch("ev0"), _branch("b1", 0.0, []), _await_branch("ev2")])
-        )
+        return (yield from gather([_await_branch("ev0"), _branch("b1", []), _await_branch("ev2")]))
 
     parked = RecordingHandler(responses=RESPONSES).run(parent)
     assert isinstance(parked, Suspended)
@@ -228,9 +239,7 @@ def test_L2_serialized_gather_resume_name_guard_names_the_lowest_branch():
     # guard rejects delivering under branch 2's name (which would positionally wake branch 0 and
     # bind ev2's payload to ev0 — P1's silent swap).
     def parent():
-        return (
-            yield from gather([_await_branch("ev0"), _branch("b1", 0.0, []), _await_branch("ev2")])
-        )
+        return (yield from gather([_await_branch("ev0"), _branch("b1", []), _await_branch("ev2")]))
 
     parked = RecordingHandler(responses=RESPONSES).run(parent)
     assert parked.awaiting.stored() == "gather:0,0;ev0"
@@ -274,7 +283,7 @@ def test_L5_concurrent_gather_branch_failure_is_an_exceptiongroup_uncatchable():
 
     def parent():
         try:
-            yield from gather([raising(), _branch("b1", 0.0, [])])
+            yield from gather([raising(), _branch("b1", [])])
         except ValueError:
             return "CAUGHT"  # must NOT happen — the workflow cannot catch a branch failure
         return "NO-RAISE"
@@ -302,7 +311,7 @@ def test_L5_sequential_gather_branch_failure_is_uncatchable():
 @pytest.fixture
 def recording_handler_await():
     def parent():
-        return (yield from gather([_branch("b0", 0.0, []), _await_branch("ev")]))
+        return (yield from gather([_branch("b0", []), _await_branch("ev")]))
 
     parked = RecordingHandler(responses=RESPONSES).run(parent)
     assert isinstance(parked, Suspended)
@@ -327,7 +336,7 @@ def test_resumed_gather_trace_orders_by_branch_and_replays():
     counter: list[str] = []
 
     def parent():
-        out = yield from gather([_branch("b0", 0.0, counter), _await_branch("ev")])
+        out = yield from gather([_branch("b0", counter), _await_branch("ev")])
         return {"out": out}
 
     handler = RecordingHandler(responses=RESPONSES)
@@ -356,7 +365,7 @@ def test_nested_gather_park_composes_and_resumes():
         return thunk
 
     def parent():
-        return (yield from gather([outer_gathering(), _branch("b1", 0.0, [])]))
+        return (yield from gather([outer_gathering(), _branch("b1", [])]))
 
     parked = RecordingHandler(responses=RESPONSES).run(parent)
     assert isinstance(parked, Suspended)
@@ -411,8 +420,8 @@ def test_two_same_arity_gathers_get_distinct_positional_keys():
     counter: list[str] = []
 
     def parent():
-        a = yield from gather([_branch("b0", 0.0, counter), _branch("b1", 0.0, counter)])
-        b = yield from gather([_branch("b0", 0.0, counter), _branch("b2", 0.0, counter)])
+        a = yield from gather([_branch("b0", counter), _branch("b1", counter)])
+        b = yield from gather([_branch("b0", counter), _branch("b2", counter)])
         return (a, b)
 
     handler = RecordingHandler(responses=RESPONSES)

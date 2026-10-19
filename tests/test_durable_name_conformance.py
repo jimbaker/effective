@@ -233,6 +233,9 @@ def test_absurd_writes_only_names_that_are_in_the_language_THROUGH_A_WRAPPER_STA
         def sleep_until(self, when, /, *, name=None):
             return self._ctx.sleep_until(when, name=name)
 
+        def clock(self) -> float:
+            return self._ctx.clock()
+
         def __getattr__(self, attr):
             return getattr(self._ctx, attr)
 
@@ -297,6 +300,9 @@ class _CapturingCtx:
         if name is not None:
             self.handed.append(name)
         return self._ctx.sleep_until(when, name=name)
+
+    def clock(self) -> float:
+        return self._ctx.clock()
 
     def __getattr__(self, attr):
         return getattr(self._ctx, attr)

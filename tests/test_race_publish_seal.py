@@ -17,22 +17,11 @@ real tick through the window.
 import threading
 from typing import Any
 
+from _witness import WatchedCondition
 from test_race_shapes import HOLD, until
 
 from effective.choice import Choice
 from effective.handlers.admission import Cursor, Halt, RaceState
-
-
-class _Watched(threading.Condition):
-    """A cursor's condition that says when a tick starts waiting on the seal."""
-
-    def __init__(self, lock: threading.Lock, waiting: threading.Event) -> None:
-        super().__init__(lock)
-        self._waiting = waiting
-
-    def wait(self, timeout: float | None = None) -> bool:
-        self._waiting.set()
-        return super().wait(timeout)
 
 
 def test_a_loser_admitted_during_the_store_write_stops_at_the_cut():
@@ -41,7 +30,7 @@ def test_a_loser_admitted_during_the_store_write_stops_at_the_cut():
     race.register(loser, index=1)
     loser.count = 2
     parked_or_done, go = threading.Event(), threading.Event()
-    loser.ready = _Watched(loser.lock, parked_or_done)
+    loser.ready = WatchedCondition(loser.lock, parked_or_done)
     ticked: list[Any] = []
 
     def admit() -> None:

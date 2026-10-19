@@ -1,7 +1,8 @@
 """Every f-string in `src/`, gated: allowed where a t-string processor renders and where an
 exception says itself.
 
-    uv run python scripts/fstring_sweep.py --gate --touched main # the gate `just check` runs
+    uv run python scripts/fstring_sweep.py --gate                # the gate `just check` runs
+    uv run python scripts/fstring_sweep.py --gate --touched main # where changes are written
     uv run python scripts/fstring_sweep.py                       # report, no exit code
     uv run python scripts/fstring_sweep.py --init-baseline       # bootstrap, keeping reasons
 
@@ -22,8 +23,8 @@ totality asks of an `isinstance` chain: was a structure available here, and did 
 Everything else is a finding, a raise that builds its message included. The ones that exist today
 are recorded in the baseline with the grammar each one builds, and a count where several sites
 share a key, so the gate fails on GROWTH and on any entry that no longer reproduces: the record
-can only shrink. A raise is also refused on any line a branch changed (`--touched`), so a change
-structures each exception it touches.
+can only shrink. With `--touched`, run where changes are written, a raise is also refused on any
+line a branch changed, so a change structures each exception it touches.
 
 Where each grammar's processor already lives: a key is `compose_key`, SQL is the psycopg
 t-string boundary, a prompt is `effective.channels`, a web search query is `effective.query`,
@@ -362,7 +363,7 @@ def write_baseline(entries: dict[Entry, tuple[str, int]]) -> None:
         "# Private entries for scripts/fstring-baseline.txt: sites in files that do not ship."
         " Same format.",
     ]
-    ships = _shipping()
+    ships = shipping()
     shared = {k: v for k, v in entries.items() if ships(k[0])}
     private = {k: v for k, v in entries.items() if not ships(k[0])}
     BASELINE.write_text("\n".join([*head, *_lines(shared), ""]))
@@ -379,7 +380,7 @@ def _lines(entries: dict[Entry, tuple[str, int]]) -> list[str]:
     ]
 
 
-def _shipping() -> Callable[[str], bool]:
+def shipping() -> Callable[[str], bool]:
     """Whether a path ships, by this tree's manifest; every path ships in a tree without one."""
     reader = MANIFEST.parent / "sync_public.py"
     if not (MANIFEST.exists() and reader.exists()):

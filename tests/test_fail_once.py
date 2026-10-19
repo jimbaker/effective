@@ -11,7 +11,6 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -28,6 +27,7 @@ from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Run, compose_key
+from effective.lint import _expanded
 from effective.ops import CompositionRefused, leaves
 from effective.spawning import (
     ChildAnswer,
@@ -438,17 +438,16 @@ def test_every_process_that_works_an_absurd_queue_builds_its_app_through_absurd_
     shipped worker, or it proves nothing, and it names the one file this interpreter cannot
     read."""
     workers, plain, unread = [], [], []
-    for root in ("src", "scripts", "examples"):
-        for path in sorted(Path(root).rglob("*.py")):
-            if path.name == "absurd_worker.py":
-                continue
-            try:
-                calls = called_names(path.read_text(encoding="utf-8"))
-            except SyntaxError:
-                unread.append(str(path))
-                continue
-            if calls & {"work_batch", "start_worker"}:
-                (plain if "Absurd" in calls else workers).append(str(path))
+    for path in _expanded(("src", "scripts", "examples")):
+        if path.name == "absurd_worker.py":
+            continue
+        try:
+            calls = called_names(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            unread.append(str(path))
+            continue
+        if calls & {"work_batch", "start_worker"}:
+            (plain if "Absurd" in calls else workers).append(str(path))
 
     assert "examples/smol_durable.py" in workers
     assert plain == []

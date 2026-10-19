@@ -7,7 +7,7 @@ so green-on-both is the engine-independence proof. The SQLite cases run in
 ``test-core`` (infra-free); the Postgres cases run under ``just pgt-test``.
 """
 
-import time
+import threading
 from datetime import datetime, timedelta
 from typing import Any, ClassVar, assert_never
 from uuid import uuid4
@@ -87,6 +87,7 @@ from effective.api import (
 from effective.budget import Grant, depth_grant_name
 from effective.cost import FORMAT_PARAM, RecordedFormat, Usage, serve
 from effective.domain import CallTool, DomainOp
+from effective.engines import REPARK_MARGIN
 from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
 from effective.handlers.base import op_key, step_key
@@ -566,8 +567,8 @@ def test_scoped_park_crash_at_every_op_resumes_on_the_scoped_name(backend):
         assert backend.ledger_kinds(run_id) == ["done"], f"k={k}"
 
 
-def _run_gather_wf(backend, fault=None, delay=0.0):
-    domain = CountingDomain(delay=delay)
+def _run_gather_wf(backend, fault=None, meeting=None):
+    domain = CountingDomain(meeting=meeting)
     fault = fault if fault is not None else Fault()
     run_id = f"g-{uuid4().hex[:8]}"
     name = f"gather-{run_id}"
@@ -795,69 +796,31 @@ def test_durable_descend_multi_grant_round_trip(backend):
     assert sorted(domain.calls) == ["a"] * 5  # only the final judge ran live on the last wake
 
 
-def _wait_past(deadline: datetime, *, margin: float = 0.05, timeout: float = 30.0) -> None:
-    """Block until `time.time()` is past `deadline` — the ENGINE's clock, not elapsed sleep.
-
-    A durable deadline is compared against `time.time()` (`SqliteApp._claim`; Absurd's own SQL
-    does the equivalent), so that is the only clock whose reading settles "has it expired?".
-    `time.sleep(n)` measures MONOTONIC time and the two diverge whenever the wall clock steps —
-    which it does on this host, backward, by ~0.95s (see the caller). Polling the guard's clock
-    is total under a step in either direction: forward and we return at once, backward and we
-    simply wait longer.
-
-    Bounded on `monotonic` rather than on the clock being waited for, so a clock that never
-    reaches the deadline raises instead of hanging the suite."""
-    started = time.monotonic()
-    while time.time() < deadline.timestamp() + margin:
-        if time.monotonic() - started > timeout:
-            raise AssertionError(
-                f"wall clock never reached {deadline.isoformat()} in {timeout}s of monotonic "
-                f"time (now={time.time()}); the host clock is stepping, not merely slow"
-            )
-        time.sleep(0.02)
+A_SECOND = timedelta(seconds=1)
 
 
-def test_durable_gather_sleep_parks_then_wakes(backend):
-    """V1 for SleepUntil: a branch's durable sleep parks the task 'sleeping';
-    the deadline passing completes it (and exercises the durable-sleep path on
-    Postgres).
+def test_durable_gather_sleep_parks_then_wakes(held_backend):
+    """V1 for SleepUntil: a branch's durable sleep parks the task 'sleeping', and the held clock
+    reaching its deadline completes it."""
+    backend, clock = held_backend
+    domain = CountingDomain()
+    run_id = f"gs-{uuid4().hex[:8]}"
+    name = f"gather-sleep-{run_id}"
+    wake_at = clock.at + timedelta(hours=1)
+    backend.register(name, make_gather_sleep_wf(wake_at), domain, Fault(), ())
+    task_id = backend.spawn(name, run_id)
 
-    **Both halves are timed against the ENGINE's clock, not against elapsed sleep.** A durable
-    deadline is a wall-clock instant (`available_at`, compared to `time.time()` in `_claim`),
-    and it has to be, because a durable timer must survive process death and a monotonic clock
-    restarts with the process. Wall clocks **step**: on a WSL2 host `time.time()` can step
-    **backward** by most of a second during a `time.sleep(0.1)`. So `sleep(deadline + margin)` does
-    not imply the deadline passed: a backward step un-expires it, the task stays `sleeping`, and
-    the test fails while the engine is behaving exactly as specified. A test that slept the
-    margin failed one run in twelve on that host, and it is not a race: no ordering makes it go
-    away.
-
-    The rule this test follows: **wait on the same clock the guard reads.** `_wait_past`
-    polls `time.time()` until it is genuinely past the deadline (bounded on `monotonic`, so a
-    pathological clock fails loudly instead of hanging). The park half is the mirror image: the
-    reading only means something if it happened strictly *before* the deadline, so if the clock
-    reached it during the drain the attempt proves nothing and is retried with a wider budget.
-    Neither loosening can hide a defect: a sleep that never parks still fails, and a sleep that
-    never wakes still fails."""
-    for budget in (1.0, 4.0, 16.0):
-        domain = CountingDomain()
-        run_id = f"gs-{uuid4().hex[:8]}"
-        name = f"gather-sleep-{run_id}"
-        wake_at = datetime.now().astimezone() + timedelta(seconds=budget)
-        backend.register(name, make_gather_sleep_wf(wake_at), domain, Fault(), ())
-        task_id = backend.spawn(name, run_id)
-
-        snap = backend.run_until_result(task_id)
-        assert snap is not None
-        if time.time() < wake_at.timestamp():
-            break  # read strictly before the deadline, so 'is it parked?' is a real question
-    else:
-        pytest.fail("the clock passed a 16s deadline mid-drain three times — not an artifact")
-
+    snap = backend.run_until_result(task_id)
+    assert snap is not None
     assert snap.state not in ("completed", "failed"), snap  # parked sleeping
     assert domain.calls == ["a"]  # the sibling committed in the round
 
-    _wait_past(wake_at)
+    clock.advance_to(wake_at - A_SECOND)
+    snap = backend.run_until_result(task_id)
+    assert snap is not None
+    assert snap.state not in ("completed", "failed"), "woke a second before its deadline"
+
+    clock.advance_to(wake_at)
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -888,7 +851,7 @@ def test_durable_gather_park_crash_at_every_op(backend):
         assert domain.calls == ["a"], f"k={k}: {domain.calls}"  # exactly once, every k
 
 
-def _run_raced_gather(backend, *, max_attempts=None, fault=None):
+def _run_raced_gather(backend, clock, *, max_attempts=None, fault=None):
     """One gather_await_wf run under the deterministic wake race: the branch's
     first peek emits its own awaited event mid-round, so the post-barrier re-arm
     finds every wake condition satisfied and _join must repark (no attempt burn).
@@ -904,34 +867,32 @@ def _run_raced_gather(backend, *, max_attempts=None, fault=None):
     )
     task_id = backend.spawn(name, run_id, max_attempts=max_attempts)
     box.append(task_id)
-    snap = _drain_terminal(backend, task_id)
+    snap = _drain_past_reparks(backend, clock, task_id)
     assert race.fired, "the race instrument never fired"
     return snap, domain, fault, task_id
 
 
-def _drain_terminal(backend, task_id, deadline: float = 8.0):
-    """Drain a task to a terminal state on a wall-clock deadline, not a fixed
-    retry count: a reparked task sleeps until the present plus epsilon (and a raced sleep
-    branch until its own wake time), so under suite load a single fixed retry
-    is a flake — the deadline absorbs the jitter without changing what the
-    test asserts."""
+REPARKS_A_DRAIN_CROSSES = 4
+"""More reparks than any row here takes; a row needing more ends sleeping and fails."""
+
+
+def _drain_past_reparks(backend, clock, task_id):
+    """Drain a task, moving the held clock past each repark margin it sleeps on."""
     snap = backend.run_until_result(task_id)
-    start = time.monotonic()
-    while (
-        snap is not None
-        and snap.state not in ("completed", "failed")
-        and time.monotonic() - start < deadline
-    ):
-        time.sleep(0.3)
+    for _ in range(REPARKS_A_DRAIN_CROSSES):
+        if snap is None or snap.state != "sleeping":
+            break
+        clock.advance(timedelta(seconds=REPARK_MARGIN))
         snap = backend.run_until_result(task_id)
     return snap
 
 
-def test_durable_gather_wake_race_reparks_and_completes_without_burning_an_attempt(backend):
+def test_durable_gather_wake_race_reparks_and_completes_without_burning_an_attempt(held_backend):
     """The no-burn repark on a real engine: the raced task converges to the
     identical outcome, exactly-once, with the SAME attempt count as an unraced
     park/resume run — the race re-queued via the engine's park path, not its
     retry path (the baseline is read, not assumed)."""
+    backend, clock = held_backend
     # Baseline: the ordinary park -> emit -> resume run (no race).
     domain = CountingDomain()
     run_id = f"bl-{uuid4().hex[:8]}"
@@ -946,7 +907,7 @@ def test_durable_gather_wake_race_reparks_and_completes_without_burning_an_attem
     assert snap is not None
     assert snap.state == "completed"
 
-    raced_snap, raced_domain, _, raced_id = _run_raced_gather(backend)
+    raced_snap, raced_domain, _, raced_id = _run_raced_gather(backend, clock)
     assert raced_snap is not None
     assert raced_snap.state == "completed", raced_snap
     assert raced_snap.result == {"results": [10, {"ok": True}]}
@@ -954,23 +915,25 @@ def test_durable_gather_wake_race_reparks_and_completes_without_burning_an_attem
     assert backend.task_attempts(raced_id) == backend.task_attempts(baseline_id)
 
 
-def test_durable_gather_wake_race_max_attempts_1_completes(backend):
+def test_durable_gather_wake_race_max_attempts_1_completes(held_backend):
     """A HEALTHY max_attempts=1 task hitting the wake race must complete. Repark
     burns no attempt; a retry fallback would spend the only one and fail the task
     permanently."""
-    snap, domain, _, _ = _run_raced_gather(backend, max_attempts=1)
+    backend, clock = held_backend
+    snap, domain, _, _ = _run_raced_gather(backend, clock, max_attempts=1)
     assert snap is not None
     assert snap.state == "completed", snap
     assert snap.result == {"results": [10, {"ok": True}]}
     assert domain.calls == ["a"]
 
 
-def test_durable_wake_race_step_name_collision_is_impossible(backend):
+def test_durable_wake_race_step_name_collision_is_impossible(held_backend):
     """An author step legally named ``wake-race`` inside the raced branch must
     NOT alias the repark checkpoint. A repark minted as ``gather:{g},{i};wake-race``
     would collide with it, and the second run's begin_step would return the
     repark's wake TIME as the step's value: silent wrong data, the tool never
     executed, the engines diverging."""
+    backend, clock = held_backend
     domain = CountingDomain()
     run_id = f"wc-{uuid4().hex[:8]}"
     name = f"wake-collide-{run_id}"
@@ -986,7 +949,7 @@ def test_durable_wake_race_step_name_collision_is_impossible(backend):
     )
     task_id = backend.spawn(name, run_id)
     box.append(task_id)
-    snap = _drain_terminal(backend, task_id)
+    snap = _drain_past_reparks(backend, clock, task_id)
     assert race.fired
     assert snap is not None
     assert snap.state == "completed", snap
@@ -994,12 +957,13 @@ def test_durable_wake_race_step_name_collision_is_impossible(backend):
     assert domain.calls == ["a"]  # exactly-once includes "once", not zero
 
 
-def test_durable_double_wake_race_still_burns_no_attempt(backend):
+def test_durable_double_wake_race_still_burns_no_attempt(held_backend):
     """A branch with two sequential awaits can race the same gather TWICE, so
     'at most once' must hold per branch, not only per await. With the wake
     condition in the repark name each race mints a fresh checkpoint, so no-burn
     holds unconditionally: a max_attempts=1 task completes and the attempt count
     matches an unraced baseline."""
+    backend, clock = held_backend
     # Baseline: unraced park/resume of the same double-await shape.
     domain = CountingDomain()
     run_id = f"db-{uuid4().hex[:8]}"
@@ -1038,7 +1002,7 @@ def test_durable_double_wake_race_still_burns_no_attempt(backend):
     )
     task_id = backend.spawn(name, run_id, max_attempts=1)
     box.append(task_id)
-    snap = _drain_terminal(backend, task_id)  # two repark wakes (now + epsilon each)
+    snap = _drain_past_reparks(backend, clock, task_id)  # two repark wakes
     assert len(race.raced) == 2, race.raced
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1047,32 +1011,44 @@ def test_durable_double_wake_race_still_burns_no_attempt(backend):
     assert backend.task_attempts(task_id) == backend.task_attempts(baseline_id)
 
 
-def test_durable_sleep_wake_race_reparks_and_completes(backend):
-    """The sleep flavor of the wake race: a branch parks on an UNDUE deadline,
-    the slow sibling delays the barrier past it, and the re-arm's sleep_until
-    finds it already due — nothing to park on. Repark's name derives from
-    bp.until here (the isoformat arm), so this pins that derivation on both
-    engines. (If suite load delays the round past wake_at, the branch's own
-    sleep is already due and no race occurs — the same assertions hold on that
-    path, so the test is load-tolerant in both directions.)"""
-    domain = CountingDomain(delay=1.0)
+class _ReachingWakeAt(CountingDomain):
+    """A domain whose call moves the held clock to `wake_at`, so the gather's barrier finds a
+    sibling's sleep due."""
+
+    def __init__(self, clock, wake_at: datetime) -> None:
+        super().__init__()
+        self.clock, self.wake_at = clock, wake_at
+
+    def run(self, op: DomainOp) -> Any:
+        self.clock.advance_to(self.wake_at)
+        return super().run(op)
+
+
+def test_durable_sleep_wake_race_reparks_and_completes(held_backend):
+    """The sleep flavor of the wake race: a branch parks on an undue deadline, its sibling's
+    call moves the clock to it, and the re-arm's sleep_until finds it already due, with nothing
+    to park on. Repark's name derives from bp.until here (the isoformat arm), so this pins that
+    derivation on both engines. A branch that reads the clock after the sibling's call finds its
+    sleep due and races nothing, and the same assertions hold."""
+    backend, clock = held_backend
+    wake_at = clock.at + timedelta(hours=1)
+    domain = _ReachingWakeAt(clock, wake_at)
     run_id = f"sr-{uuid4().hex[:8]}"
     name = f"sleep-race-{run_id}"
-    wake_at = datetime.now().astimezone() + timedelta(seconds=0.3)
     backend.register(name, make_gather_sleep_wf(wake_at), domain, Fault(), ())
     task_id = backend.spawn(name, run_id, max_attempts=1)
-    snap = _drain_terminal(backend, task_id)
+    snap = _drain_past_reparks(backend, clock, task_id)
     assert snap is not None
     assert snap.state == "completed", snap
     assert snap.result == {"results": ["woke", 10]}
     assert domain.calls == ["a"]
 
 
-def test_a_top_level_durable_sleep_wakes_and_completes(backend):
+def test_a_top_level_durable_sleep_wakes_and_completes(held_backend):
     """A durable sleep at the TASK ROOT, on both engines: the `sleep` pair, not `sleep ∘ gather`.
 
-    A sleep inside a gather branch routes to `_branch_sleep`, a pure clock compare that calls
-    neither ctx, so the top-level path needs a cross-engine cell of its own.
+    A sleep inside a gather branch routes to `_branch_sleep`, a clock compare that calls no
+    ctx's sleep, so the top-level path needs a cross-engine cell of its own.
 
     **Scope.** This does NOT pin `SdkCtx.sleep_until`'s two-argument forward to the SDK:
     `AbsurdBackend` wraps `ConcurrentAbsurdCtx` rather than `SdkCtx` (which `_adapt_ctx`
@@ -1082,13 +1058,20 @@ def test_a_top_level_durable_sleep_wakes_and_completes(backend):
 
     Both steps must commit, one either side of the sleep, so the sleep is proved to be
     traversed rather than skipped."""
+    backend, clock = held_backend
     domain = CountingDomain()
     run_id = f"tls-{uuid4().hex[:8]}"
     name = f"top-sleep-{run_id}"
-    wake_at = datetime.now().astimezone() + timedelta(seconds=0.3)
+    wake_at = clock.at + timedelta(hours=1)
     backend.register(name, make_top_level_sleep_wf(wake_at), domain, Fault(), ())
     task_id = backend.spawn(name, run_id, max_attempts=1)
-    snap = _drain_terminal(backend, task_id)
+    snap = backend.run_until_result(task_id)
+    assert snap is not None
+    assert snap.state == "sleeping", snap
+    assert domain.calls == ["a"]
+
+    clock.advance_to(wake_at)
+    snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
     assert snap.result == {"before": 10, "after": 20}
@@ -1148,13 +1131,14 @@ def test_an_absolute_await_inside_a_gather_branch_is_refused_on_both_engines(bac
     assert "marginal_sweep" in failure, failure
 
 
-def test_durable_wake_race_crash_at_repark_still_converges(backend):
+def test_durable_wake_race_crash_at_repark_still_converges(held_backend):
     """Crash-at-repark is a real death mode: the fault lands exactly on the
     repark touch, the engine's ordinary retry re-queues (this one legitimately
     burns an attempt; the default budget absorbs it), and the wake replay
     resolves every branch at its peek — identical outcome, exactly-once."""
+    backend, clock = held_backend
     fault = Fault(on_name="repark:")
-    snap, domain, fault, _ = _run_raced_gather(backend, fault=fault)
+    snap, domain, fault, _ = _run_raced_gather(backend, clock, fault=fault)
     assert fault.armed is False, "the crash never landed on the repark touch"
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1178,21 +1162,15 @@ def test_durable_gather_crash_resume(backend):
 
 def test_durable_gather_runs_tools_concurrently(backend):
     """Parallel tools, serialized writes on BOTH concurrent paths (SQLite's write-lock,
-    Postgres's begin/complete lock): the two tools are IN FLIGHT AT THE SAME TIME — the lock
-    is released during the tool work, GIL-style.
-
-    An interval intersection, not a wall-clock bound. The bound asserted "finished fast enough
-    to have been concurrent", which is a claim about the machine rather than the code: it read
-    1.975s against a 0.55s ceiling at load average 15, and 0.49s alone, on the same commit."""
-    snap, domain, _, _ = _run_gather_wf(backend, delay=0.3)
+    Postgres's begin/complete lock): each tool waits at a two-party barrier, so the run
+    completes only when both tools are in flight at once."""
+    meeting = threading.Barrier(2)
+    snap, domain, _, _ = _run_gather_wf(backend, meeting=meeting)
+    assert not meeting.broken, "the tools ran one at a time"
     assert snap is not None
     assert snap.state == "completed"
     assert snap.result == {"results": [10, 20]}
-    spans = {name: (enter, done) for name, enter, done in domain.spans}
-    assert set(spans) == {"a", "b"}, f"expected both tools to run: {domain.spans}"
-    (a_in, a_out), (b_in, b_out) = spans["a"], spans["b"]
-    overlap = min(a_out, b_out) - max(a_in, b_in)
-    assert overlap > 0, f"tools did not overlap (serialized?): {domain.spans}"
+    assert sorted(domain.calls) == ["a", "b"]
 
 
 def test_ledger_is_append_only(backend):
@@ -2216,7 +2194,7 @@ def _waiting_while_the_deadline_passes(token: str, deadline: datetime):
     return wf
 
 
-def test_an_event_after_the_deadline_leaves_an_expired_wait_alone_on_both_engines(backend):
+def test_an_event_after_the_deadline_leaves_an_expired_wait_alone_on_both_engines(held_backend):
     """A wake is owed to the waits the clock has not passed, which is what the reference does.
 
     `absurd.emit_event` deletes waits whose `timeout_at` has passed and wakes only those still
@@ -2226,15 +2204,16 @@ def test_an_event_after_the_deadline_leaves_an_expired_wait_alone_on_both_engine
     nothing is settled when the emit arrives, which is the only window where the wake predicate
     decides the answer.
     """
+    backend, clock = held_backend
     token = _fresh_token()
-    deadline = datetime.now().astimezone() + timedelta(seconds=1)
+    deadline = clock.at + timedelta(hours=1)
     body = _waiting_while_the_deadline_passes(token, deadline)
     backend.register(f"bw-wake-{token}", body, None, Fault(), ())
     task_id = backend.spawn(f"bw-wake-{token}", "run-bw-wake")
     parked = backend.run_until_result(task_id)
     assert parked.state in ("waiting", "sleeping"), parked
 
-    _wait_past(deadline, margin=0.5)
+    clock.advance_to(deadline + A_SECOND)
     backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # after the deadline
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -2284,7 +2263,7 @@ def _parking_then_sleeping_then_waiting(
     return wf
 
 
-def test_a_wake_does_not_outlive_the_park_it_ended_on_both_engines(backend):
+def test_a_wake_does_not_outlive_the_park_it_ended_on_both_engines(held_backend):
     """A wake answers the wait it woke, and nothing later.
 
     The first wait parks and the clock ends it. The event then arrives, too late for that wait
@@ -2292,19 +2271,20 @@ def test_a_wake_does_not_outlive_the_park_it_ended_on_both_engines(backend):
     An engine that keeps the first park's registration answers the second from a wake spent
     several claims earlier.
     """
+    backend, clock = held_backend
     token = _fresh_token()
-    now = datetime.now().astimezone()
-    deadline, wake_at = now + timedelta(seconds=1), now + timedelta(seconds=2)
-    body = _parking_then_sleeping_then_waiting(token, deadline, wake_at, now + timedelta(hours=1))
+    now = clock.at
+    deadline, wake_at = now + timedelta(hours=1), now + timedelta(hours=2)
+    body = _parking_then_sleeping_then_waiting(token, deadline, wake_at, now + timedelta(hours=3))
     backend.register(f"bw-stale-wake-{token}", body, None, Fault(), ())
     task_id = backend.spawn(f"bw-stale-wake-{token}", "run-bw-stale-wake")
     parked = backend.run_until_result(task_id)
     assert parked.state in ("waiting", "sleeping"), parked
 
-    _wait_past(deadline, margin=0.2)
+    clock.advance_to(deadline + A_SECOND)
     backend.run_until_result(task_id)  # the clock ends the first wait; the sleep begins
     backend.emit_event(task_id, f"shared:{token}", {"ok": True})
-    _wait_past(wake_at, margin=0.2)
+    clock.advance_to(wake_at)
 
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -2419,17 +2399,6 @@ def _answering_after_a_sleep(token: str, first: datetime, wake_at: datetime, sec
     return wf
 
 
-PAST_THE_SKEW = 0.2
-"""How long after a deadline an emit has to land for BOTH engines to agree it is late.
-
-Each engine reads its OWN clock to decide: `time.time()` on the embedded engine,
-`absurd.current_time()` on the reference. They share a host here and the gap between them is
-sub-millisecond, so this is three orders of room. An empirical allowance, and not a bound for a
-loaded runner or a managed database: a history asserting the INSTANT rather than the rule puts
-both sides on the engine's clock instead (`tests/test_absurd_deadline_park.py`).
-`wiki/concepts/bounded-wait.md` carries the measurement and what widens it."""
-
-
 def _start(backend, token: str, body, tag: str):
     backend.register(f"bw-{tag}-{token}", body, None, Fault(), ())
     return backend.spawn(f"bw-{tag}-{token}", f"run-{tag}-{token}")
@@ -2463,23 +2432,8 @@ def _parks(backend, task_id) -> None:
     assert snap.state in PARKED_STATES, f"the wait did not park: {snap}"
 
 
-def _parked(backend, task_id) -> bool:
-    """Whether the wait parked, for a history that can widen its budget and try again."""
-    return backend.run_until_result(task_id).state in PARKED_STATES
-
-
-PARK_BUDGETS = (0.5, 2.0, 8.0)
-"""Deadlines to try for a history whose wait must PARK before the clock reaches it.
-
-The deadline is fixed before the spawn, so a loaded server can reach the wait after it has already
-passed: the wait expires on its first call, never parks, and the history quietly becomes the one
-where nothing parked. Widening on a miss is what `test_durable_gather_sleep_parks_then_wakes`
-does, and for the same reason — the fast path stays fast and a slow host costs seconds rather than
-a wrong measurement. Measured: 0.5 missed once in roughly four full-suite runs under `-n auto`."""
-
-
-def _settled_keeps_its_answer(backend, token, now):
-    body = _answering_then_parking(token, now - timedelta(seconds=2))
+def _settled_keeps_its_answer(backend, clock, token):
+    body = _answering_then_parking(token, clock.at - timedelta(seconds=2))
     task = _start(backend, token, body, "settled")
     _parks(backend, task)  # on the release, with the first wait already decided
     backend.emit_event(task, f"shared:{token}", {"ok": True})
@@ -2487,106 +2441,83 @@ def _settled_keeps_its_answer(backend, token, now):
     return _answer(backend, task)
 
 
-def _the_clock_reached_a_parked_wait(backend, token, now):
-    for budget in PARK_BUDGETS:
-        token = _fresh_token()
-        deadline = datetime.now().astimezone() + timedelta(seconds=budget)
-        task = _start(backend, token, _answering(token, deadline), f"clock{budget}")
-        if not _parked(backend, task):
-            continue
-        _wait_past(deadline, margin=PAST_THE_SKEW)
-        backend.emit_event(task, f"shared:{token}", {"ok": True})  # too late for this wait
-        return _answer(backend, task)
-    raise AssertionError(f"the wait never parked, on any of {PARK_BUDGETS}s")
+def _the_clock_reached_a_parked_wait(backend, clock, token):
+    deadline = clock.at + timedelta(hours=1)
+    task = _start(backend, token, _answering(token, deadline), "clock")
+    _parks(backend, task)
+    clock.advance_to(deadline + A_SECOND)
+    backend.emit_event(task, f"shared:{token}", {"ok": True})  # too late for this wait
+    return _answer(backend, task)
 
 
-def _its_event_reached_a_parked_wait(backend, token, now):
-    task = _start(backend, token, _answering(token, now + timedelta(hours=1)), "event")
+def _its_event_reached_a_parked_wait(backend, clock, token):
+    task = _start(backend, token, _answering(token, clock.at + timedelta(hours=1)), "event")
     _parks(backend, task)
     backend.emit_event(task, f"shared:{token}", {"ok": True})
     return _answer(backend, task)
 
 
-def _never_parked_with_its_event(backend, token, now):
-    task = _start(backend, token, _answering(token, now + timedelta(hours=1)), "stored")
+def _never_parked_with_its_event(backend, clock, token):
+    task = _start(backend, token, _answering(token, clock.at + timedelta(hours=1)), "stored")
     backend.emit_event(task, f"shared:{token}", {"ok": True})
     return _answer(backend, task)
 
 
-def _never_parked_past_its_deadline_with_its_event(backend, token, now):
-    task = _start(backend, token, _answering(token, now - timedelta(seconds=2)), "late-stored")
+def _never_parked_past_its_deadline_with_its_event(backend, clock, token):
+    deadline = clock.at - timedelta(seconds=2)
+    task = _start(backend, token, _answering(token, deadline), "late-stored")
     backend.emit_event(task, f"shared:{token}", {"ok": True})
     return _answer(backend, task)
 
 
-def _never_parked_past_its_deadline(backend, token, now):
-    task = _start(backend, token, _answering(token, now - timedelta(seconds=2)), "late")
+def _never_parked_past_its_deadline(backend, clock, token):
+    task = _start(backend, token, _answering(token, clock.at - timedelta(seconds=2)), "late")
     return _answer(backend, task)
 
 
-def _a_later_wait_on_the_same_claim(backend, token, now):
-    for budget in PARK_BUDGETS:
-        token = _fresh_token()
-        started = datetime.now().astimezone()
-        deadline = started + timedelta(seconds=budget)
-        body = _answering_after_a_wait(token, deadline, started + timedelta(hours=1))
-        task = _start(backend, token, body, f"again{budget}")
-        if not _parked(backend, task):
-            continue
-        _wait_past(deadline, margin=PAST_THE_SKEW)
-        backend.emit_event(task, f"shared:{token}", {"ok": True})
-        return _answer(backend, task)
-    raise AssertionError(f"the first wait never parked, on any of {PARK_BUDGETS}s")
+def _a_later_wait_on_the_same_claim(backend, clock, token):
+    deadline = clock.at + timedelta(hours=1)
+    body = _answering_after_a_wait(token, deadline, deadline + timedelta(hours=1))
+    task = _start(backend, token, body, "again")
+    _parks(backend, task)
+    clock.advance_to(deadline + A_SECOND)
+    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    return _answer(backend, task)
 
 
-def _a_later_wait_on_the_same_claim_without_one(backend, token, now):
+def _a_later_wait_on_the_same_claim_without_one(backend, clock, token):
     """History 7 with the emit removed, which is the whole difference.
 
     Nothing is ever emitted and the second deadline is an hour out, so the second ask has neither
     ending available to it and parks. An engine that reads the FIRST ask's wake here answers a
     wait nobody could have answered."""
-    for budget in PARK_BUDGETS:
-        token = _fresh_token()
-        started = datetime.now().astimezone()
-        deadline = started + timedelta(seconds=budget)
-        body = _answering_after_a_wait(token, deadline, started + timedelta(hours=1))
-        task = _start(backend, token, body, f"nofab{budget}")
-        if not _parked(backend, task):
-            continue
-        _wait_past(deadline, margin=PAST_THE_SKEW)
-        answered = _answer(backend, task)
-        # WHICH ask is parked, not merely that something is. The two asks park identically, so
-        # without this the row reads the same whether the run got past the first one or not.
-        settled = backend.checkpoint_states(task)
-        first = compose_key(t"event;shared:{Segment(token)}")
-        assert settled.get(first) == ["expired"], (
-            f"the run never got past its first ask: {sorted(k.stored() for k in settled)}"
-        )
-        return answered
-    raise AssertionError(f"the first wait never parked, on any of {PARK_BUDGETS}s")
+    deadline = clock.at + timedelta(hours=1)
+    body = _answering_after_a_wait(token, deadline, deadline + timedelta(hours=1))
+    task = _start(backend, token, body, "nofab")
+    _parks(backend, task)
+    clock.advance_to(deadline + A_SECOND)
+    answered = _answer(backend, task)
+    # WHICH ask is parked, not merely that something is. The two asks park identically, so
+    # without this the row reads the same whether the run got past the first one or not.
+    settled = backend.checkpoint_states(task)
+    first = compose_key(t"event;shared:{Segment(token)}")
+    assert settled.get(first) == ["expired"], (
+        f"the run never got past its first ask: {sorted(k.stored() for k in settled)}"
+    )
+    return answered
 
 
-def _a_later_wait_across_a_sleep(backend, token, now):
-    for budget in PARK_BUDGETS:
-        token = _fresh_token()
-        started = datetime.now().astimezone()
-        deadline = started + timedelta(seconds=budget)
-        wake_at = deadline + timedelta(seconds=budget + PAST_THE_SKEW + 4)
-        body = _answering_after_a_sleep(token, deadline, wake_at, started + timedelta(hours=1))
-        task = _start(backend, token, body, f"slept{budget}")
-        if not _parked(backend, task):
-            continue
-        _wait_past(deadline, margin=PAST_THE_SKEW)
-        backend.run_until_result(task)  # the clock ends the first wait, and the sleep begins
-        # The sleep has to still be AHEAD here, or the second ask is decided on the same claim
-        # and this history is its sibling wearing a longer name. A slow drain is exactly what the
-        # ladder absorbs, so this widens rather than raising.
-        if time.time() >= wake_at.timestamp():
-            continue
-        backend.emit_event(task, f"shared:{token}", {"ok": True})
-        _wait_past(wake_at, margin=0.2)
-        return _answer(backend, task)
-    raise AssertionError(f"the first wait never parked, on any of {PARK_BUDGETS}s")
+def _a_later_wait_across_a_sleep(backend, clock, token):
+    deadline = clock.at + timedelta(hours=1)
+    wake_at = deadline + timedelta(hours=1)
+    body = _answering_after_a_sleep(token, deadline, wake_at, wake_at + timedelta(hours=1))
+    task = _start(backend, token, body, "slept")
+    _parks(backend, task)
+    clock.advance_to(deadline + A_SECOND)
+    _parks(backend, task)  # the clock ends the first wait, and the sleep begins
+    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    clock.advance_to(wake_at)
+    return _answer(backend, task)
 
 
 BOUNDED_WAIT_TABLE: tuple[tuple[str, str, Any], ...] = (
@@ -2620,7 +2551,7 @@ whether a claim intervened. `parks` is an answer like the other two, so a row ca
 neither ending was reached."""
 
 
-def _reached(backend, run) -> str:
+def _reached(backend, clock, run) -> str:
     """The answer a history reached, or the reason it could not be measured.
 
     A history that checks it measured the history it names raises when it did not, and a raise
@@ -2632,21 +2563,22 @@ def _reached(backend, run) -> str:
     history that fails some other way. `BaseException` keeps propagating, so a `KeyboardInterrupt`
     still stops the run."""
     try:
-        return run(backend, _fresh_token(), datetime.now().astimezone())
+        return run(backend, clock, _fresh_token())
     except Exception as why:
         return f"unmeasurable: {type(why).__name__}: {why}"
 
 
-def test_a_history_that_raises_joins_the_offenders_rather_than_ending_the_table(backend):
+def test_a_history_that_raises_joins_the_offenders_rather_than_ending_the_table(held_backend):
     """The driver's promise, asked directly: one bad cell must not hide the cells after it."""
 
-    def raises(_backend, _token, _now) -> str:
+    def raises(_backend, _clock, _token) -> str:
         raise ValueError("this history could not run")
 
-    assert "unmeasurable: ValueError" in _reached(backend, raises)
+    backend, clock = held_backend
+    assert "unmeasurable: ValueError" in _reached(backend, clock, raises)
 
 
-def test_every_history_in_the_bounded_wait_table_answers_alike_on_both_engines(backend):
+def test_every_history_in_the_bounded_wait_table_answers_alike_on_both_engines(held_backend):
     """The whole table, as ONE assertion, so a cell is a row here rather than a gap.
 
     Each history is run and its answer collected; the offenders are what is asserted empty. A
@@ -2654,10 +2586,11 @@ def test_every_history_in_the_bounded_wait_table_answers_alike_on_both_engines(b
     nobody listed reports nothing at all. The second is why this exists: such defects surface one
     cell at a time.
     """
+    backend, clock = held_backend
     offenders = [
         (history, expected, answered)
         for history, expected, run in BOUNDED_WAIT_TABLE
-        if (answered := _reached(backend, run)) != expected
+        if (answered := _reached(backend, clock, run)) != expected
     ]
     assert offenders == [], f"{len(offenders)} of {len(BOUNDED_WAIT_TABLE)} histories: {offenders}"
 

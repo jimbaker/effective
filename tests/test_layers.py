@@ -11,6 +11,8 @@ failed attempt in the trace) is deferred and deliberately not exercised here: re
 proven against live/no-trace handlers only.
 """
 
+import time
+
 import pytest
 
 from effective import (
@@ -204,6 +206,9 @@ class _LocalCtx:
     def sleep_until(self, when, *, name: Key | None = None):
         raise NotImplementedError
 
+    def clock(self) -> float:
+        return time.time()
+
 
 class _FlakyDomain:
     """Fails the first AskLLM with a transient error, then succeeds."""
@@ -259,6 +264,9 @@ class _InlineAwaitCtx:
 
     def sleep_until(self, when, *, name: Key | None = None):
         raise NotImplementedError
+
+    def clock(self) -> float:
+        return time.time()
 
 
 class _ToolDomain:

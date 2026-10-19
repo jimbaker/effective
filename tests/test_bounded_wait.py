@@ -13,6 +13,7 @@ from typing import Any, get_args, get_origin, get_type_hints
 from uuid import uuid4
 
 import pytest
+from _clock import HeldClock
 from _conformance import review_name
 from _shapes import run
 
@@ -242,6 +243,9 @@ def test_a_ctx_that_waits_on_an_event_alone_refuses_by_name() -> None:
         def sleep_until(self, when: datetime, /, *, name: Key) -> None:
             return None
 
+        def clock(self) -> float:
+            return time.time()
+
     handler = DurableHandler(_EventOnly(), _Tool())
     with pytest.raises(NotImplementedError, match="waits on an event alone"):
         handler.run(_waits_until())
@@ -336,6 +340,9 @@ def test_the_capability_probe_reads_past_every_ctx_wrapper() -> None:
         def sleep_until(self, when: datetime, /, *, name: Key) -> None:
             return None
 
+        def clock(self) -> float:
+            return time.time()
+
     class _Clocked(_EventOnly):
         def await_until(self, name: Key, deadline: float, decided: Key, /) -> Any:
             return Expired()
@@ -367,6 +374,9 @@ def test_a_fork_childs_bounded_wait_parks_in_its_own_event_world() -> None:
 
         def sleep_until(self, when: datetime, /, *, name: Key) -> None:
             return None
+
+        def clock(self) -> float:
+            return time.time()
 
         def await_until(self, name: Key, deadline: float, decided: Key, /) -> Any:
             asked.append(name)
@@ -469,6 +479,9 @@ def test_a_viewer_reads_a_settled_wait_and_reports_an_open_one() -> None:
         def sleep_until(self, when: datetime, /, *, name: Key) -> None:
             return None
 
+        def clock(self) -> float:
+            return time.time()
+
         def peek_step(self, name: Key, /) -> tuple[bool, Any]:
             return (True, self._settled) if self._settled is not None else (False, None)
 
@@ -507,7 +520,7 @@ def test_a_wake_is_spent_by_the_wait_it_answers(tmp_path) -> None:
 
         # the deadline arrives, then the event does — too late to wake anyone, and in the store
         app.conn.execute(
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         app.emit_event("ev:x", {"n": 1})
         app.run_until_result(task)
@@ -565,6 +578,9 @@ def test_a_durable_forks_tail_refuses_a_wait_that_names_a_deadline() -> None:
         def sleep_until(self, when: datetime, /, *, name: Key) -> None:
             return None
 
+        def clock(self) -> float:
+            return time.time()
+
         def await_until(self, name: Key, deadline: float, decided: Key, /) -> Any:
             return Expired()
 
@@ -618,7 +634,7 @@ def test_a_reclaim_reads_the_store_rather_than_a_dead_claims_wake(tmp_path) -> N
 
         # the deadline arrives, and the emit that follows leaves a waiter the clock has passed
         app.conn.execute(
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         app.emit_event("ev:x", {"n": 1})
         assert _row(app, task) == ("waiting", "ev:x")
@@ -627,7 +643,7 @@ def test_a_reclaim_reads_the_store_rather_than_a_dead_claims_wake(tmp_path) -> N
         app.conn.execute(
             "UPDATE tasks SET state='running', claimed_by='dead', claim_expires_at=? "
             "WHERE task_id=?",
-            (time.time() - 1.0, str(task)),
+            (app.clock() - 1.0, str(task)),
         )
         snap = app.run_until_result(task)
         assert snap is not None
@@ -677,12 +693,12 @@ def test_a_reclaim_does_not_hand_the_next_attempt_a_spent_wake(tmp_path) -> None
         assert _row(app, task) == ("waiting", "ev:x")
 
         app.conn.execute(  # the deadline arrives, so the claim that follows is the clock's
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         with pytest.raises(BaseException, match="the worker died"):
             app.work_batch()
         app.conn.execute(  # and that claim's lease expires, holding the wake it spent
-            "UPDATE tasks SET claim_expires_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET claim_expires_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         for _ in range(5):
             app.work_batch()
@@ -702,11 +718,13 @@ def test_a_park_ended_by_a_sleep_leaves_no_wake_for_the_next_ask(tmp_path) -> No
     deletes the claim's clause survives THIS file without it, and this file is where the wake's
     lifetime is documented.
     """
-    app = SqliteApp(str(tmp_path / "slept.db"))
-    ends_at = datetime.now(UTC) + timedelta(seconds=0.3)
+    clock = HeldClock(datetime.now(UTC))
+    app = SqliteApp(str(tmp_path / "slept.db"), clock=clock)
+    ends_at = clock.at + timedelta(hours=1)
     # FIXED before the run, not read inside it: a workflow that computes its own wake time reads
     # the clock between yields, and every replay pushes the sleep further out.
-    wakes_at = datetime.now(UTC) + timedelta(seconds=0.6)
+    wakes_at = clock.at + timedelta(hours=2)
+    ahead = clock.at + timedelta(hours=3)
     try:
 
         @app.register_task("waiter")
@@ -714,7 +732,7 @@ def test_a_park_ended_by_a_sleep_leaves_no_wake_for_the_next_ask(tmp_path) -> No
             def wf():
                 yield from await_until(NAME, dict, deadline=ends_at)
                 yield from api_sleep_until(wakes_at)
-                second = yield from await_until(NAME, dict, deadline=AHEAD)
+                second = yield from await_until(NAME, dict, deadline=ahead)
                 return {"second": type(second).__name__}
 
             return DurableHandler(ctx, _Tool()).run(wf)
@@ -723,13 +741,11 @@ def test_a_park_ended_by_a_sleep_leaves_no_wake_for_the_next_ask(tmp_path) -> No
         app.work_batch()
         assert _row(app, task) == ("waiting", "ev:x")
 
-        while time.time() < ends_at.timestamp() + 0.05:
-            time.sleep(0.02)
+        clock.advance_to(ends_at + timedelta(seconds=1))
         app.work_batch()  # the clock ends the first wait, and the sleep begins
         assert _row(app, task)[0] == "sleeping"
 
-        while time.time() < wakes_at.timestamp() + 0.05:
-            time.sleep(0.02)
+        clock.advance_to(wakes_at)
         app.work_batch()
         state, registered = _row(app, task)
         assert (state, registered) == ("waiting", "ev:x"), (

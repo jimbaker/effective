@@ -6,13 +6,16 @@ import gc
 import inspect
 import json
 import os
+import socket
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
+from _witness import WatchedSocket
 
 from effective.cancel import Cancelled, CancelToken
 from effective.domain import AskLLM
@@ -239,6 +242,8 @@ class _Provider:
         self.silent = threading.Event()
         self.resume = threading.Event()
         self.client_gone = threading.Event()
+        self.replied = threading.Event()
+        self.left = threading.Event()
         self.released = threading.Event()
         self.spoke = threading.Event()
         provider = self
@@ -255,7 +260,7 @@ class _Provider:
                 stall = first if provider.calls == 1 else None
                 if stall == "headers":
                     provider.silent.set()
-                    provider.resume.wait(10)
+                    provider.resume.wait(SAFETY_NET)
                     provider.released.set()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -272,6 +277,9 @@ class _Provider:
                     self.wfile.flush()
                 except OSError:
                     provider.client_gone.set()
+                finally:
+                    if stall is not None:
+                        provider.replied.set()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -279,6 +287,11 @@ class _Provider:
     @property
     def url(self) -> str:
         return f"http://127.0.0.1:{self.server.server_address[1]}/v1"
+
+    def heard(self) -> bool:
+        """Whether the first call's reply ended on a client that had left, read once it ended."""
+        assert self.replied.wait(SAFETY_NET), "the first reply never ended"
+        return self.client_gone.is_set()
 
     def reply(self, send: Callable[[bytes], None], stall: str | None) -> None:
         """Everything but the last chunk; a `silent` stall never completes."""
@@ -291,12 +304,12 @@ class _Provider:
         if stall == "ended":  # the output cap reached, which is no answer
             send(INCOMPLETE)
             self.silent.set()
-            self.resume.wait(10)
+            self.resume.wait(SAFETY_NET)
             return
-        if stall == "headers":  # a reply long enough to notice a client that left
+        if stall == "headers":  # the rest of the reply, once the client's readers have ended
+            self.left.wait(SAFETY_NET)
             for _ in range(40):
                 send(_delta("x"))
-                threading.Event().wait(0.01)
         if stall == "silent":
             self.silent.set()
             self.resume.wait(SAFETY_NET)
@@ -308,7 +321,7 @@ class _Provider:
         send(COMPLETED)
         if stall == "end":
             self.silent.set()
-            self.resume.wait(10)
+            self.resume.wait(SAFETY_NET)
 
 
 type Readers = tuple[set[threading.Thread], set[asyncio.Task[Any]]]
@@ -348,6 +361,31 @@ FLAVORS: list[Flavor] = ["sync", "async"]
 """Each real-socket pin runs against the threaded caller and the asyncio one."""
 
 
+class _ReadingAfter(threading.Event):
+    """An event a client socket's read sets only once `after` is set, so a wait on it ends in a
+    read begun after `after`."""
+
+    def __init__(self, after: threading.Event | None) -> None:
+        super().__init__()
+        self.after = after
+
+    def set(self) -> None:
+        if self.after is None or self.after.is_set():
+            super().set()
+
+
+def _reading(monkeypatch: pytest.MonkeyPatch, after: threading.Event | None = None) -> Any:
+    """An event the threaded caller's socket sets as it enters a read begun once `after` is set.
+    The asyncio caller needs none: its cancel is a callback on the loop its reader runs on, so it
+    lands where the reader next awaits."""
+    reading = _ReadingAfter(after)
+    connect = socket.create_connection
+    monkeypatch.setattr(
+        socket, "create_connection", lambda *a, **k: WatchedSocket(connect(*a, **k), reading)
+    )
+    return reading
+
+
 def _client(flavor: Flavor, provider: _Provider) -> Any:
     openai = pytest.importorskip("openai")
     kind = openai.OpenAI if flavor == "sync" else openai.AsyncOpenAI
@@ -364,16 +402,18 @@ def _caller(flavor: Flavor, client: Any, token: CancelToken) -> ResponsesTurnCal
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
-def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(flavor: Flavor):
+def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
+    flavor: Flavor, monkeypatch: pytest.MonkeyPatch
+):
     """Measured by a review: with the reader blocked in `recv` when the cancel closed the stream,
     and the next call on the same client, the reader stayed asleep and the provider wrote its
-    whole reply. The face waits until the reader has taken the first delta, then a moment more
-    so the reader is in that read; on a machine too slow for that the test is weaker, never
-    wrong."""
+    whole reply. The face presses Esc once the reader has taken the first delta and, on the
+    threaded caller, entered its next read; the asyncio caller's cancel lands at its next await."""
     provider = _Provider()
     pooled = _client(flavor, provider)
     taken, token = threading.Event(), CancelToken()
     wrap = _Watched if flavor == "sync" else _AsyncWatched
+    in_read = _reading(monkeypatch, after=taken) if flavor == "sync" else taken
     seen: list[bool] = []
 
     def stream(**kwargs: Any) -> _Watched:
@@ -383,8 +423,7 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
     before = _readers()
 
     def face() -> None:
-        seen.append(taken.wait(SAFETY_NET))
-        threading.Event().wait(0.3)
+        seen.append(in_read.wait(SAFETY_NET))
         token.cancel()
 
     pressed = threading.Thread(target=face, name="face")
@@ -392,7 +431,7 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
     try:
         turn, _ = _caller(flavor, client, token)(ASK)
         pressed.join()
-        assert seen == [True], "the face pressed Esc before the reader took the first delta"
+        assert seen == [True], "the face pressed Esc before the reader was in its next read"
         assert turn == Cancelled(partial=ANSWER[:5])
         following, _ = _caller(flavor, client, CancelToken())(ASK)
         assert isinstance(following, AssistantTurn)
@@ -401,7 +440,7 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
         assert not provider.spoke.is_set(), "the reader ended only once the provider spoke"
     finally:
         provider.resume.set()
-    assert provider.client_gone.wait(3), "the provider never heard the client leave"
+    assert provider.heard(), "the provider never heard the client leave"
     provider.server.shutdown()
 
 
@@ -459,17 +498,17 @@ DELTA = frozenset({"response.output_text.delta"})
 
 
 def _cancelled_at_the_stall(
-    flavor: Flavor, first: Literal["headers", "end", "ended"]
+    flavor: Flavor, first: Literal["headers", "end", "ended"], monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Any, Any, float, bool]:
     """One call cancelled during the provider's stall: the turn, its usage, whether the op
     returned while the provider still held the headers, and whether the provider heard the client
     leave.
 
-    | `first`   | the face presses Esc                                     |
-    |-----------|----------------------------------------------------------|
-    | `headers` | 0.3s into the stall, while the request waits for headers |
-    | `end`     | once the reader has taken `response.completed`           |
-    | `ended`   | once the reader has taken `response.incomplete`          |
+    | `first`   | the face presses Esc                                            |
+    |-----------|-----------------------------------------------------------------|
+    | `headers` | once the stall holds the headers, and the threaded reader reads |
+    | `end`     | once the reader has taken `response.completed`                  |
+    | `ended`   | once the reader has taken `response.incomplete`                 |
     """
     provider = _Provider(first)
     client = _client(flavor, provider)
@@ -477,13 +516,15 @@ def _cancelled_at_the_stall(
     opened = client.responses.stream
     wrap = _Watched if flavor == "sync" else _AsyncWatched
     watched = SimpleNamespace(stream=lambda **kwargs: wrap(opened(**kwargs), completed, WATCHED))
+    before = _readers()
+    in_read = _reading(monkeypatch) if flavor == "sync" else provider.silent
 
     def face() -> None:
         if first in ("end", "ended"):
-            completed.wait(10)
+            completed.wait(SAFETY_NET)
         else:
-            provider.silent.wait(10)
-            threading.Event().wait(0.3)  # the reader into its wait for headers
+            provider.silent.wait(SAFETY_NET)
+            in_read.wait(SAFETY_NET)
         token.cancel()
 
     pressed = threading.Thread(target=face, name="face")
@@ -494,22 +535,29 @@ def _cancelled_at_the_stall(
         pressed.join()
     finally:
         provider.resume.set()
-    heard = provider.client_gone.wait(3)
-    provider.server.shutdown()
+        running = _join(before)
+        provider.left.set()
+        heard = provider.heard()
+        provider.server.shutdown()
+    assert running == (set(), set()), "the reader outlived the call"
     return turn, usage, held, heard
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
-def test_a_cancel_before_the_first_byte_returns_at_once(flavor: Flavor):
-    turn, _, held, heard = _cancelled_at_the_stall(flavor, "headers")
+def test_a_cancel_before_the_first_byte_returns_at_once(
+    flavor: Flavor, monkeypatch: pytest.MonkeyPatch
+):
+    turn, _, held, heard = _cancelled_at_the_stall(flavor, "headers", monkeypatch)
     assert turn == Cancelled(partial="")
     assert held, "the op waited for headers the stop could not reach"
     assert heard, "the reader read the whole reply for a client that had left"
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
-def test_a_reply_completed_before_the_cancel_is_the_answer_and_is_metered(flavor: Flavor):
-    turn, usage, _, _ = _cancelled_at_the_stall(flavor, "end")
+def test_a_reply_completed_before_the_cancel_is_the_answer_and_is_metered(
+    flavor: Flavor, monkeypatch: pytest.MonkeyPatch
+):
+    turn, usage, _, _ = _cancelled_at_the_stall(flavor, "end", monkeypatch)
     assert isinstance(turn, AssistantTurn)
     assert turn.answer == "hello"
     assert (usage.prompt_tokens, usage.completion_tokens) == (3, 2)
@@ -605,9 +653,11 @@ def test_an_async_call_with_no_token_parses_on_the_loop():
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
-def test_a_reply_that_ended_incomplete_before_the_stop_is_not_a_cancel(flavor: Flavor):
+def test_a_reply_that_ended_incomplete_before_the_stop_is_not_a_cancel(
+    flavor: Flavor, monkeypatch: pytest.MonkeyPatch
+):
     with pytest.raises(RuntimeError, match="without completing"):
-        _cancelled_at_the_stall(flavor, "ended")
+        _cancelled_at_the_stall(flavor, "ended", monkeypatch)
 
 
 def test_an_async_call_after_the_cancel_sends_nothing():
@@ -633,20 +683,23 @@ def test_a_cancelled_error_nobody_asked_for_is_not_a_stop():
 def test_an_error_after_the_stop_is_retrieved_not_logged():
     loop, logged, token = LoopThread(), [], CancelToken()
     loop.loop.set_exception_handler(lambda _, context: logged.append(context))
-    started = threading.Event()
+    started, tasks = threading.Event(), []
 
     async def unwinding() -> None:
         try:
+            tasks.append(asyncio.current_task())
             started.set()
             await asyncio.sleep(10)
         finally:
             raise OSError("the cleanup failed")
 
-    threading.Thread(target=lambda: (started.wait(5), token.cancel())).start()
+    async def ended(task: asyncio.Task[Any]) -> None:
+        await asyncio.wait([task])  # its callbacks run in the order added, the retrieval first
+
+    threading.Thread(target=lambda: (started.wait(SAFETY_NET), token.cancel())).start()
     with pytest.raises(Stopped):
         loop.run(unwinding(), token)
-    threading.Event().wait(0.2)
-    loop.run(asyncio.sleep(0))  # the loop has run the task's callbacks
+    loop.run(ended(tasks.pop()))
     gc.collect()  # an unretrieved exception is logged when its task is collected
     loop.run(asyncio.sleep(0))
     assert logged == []
@@ -682,7 +735,17 @@ def test_a_reply_capped_with_no_stop_raises_as_either_caller(flavor: Flavor):
         provider.server.shutdown()
 
 
-class _ResetAtOnce(CancelToken):
+class _Registered(CancelToken):
+    """A token that cancels itself on another thread once a stop is registered on it."""
+
+    @contextmanager
+    def on_cancel(self, stop: Callable[[], None]) -> Generator[None]:
+        with super().on_cancel(stop):
+            threading.Thread(target=self.cancel).start()
+            yield
+
+
+class _ResetAtOnce(_Registered):
     """A token the face resets the instant it cancels: its flag never reads set."""
 
     @property
@@ -692,25 +755,23 @@ class _ResetAtOnce(CancelToken):
 
 def test_a_stop_is_a_stop_though_the_token_was_reset_at_once():
     token = _ResetAtOnce()
-    threading.Timer(0.1, token.cancel).start()
     with pytest.raises(Stopped):
         shared_loop().run(asyncio.sleep(10), token)
 
 
 def test_a_coroutine_cancelled_before_its_first_step_is_closed_not_abandoned():
-    loop, token = LoopThread(), CancelToken()
+    loop, token = LoopThread(), _Registered()
     release = threading.Event()
-    loop.loop.call_soon_threadsafe(release.wait, 5)  # the loop is busy, so no task starts yet
+    loop.loop.call_soon_threadsafe(release.wait, SAFETY_NET)  # busy, so no task starts yet
 
     async def never() -> None:
         pass
 
     coroutine = never()
-    threading.Timer(0.1, token.cancel).start()
     with pytest.raises(Stopped):
         loop.run(coroutine, token)
     release.set()
-    loop.run(asyncio.sleep(0.05))
+    loop.run(asyncio.sleep(0))  # the loop runs what the stop queued before this sleep
     assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
 
 

@@ -33,7 +33,7 @@ from effective.govern import govern
 from effective.handlers.durable import DurableHandler
 from effective.keys import Segment
 from effective.ledgerread import sqlite_payloads
-from effective.parked import answer, read_sqlite_parked_conn
+from effective.parked import answer
 
 from .ar import REMIND, Round
 from .cases import CASES, Case
@@ -115,7 +115,7 @@ def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Pat
         params = {"run_id": run_id} | manifest.params()
         task_id = app.spawn("resolve", params)
         done = app.run_until_result(task_id)
-        while parked := [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == task_id]:
+        while parked := [p for p in app.parked() if p.task_id == task_id]:
             rows = sqlite_payloads(app.conn, run_id)
             asked = [row for row in rows if row["kind"] == ASKED]
             print("asked:    ", asked[-1]["ask"], *asked[-1]["detail"])

@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from _clock import HeldClock
 from _conformance import private
 from _durable import DSN
 from _sweep import InOrder
@@ -52,7 +53,6 @@ from effective.engines.absurd import (
 )
 from effective.engines.sqlite import SqliteApp
 from effective.govern import Refused
-from effective.handlers import base
 from effective.handlers.admission import RaceState
 from effective.handlers.base import Attempt, failing_leaf
 from effective.handlers.durable import DurableHandler, SeedingCtx
@@ -775,6 +775,10 @@ def fail(op):
     raise TimeoutError(op.name)
 
 
+BEFORE, PAST = datetime.fromtimestamp(0, UTC), datetime.fromtimestamp(20, UTC)
+"""Where the race rows' held clock starts, and where it moves once the deadline at 10 is behind
+it."""
+
 type Case = Callable[[pytest.MonkeyPatch], tuple[Any, Tools, tuple[Any, ...]]]
 
 
@@ -809,11 +813,12 @@ def a_schema_default_fills_what_the_record_lacked(monkeypatch):
 
 
 def a_race_deadline_passes_between_attempts(monkeypatch):
-    starts = []
-    monkeypatch.setattr(base, "race_time", lambda: 0.0 if len(starts) == 1 else 20.0)
+    clock, starts = HeldClock(BEFORE).on_races(monkeypatch), []
 
     def timed():
         starts.append(1)
+        if len(starts) == 2:
+            clock.advance_to(PAST)
         answer = yield from race([reads_missing], deadline=datetime.fromtimestamp(10, UTC))
         return type(answer).__name__
 
@@ -875,11 +880,12 @@ def test_a_code_error_a_retry_changes_completes_on_the_next_attempt(engine, monk
 
 
 def a_race_deadline_passing_before_the_third_attempt(monkeypatch):
-    starts = []
-    monkeypatch.setattr(base, "race_time", lambda: 0.0 if len(starts) < 3 else 20.0)
+    clock, starts = HeldClock(BEFORE).on_races(monkeypatch), []
 
     def timed():
         starts.append(1)
+        if len(starts) == 3:
+            clock.advance_to(PAST)
         answer = yield from race([reads_missing], deadline=datetime.fromtimestamp(10, UTC))
         return type(answer).__name__
 
@@ -948,8 +954,13 @@ def refuse_branch():
 def a_fresh_failure_as_the_deadline_passes(monkeypatch):
     """The clock passes the deadline once the branch has failed, so attempt 1 ends with no branch
     left to win, and attempt 2 finds the deadline behind it before any branch runs."""
-    tools = Tools({"fresh_fail": fail})
-    monkeypatch.setattr(base, "race_time", lambda: 20.0 if tools.calls else 0.0)
+    clock = HeldClock(BEFORE).on_races(monkeypatch)
+
+    def fail_past_the_deadline(op):
+        clock.advance_to(PAST)
+        fail(op)
+
+    tools = Tools({"fresh_fail": fail_past_the_deadline})
 
     def timed():
         answer = yield from race([fresh_fail_branch], deadline=datetime.fromtimestamp(10, UTC))

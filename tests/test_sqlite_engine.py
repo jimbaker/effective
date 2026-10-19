@@ -10,13 +10,13 @@ import json
 import sqlite3
 import subprocess
 import sys
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import pytest
+from _clock import HeldClock
 
 import effective
 from effective.api import await_until as api_await_until
@@ -26,7 +26,6 @@ from effective.engines.sqlite import (
     ClaimLost,
     IncompatibleStore,
     SqliteApp,
-    SqliteTaskContext,
     _Suspend,
     enable_wal,
 )
@@ -97,7 +96,7 @@ def test_expired_lease_running_task_is_reclaimed():
     # simulate a worker that claimed then died mid-run: 'running' with a lease already expired.
     app.conn.execute(
         "UPDATE tasks SET state='running', claimed_by='dead', claim_expires_at=? WHERE task_id=?",
-        (time.time() - 100, tid),
+        (app.clock() - 100, tid),
     )
     snap = app.run_until_result(tid)
     assert snap is not None
@@ -111,8 +110,8 @@ def test_expired_lease_running_task_is_reclaimed():
 def test_poison_task_reclaim_is_capped_at_max_attempts():
     """A worker that repeatedly dies with no exception reaching work_batch (process kill / DO
     eviction) leaves the task 'running'; the reclaim must NOT loop forever. Once attempts are
-    exhausted the reclaim path fails it terminally. (Fresh-eyes review #4 reproduced an uncapped
-    reclaim — attempt climbing past max_attempts, never terminal.)"""
+    exhausted the reclaim path fails it terminally: an uncapped reclaim climbs past
+    max_attempts and never ends."""
     app = SqliteApp()
 
     @app.register_task("t")
@@ -125,7 +124,7 @@ def test_poison_task_reclaim_is_capped_at_max_attempts():
     for _ in range(6):
         app.conn.execute(
             "UPDATE tasks SET state='running', claim_expires_at=? WHERE task_id=?",
-            (time.time() - 100, tid),
+            (app.clock() - 100, tid),
         )
         app._claim()
         final = app.conn.execute(
@@ -142,8 +141,8 @@ def test_poison_task_reclaim_is_capped_at_max_attempts():
 
 def test_poison_body_runs_max_attempts_regardless_of_death_mode():
     """`max_attempts` must mean the same number of body executions whether the worker fails
-    cleanly (exception reaches work_batch) or dies silently (left 'running' + expired). Fixes
-    an off-by-one where silent death ran the body one extra time. (Fresh-eyes review #5.)"""
+    cleanly (exception reaches work_batch) or dies silently (left 'running' + expired), so a
+    silent death runs the body no extra time."""
 
     def clean_failure_execs(max_attempts: int) -> int:
         app = SqliteApp()
@@ -178,7 +177,7 @@ def test_poison_body_runs_max_attempts_regardless_of_death_mode():
             n[0] += 1  # the body executed once (then the worker died with no exception)
             app.conn.execute(
                 "UPDATE tasks SET state='running', claim_expires_at=? WHERE task_id=?",
-                (time.time() - 100, tid),
+                (app.clock() - 100, tid),
             )
         app.close()
         return n[0]
@@ -200,7 +199,7 @@ def test_valid_lease_running_task_is_not_stolen():
     tid = app.spawn("t", {"run_id": "r"})
     app.conn.execute(
         "UPDATE tasks SET state='running', claim_expires_at=? WHERE task_id=?",
-        (time.time() + 100, tid),
+        (app.clock() + 100, tid),
     )
     assert app.work_batch() is False  # nothing claimable
     snap = app.fetch_task_result(tid)
@@ -231,8 +230,9 @@ def test_sleep_until_past_returns_immediately():
 def test_sleep_until_future_parks_then_resumes():
     """A future deadline parks the task ('sleeping', worker released); once the deadline
     passes a later work_batch claims and completes it — durable timer across the gap."""
-    app = SqliteApp()
-    when = datetime.fromtimestamp(time.time() + 0.15, tz=UTC)
+    clock = HeldClock(datetime.now(UTC))
+    app = SqliteApp(clock=clock)
+    when = clock.at + timedelta(hours=1)
 
     @app.register_task("sf")
     def task(params, ctx):
@@ -247,7 +247,7 @@ def test_sleep_until_future_parks_then_resumes():
     assert parked is not None
     assert parked.state == "sleeping"
 
-    time.sleep(0.2)
+    clock.advance_to(when)
     done = app.run_until_result(tid)
     assert done is not None
     assert done.state == "completed"
@@ -430,9 +430,9 @@ def test_a_store_from_the_previous_engine_still_REPLAYS(tmp_path):
 
     A bench `task.db` is a PAID run kept so scoring can re-run for free
     (`contrastbench.replay_structured` reopens the file and drives `DurableHandler` with an
-    exploding LLM). The first version of the compat check refused at
-    `SqliteApp()` construction, which would have made every one unreplayable and their
-    regeneration a model bill — the exact cost replay-for-free exists to avoid.
+    exploding LLM). A compat check that refused at `SqliteApp()` construction would make
+    every one unreplayable and its regeneration a model bill, the exact cost replay-for-free
+    exists to avoid.
 
     Nothing about the old shape actually obstructs a replay: it writes no `tasks` row, SQLite is
     dynamically typed, and the checkpoint lookup binds a `Key` as text through the adapter, which
@@ -445,7 +445,7 @@ def test_a_store_from_the_previous_engine_still_REPLAYS(tmp_path):
     assert app.legacy_store  # recognized, not rejected
 
     (task_id,) = [r[0] for r in app.conn.execute("SELECT task_id FROM tasks")]
-    ctx = SqliteTaskContext(app.conn, task_id, app.write_lock)
+    ctx = app.context(task_id)
 
     def _must_not_run():
         raise AssertionError("the thunk re-ran — this was supposed to replay from the checkpoint")
@@ -566,10 +566,9 @@ def test_a_read_only_observer_still_opens_a_WAL_store_after_an_unclean_exit(tmp_
     including after a crash left `-wal`/`-shm` behind, which is precisely when someone reaches
     for `read_sqlite_parked`. SQLite recovers them.
 
-    **The writer crashes in a SUBPROCESS, and that is the whole test.** The first version kept
-    the writing `SqliteApp` alive in this process and called that "modelling the crash", so a
-    live connection was holding the `-shm` the entire time and the test would have passed even
-    if the stated property were false — an instrument that could not fail. `os._exit` in a child
+    **The writer crashes in a SUBPROCESS, and that is the whole test.** A writing `SqliteApp`
+    kept alive in this process holds the `-shm` the entire time, so the test would pass even if
+    the stated property were false. `os._exit` in a child
     is the only way to leave the sidecars behind with genuinely nobody attached."""
     path = tmp_path / "live.db"
     src = str(Path(effective.__file__).resolve().parents[1])
@@ -707,7 +706,7 @@ def test_a_deadline_already_past_expires_without_parking(tmp_path: Path) -> None
     app = SqliteApp(str(tmp_path / "past.db"))
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() - 1.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() - 1.0, seen)
         app.work_batch()
         snap = app.fetch_task_result(task)
         assert snap is not None
@@ -723,7 +722,7 @@ def test_a_park_records_its_deadline(tmp_path: Path) -> None:
     app = SqliteApp(str(tmp_path / "records.db"))
     try:
         seen: list[Any] = []
-        deadline = time.time() + 3600.0
+        deadline = app.clock() + 3600.0
         task = _waits_until(app, "ev:x", deadline, seen)
         app.work_batch()
         row = app.conn.execute(
@@ -737,21 +736,17 @@ def test_a_park_records_its_deadline(tmp_path: Path) -> None:
         app.close()
 
 
-def test_a_waiting_task_whose_deadline_passed_is_claimable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_waiting_task_whose_deadline_passed_is_claimable(tmp_path: Path) -> None:
     """The claim half. One clock drives the claim and the body, so the deadline passes for
     both together, and the pin states a claim rule rather than a duration."""
-    app = SqliteApp(str(tmp_path / "due.db"))
+    clock = HeldClock(datetime.now(UTC))
+    app = SqliteApp(str(tmp_path / "due.db"), clock=clock)
     try:
-        base = time.time()
-        clock = [base]
-        monkeypatch.setattr(time, "time", lambda: clock[0])
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", base + 1.0, seen)
+        task = _waits_until(app, "ev:x", clock() + 1.0, seen)
         app.work_batch()
         assert app.work_batch() is False, "a park whose deadline is future was claimed early"
-        clock[0] = base + 2.0
+        clock.advance(timedelta(seconds=2))
         assert app.work_batch() is True, "a park whose deadline passed was not claimable"
         snap = app.fetch_task_result(task)
         assert snap is not None
@@ -768,7 +763,7 @@ def test_an_event_before_the_deadline_arrives_with_its_payload(tmp_path: Path) -
     app, emitter = SqliteApp(path), SqliteApp(path)
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() + 30.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() + 30.0, seen)
         app.work_batch()
         parked = app.fetch_task_result(task)
         assert parked is not None
@@ -824,7 +819,7 @@ def test_a_wait_that_expired_stays_expired_when_its_event_arrives_late(tmp_path:
 
         @app.register_task("waiter")
         def waiter(params: dict[str, Any], ctx: Any) -> Any:
-            seen.append(ctx.await_until(Key.parse("ev:a"), time.time() - 1.0, _slot("ev:a")))
+            seen.append(ctx.await_until(Key.parse("ev:a"), app.clock() - 1.0, _slot("ev:a")))
             return ctx.await_event(Key.parse("ev:b"))
 
         task = app.spawn("waiter", {})
@@ -859,7 +854,7 @@ def test_an_event_landing_while_the_park_is_recorded_leaves_the_task_claimable(
 
         @app.register_task("waiter")
         def waiter(params: dict[str, Any], ctx: Any) -> Any:
-            return ctx.await_until(Key.parse("ev:x"), time.time() + 3600.0, _slot("ev:x"))
+            return ctx.await_until(Key.parse("ev:x"), app.clock() + 3600.0, _slot("ev:x"))
 
         task = app.spawn("waiter", {})
         real = app.conn.execute
@@ -882,7 +877,7 @@ def test_an_event_landing_while_the_park_is_recorded_leaves_the_task_claimable(
         assert row[0] == "ready"
         # BOTH bounds. `<= now` alone is satisfied by 0, which is the value to rule out: a ready
         # task stamped 0 is due, and outranks every waiter the clock has passed.
-        assert 0 < row[1] <= time.time(), f"a ready task carries {row[1]} for its due instant"
+        assert 0 < row[1] <= app.clock(), f"a ready task carries {row[1]} for its due instant"
         assert app.work_batch() is True, "a ready task holding its event was not claimable"
     finally:
         emitter.close()
@@ -934,12 +929,12 @@ def test_a_task_whose_deadline_passed_is_not_reported_as_parked(tmp_path: Path) 
     app = SqliteApp(path)
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() + 3600.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() + 3600.0, seen)
         app.work_batch()
         assert [p.task_id for p in read_sqlite_parked(path)] == [task], "a live park should list"
 
         app.conn.execute(
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         assert read_sqlite_parked(path) == (), "a claimable task was reported as parked"
     finally:
@@ -963,7 +958,7 @@ def test_await_until_under_a_prefix_parks_on_the_prefixed_name(tmp_path: Path) -
         def waiter(params: dict[str, Any], ctx: Any) -> Any:
             inner = _PrefixedCtx(ctx, "gather:0,1;")
             try:
-                return inner.await_until(Key.parse("ev:x"), time.time() + 3600.0, _slot("ev:x"))
+                return inner.await_until(Key.parse("ev:x"), app.clock() + 3600.0, _slot("ev:x"))
             except Exception:
                 parked.append(str(app.conn.execute("SELECT waiting_event FROM tasks").fetchone()))
                 raise
@@ -998,11 +993,11 @@ def test_a_claim_takes_the_task_that_came_due_first(tmp_path: Path) -> None:
             ran.append("ready")
             return "done"
 
-        parked = app.spawn("waiter", {"deadline": time.time() + 3600.0})
+        parked = app.spawn("waiter", {"deadline": app.clock() + 3600.0})
         app.work_batch()
         app.conn.execute(
             "UPDATE tasks SET available_at=? WHERE task_id=?",
-            (time.time() - 10.0, str(parked)),
+            (app.clock() - 10.0, str(parked)),
         )
         app.spawn("ready", {})
 
@@ -1023,7 +1018,7 @@ def test_a_woken_task_carries_the_instant_it_was_woken(tmp_path: Path) -> None:
     app = SqliteApp(str(tmp_path / "woken.db"))
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() + 3600.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() + 3600.0, seen)
         app.work_batch()
         assert _state_of(app, task) == "waiting"
 
@@ -1032,7 +1027,7 @@ def test_a_woken_task_carries_the_instant_it_was_woken(tmp_path: Path) -> None:
             "SELECT state, available_at FROM tasks WHERE task_id=?", (str(task),)
         ).fetchone()
         assert state == "ready"
-        assert 0 < available_at <= time.time(), f"the wake wrote {available_at}"
+        assert 0 < available_at <= app.clock(), f"the wake wrote {available_at}"
     finally:
         app.close()
 
@@ -1049,16 +1044,15 @@ def test_an_emit_past_a_deadline_leaves_the_waiter_where_it_was(tmp_path: Path) 
     registration. Asserting the outcome instead cannot see this: the task is claimable by its own
     deadline either way, so it reaches `Expired` down two different paths. The row says which.
     """
-    app = SqliteApp(str(tmp_path / "skipped.db"))
+    clock = HeldClock(datetime.now(UTC))
+    app = SqliteApp(str(tmp_path / "skipped.db"), clock=clock)
     try:
         seen: list[Any] = []
-        deadline = time.time() + 0.3
-        task = _waits_until(app, "ev:x", deadline, seen)
+        task = _waits_until(app, "ev:x", clock() + 3600.0, seen)
         app.work_batch()
         assert _state_of(app, task) == "waiting"
 
-        while time.time() < deadline + 0.05:
-            time.sleep(0.02)
+        clock.advance(timedelta(hours=1, seconds=1))
         app.emit_event("ev:x", {"n": 1})
 
         state, waiting_event = app.conn.execute(
@@ -1086,25 +1080,25 @@ def test_a_wake_survives_a_claim_that_did_not_settle_it(
     app = SqliteApp(str(tmp_path / "wake.db"))
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() + 3600.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() + 3600.0, seen)
         app.work_batch()
         assert _state_of(app, task) == "waiting"
         # The deadline arrives, so the emit that follows wakes nobody and the row keeps its
         # registration — the state a task claimed by its own deadline runs in.
         app.conn.execute(
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
         app.emit_event("ev:x", {"n": 1})
         assert _state_of(app, task) == "waiting"
 
-        behind = time.time() - 1.0
-        losing = SqliteTaskContext(app.conn, task, app.write_lock)
+        behind = app.clock() - 1.0
+        losing = app.context(task)
         monkeypatch.setattr(losing, "settle", _raises_claim_lost)
         with pytest.raises(ClaimLost):
             losing.await_until(Key.parse("ev:x"), behind, _slot("ev:x"))
         monkeypatch.undo()
 
-        retrying = SqliteTaskContext(app.conn, task, app.write_lock)
+        retrying = app.context(task)
         outcome = retrying.await_until(Key.parse("ev:x"), behind, _slot("ev:x"))
         read_the_store = f"the next claim read the store instead of its wake: {outcome}"
         assert outcome == Expired(), read_the_store
@@ -1131,10 +1125,10 @@ def test_a_park_that_ended_stops_reading_as_a_park(tmp_path: Path) -> None:
     from effective.parked import read_sqlite_parked_conn
     from effective.runs import read_sqlite_runs_conn
 
-    app = SqliteApp(str(tmp_path / "ended.db"))
-    ends_at = datetime.now(UTC) + timedelta(seconds=0.3)
-    _deadline = ends_at.timestamp()
-    wake_at = datetime.now(UTC) + timedelta(hours=1)
+    clock = HeldClock(datetime.now(UTC))
+    app = SqliteApp(str(tmp_path / "ended.db"), clock=clock)
+    ends_at = clock.at + timedelta(hours=1)
+    wake_at = clock.at + timedelta(hours=2)
     try:
 
         @app.register_task("waiter")
@@ -1149,17 +1143,16 @@ def test_a_park_that_ended_stops_reading_as_a_park(tmp_path: Path) -> None:
         task = app.spawn("waiter", {})
         app.work_batch()
         assert _state_of(app, task) == "waiting", "the wait must PARK, or it leaves nothing behind"
-        while time.time() < _deadline + 0.05:
-            time.sleep(0.02)
+        clock.advance_to(ends_at + timedelta(seconds=1))
         app.work_batch()  # the clock ends the park, then the sleep begins
 
         assert _state_of(app, task) == "sleeping"
         # The READERS, not the column: a registration left standing is untidy, and a reader that
         # reports a park nobody is in is the defect. `read_sqlite_parked` already asks for
         # `state='waiting'`; these two are its siblings, and they did not.
-        assert park_name(app.conn, task) is None
+        assert park_name(app.conn, task, clock=app.clock) is None
         assert [r.waiting_on for r in read_sqlite_runs_conn(app.conn)] == [None]
-        assert read_sqlite_parked_conn(app.conn) == ()
+        assert read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
     finally:
         app.close()
 
@@ -1182,15 +1175,17 @@ def test_a_park_a_deadline_has_passed_is_not_a_park_to_key_a_grant_on(tmp_path: 
     app = SqliteApp(str(tmp_path / "grant.db"))
     try:
         seen: list[Any] = []
-        task = _waits_until(app, "ev:x", time.time() + 3600.0, seen)
+        task = _waits_until(app, "ev:x", app.clock() + 3600.0, seen)
         app.work_batch()
         assert _state_of(app, task) == "waiting"
         app.conn.execute(
-            "UPDATE tasks SET available_at=? WHERE task_id=?", (time.time() - 1.0, str(task))
+            "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
 
-        assert read_sqlite_parked_conn(app.conn) == ()
-        assert park_name(app.conn, task) is None, "a grant keyed on a park nobody can answer"
+        assert read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
+        assert park_name(app.conn, task, clock=app.clock) is None, (
+            "a grant keyed on a park nobody can answer"
+        )
         assert [r.waiting_on for r in read_sqlite_runs_conn(app.conn)] == ["ev:x"]
     finally:
         app.close()

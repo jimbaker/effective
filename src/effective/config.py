@@ -32,7 +32,7 @@ class _LazyImport(TypedDict):
 
 _SHAPES: tuple[tuple[re.Pattern[str], TypeAdapter[Any]], ...] = (
     (
-        re.compile(r"_srcs$|^extra_paths|^private_ops_nouns$|_exempt$|^app_tables$"),
+        re.compile(r"_srcs$|^extra_paths|^private_ops_nouns$|_exempt$|^app_tables$|^start_first$"),
         TypeAdapter(list[str]),
     ),
     (re.compile(r"^seam_forbidden$"), TypeAdapter(dict[str, list[str]])),

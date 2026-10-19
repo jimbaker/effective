@@ -6,13 +6,13 @@ the roles compose, they inherit every refusal rather than restating it, and the 
 the FIELD behind the wrapper so `explain` still names a producer.
 """
 
-from pathlib import Path
 
 import pytest
 
 from effective.keys import Index, Key, Name, Role, Run, Segment, Subject, compose_key
 from effective.keys.registry import KeyMap
 from effective.lint import (
+    _expanded,
     check_coordinate_roles,
     check_coordinate_roles_source,
     check_python_codegen,
@@ -318,7 +318,7 @@ def test_the_excluded_tree_is_measured_rather_than_described():
     shipped = ("src", "examples")
     excluded = lint.NOT_COORDINATE_ROLE_SCANNED
     assert [k for k in excluded if k in shipped or k.startswith("src")] == []
-    scanned = [f for root in ("src", "examples") for f in sorted(Path(root).rglob("*.py"))]
+    scanned = _expanded(shipped)
     assert {p.parts[0] for p in scanned} == {"src", "examples"}, "every root was reached"
     assert check_coordinate_roles(["src", "examples"]) == []
 

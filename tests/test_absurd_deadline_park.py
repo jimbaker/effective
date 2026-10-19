@@ -13,11 +13,13 @@ reach a deadline, so a loaded host cannot turn it into a different measurement.
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import psycopg
 import pytest
-from _durable import DSN, absurd, clock_at, pg_ready
+from _clock import HeldClock
+from _durable import DSN, absurd, pg_ready
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
@@ -34,11 +36,11 @@ pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (j
 A_DEADLINE_THE_ROUNDING_WOULD_MOVE = 3600.5
 """Seconds out, chosen with a fractional part: `ceil` moves it by half a second."""
 
-A_BREATH = 0.05
-"""Seconds out, so `ceil` leaves most of a second of rounding for an emit to land in."""
+HALF_A_SECOND = timedelta(seconds=0.5)
+"""How far past the claim a deadline sits, so `ceil` moves the park half a second past it."""
 
-HELD_FOR = 0.3
-"""How long the deadline write is held: past the deadline, and well short of the rounding."""
+SAFETY_NET = 20.0
+"""Seconds a poll waits for a condition before failing the test; no verdict turns on it."""
 
 TOLERANCE = timedelta(milliseconds=1)
 """What a round trip through `to_timestamp` and back may cost. The defect measures 0.5 s."""
@@ -53,6 +55,27 @@ class _NoDomain:
 
     def run(self, op):
         raise AssertionError(f"no domain op belongs in this workflow: {op}")
+
+
+def _until(condition: Callable[[], bool]) -> None:
+    """Poll a condition the server holds, which no event announces."""
+    ends = time.monotonic() + SAFETY_NET
+    while not condition():
+        assert time.monotonic() < ends, "the condition never held"
+        time.sleep(0.005)
+
+
+def _backend(conn: psycopg.Connection) -> int:
+    row = conn.execute("SELECT pg_backend_pid()").fetchone()
+    assert row is not None
+    return row[0]
+
+
+def _waiting_on_a_lock(conn: psycopg.Connection, pid: int) -> bool:
+    row = conn.execute(
+        t"SELECT wait_event_type FROM pg_stat_activity WHERE pid = {pid}"
+    ).fetchone()
+    return row is not None and row[0] == "Lock"
 
 
 @pytest.fixture
@@ -105,10 +128,10 @@ def test_a_parked_bounded_wait_registers_the_deadline_it_was_given(conn, deadlin
 def test_the_fake_clock_reaches_a_bounded_wait_and_expires_it(conn):
     """A deadline is reachable by `absurd.fake_now`, which is what makes it testable at all.
 
-    `clock_at` holds both clocks a park consults, and a park registered RELATIVE to the claim
+    A held clock holds both clocks a park consults, and a park registered RELATIVE to the claim
     lands at `fake_now + ceil(...)`: past the deadline by however far the fake clock was moved,
-    so advancing the clock TO the deadline cannot reach it. That is the hazard `clock_at`'s own
-    docstring names for a sleep, and an absolute park is what answers it here.
+    so advancing the clock TO the deadline cannot reach it. That is the hazard
+    `HeldClock.on_absurd` names for a sleep, and an absolute park is what answers it here.
 
     So a boundary this pins costs no wall-clock time, which is what a rule about the instant
     itself needs: a completion at exactly the deadline is a timeout.
@@ -128,7 +151,7 @@ def test_the_fake_clock_reaches_a_bounded_wait_and_expires_it(conn):
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
     task_id = app.spawn(name, {"run_id": "r1"})
-    with clock_at(app, base + timedelta(hours=1)):  # the engine is an hour on, the wait is not due
+    with HeldClock(base + timedelta(hours=1)).on_absurd(app) as clock:  # an hour short of due
         app.work_batch()
         parked = conn.execute(
             t"SELECT timeout_at FROM absurd.w_default WHERE task_id = {task_id}::uuid"
@@ -138,7 +161,7 @@ def test_the_fake_clock_reaches_a_bounded_wait_and_expires_it(conn):
             f"the held clock reached the park: {parked[0][0]} against {deadline}"
         )
 
-    with clock_at(app, deadline + timedelta(seconds=1)):
+        clock.advance_to(deadline + timedelta(seconds=1))
         for _ in range(8):
             snap = app.fetch_task_result(task_id)
             if snap is not None and snap.state in ("completed", "failed"):
@@ -159,14 +182,16 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
     arrival checkpoint and deletes the row, so no later claim asks again and the workflow is told
     an event beat a deadline it did not.
 
-    So the emit runs on its own connection while the deadline write is held. One transaction and
-    it waits on the run's lock, reaching a wait whose deadline has passed; two and it takes it.
-    The hazard reproduces through a pause and through a death.
+    So the emit runs on its own connection, its clock held between the deadline and the rounding,
+    while the deadline write is held open. With both writes in one transaction the emit waits on
+    the run's lock and reaches a wait whose deadline has passed; in two transactions it takes the
+    wait.
     """
     app = absurd()
     name = f"racing-{uuid.uuid4().hex[:8]}"
     event = f"shared:{name}"
-    deadline = datetime.now().astimezone() + timedelta(seconds=A_BREATH)
+    clock = HeldClock(datetime.now().astimezone() + timedelta(minutes=1))
+    deadline = clock.at + HALF_A_SECOND
 
     def wf():
         outcome = yield from await_until(event, _Ack, deadline=deadline)
@@ -177,15 +202,16 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
         return DurableHandler(ConcurrentAbsurdCtx(ctx), _NoDomain()).run(wf)
 
     settled = absurd_engine.sdk_pin_the_park
+    emitter = psycopg.connect(DSN, autocommit=True)
+    HeldClock(deadline + HALF_A_SECOND / 2).hold(emitter)
+    emitting = _backend(emitter)
 
-    def emit_once_the_deadline_has_passed() -> None:
-        while time.time() <= deadline.timestamp():
-            time.sleep(0.005)
-        with psycopg.connect(DSN, autocommit=True) as emitter:
-            emitter.execute(t"SELECT absurd.emit_event('default', {event}, {Jsonb({'ok': True})})")
+    def emit() -> None:
+        emitter.execute(t"SELECT absurd.emit_event('default', {event}, {Jsonb({'ok': True})})")
 
-    racer = threading.Thread(target=emit_once_the_deadline_has_passed)
+    racer = threading.Thread(target=emit)
     rounded: list[datetime] = []  # the instant the SDK registered, read before it is written over
+    blocked: list[bool] = []
 
     def held(sdk, key, at):
         rounded.append(
@@ -194,34 +220,38 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
             ).fetchone()[0]
         )
         racer.start()
-        time.sleep(HELD_FOR)  # inside the rounding, and short of it
+        _until(lambda: _waiting_on_a_lock(conn, emitting) or not racer.is_alive())
+        blocked.append(racer.is_alive())
         settled(sdk, key, at)
         # JOINED BY THE CALLER: one transaction and the emit is waiting on this one to commit,
         # which cannot happen until this returns.
 
     task_id = app.spawn(name, {"run_id": "r1"})
-    with monkeypatch.context() as patched:
-        patched.setattr(absurd_engine, "sdk_pin_the_park", held)
-        app.work_batch()
-    racer.join(timeout=20)
+    try:
+        with clock.on_absurd(app), monkeypatch.context() as patched:
+            patched.setattr(absurd_engine, "sdk_pin_the_park", held)
+            app.work_batch()
+            racer.join(timeout=SAFETY_NET)
 
-    # The schedule this measures, asserted rather than assumed: an emit that never lands, or one
-    # that lands past the rounding, passes whether or not the two writes are one transaction.
-    landed = conn.execute(
-        t"SELECT emitted_at FROM absurd.e_default "
-        t"WHERE event_name = {event} AND payload IS NOT NULL"
-    ).fetchone()
-    emitted_at = landed[0] if landed else None
-    assert emitted_at is not None, "the emit never landed, so nothing raced the park"
-    assert emitted_at < rounded[0], (
-        f"the emit landed at {emitted_at}, past the rounding it had to race: {rounded[0]}"
-    )
-    for _ in range(8):
-        snap = app.fetch_task_result(task_id)
-        if snap is not None and snap.state in ("completed", "failed"):
-            break
-        app.work_batch()
-    snap = app.fetch_task_result(task_id)
+            # The schedule this measures, asserted rather than assumed: an emit that never
+            # lands, or one past the rounding, passes whether or not the two writes are one
+            # transaction.
+            landed = conn.execute(
+                t"SELECT emitted_at FROM absurd.e_default "
+                t"WHERE event_name = {event} AND payload IS NOT NULL"
+            ).fetchone()
+            emitted_at = landed[0] if landed else None
+            assert emitted_at is not None, "the emit never landed, so nothing raced the park"
+            assert deadline < emitted_at < rounded[0], (
+                f"the emit landed at {emitted_at}, outside the rounding it had to race: "
+                f"{deadline} to {rounded[0]}"
+            )
+            assert blocked == [True], "the emit reached the wait before its deadline was written"
+
+            clock.advance_to(deadline + timedelta(seconds=1))
+            snap = app.run_until_result(task_id)
+    finally:
+        emitter.close()
     assert snap is not None, "the task produced no snapshot"
     assert snap.state == "completed", snap
     assert snap.result == {"answer": "Expired"}, (
@@ -255,7 +285,7 @@ def test_two_waits_on_one_event_each_keep_their_own_deadline(conn):
 
     task_id = app.spawn(name, {"run_id": "r1"})
     app.work_batch()  # the first ask parks, on the real clock, half an hour out
-    with clock_at(app, first + timedelta(seconds=1)):
+    with HeldClock(first + timedelta(seconds=1)).on_absurd(app):
         app.work_batch()  # the clock ends it, and the second ask parks
 
     parked = conn.execute(
@@ -275,14 +305,16 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
     an hour later; the first claim's write then lands on that second wait and ends it at the first
     deadline. Held together, the second worker cannot claim at all until the park is whole.
 
-    Kept as its own pin because the racing emit above closes the same transaction through a
-    different door.
+    Kept as its own pin because the racing emit above reaches the same transaction from an emit,
+    where this one reaches it from a claim.
     """
     app, other = absurd(), absurd()
     other.app._conn.execute("SET statement_timeout = '20s'")
+    claiming = _backend(other.app._conn)
     name = f"stale-{uuid.uuid4().hex[:8]}"
     event = f"shared:{name}"
-    first = datetime.now().astimezone() + timedelta(seconds=A_BREATH)
+    clock = HeldClock(datetime.now().astimezone() + timedelta(minutes=1))
+    first = clock.at + HALF_A_SECOND
     later = first + timedelta(hours=1)
     settled = absurd_engine.sdk_pin_the_park
     claims: list[str] = []
@@ -308,22 +340,22 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
         rounded = sdk._conn.execute(
             t"SELECT timeout_at FROM absurd.w_default WHERE event_name = {event}"
         ).fetchone()[0]
-        while time.time() <= rounded.timestamp():  # the first wait is claimable, to the rounding
-            time.sleep(0.005)
+        # The second worker's clock has passed the rounding, so the first wait is claimable to it.
+        HeldClock(rounded + HALF_A_SECOND / 2).hold(other.app._conn)
         racer = threading.Thread(target=other.work_batch)
         racer.start()
         racers.append(racer)
-        time.sleep(HELD_FOR)
+        _until(lambda: _waiting_on_a_lock(conn, claiming) or not racer.is_alive())
         claimed_before_the_commit.append(len(claims))
         settled(sdk, key, at)
 
     claimed_before_the_commit: list[int] = []
     task_id = app.spawn(name, {"run_id": "r1"})
-    with monkeypatch.context() as patched:
+    with clock.on_absurd(app), monkeypatch.context() as patched:
         patched.setattr(absurd_engine, "sdk_pin_the_park", held)
         app.work_batch()
-    for racer in racers:
-        racer.join(timeout=30)
+        for racer in racers:
+            racer.join(timeout=SAFETY_NET)
     other.work_batch()
 
     assert claimed_before_the_commit == [1], (
@@ -362,9 +394,10 @@ def test_an_event_at_the_deadline_is_late_to_the_microsecond(offset: int, answer
 
     task_id = app.spawn(name, {"run_id": "r1"})
     app.work_batch()  # the wait parks, on the deadline itself
-    with clock_at(emitter, deadline + timedelta(microseconds=offset)):
+    with HeldClock(deadline + timedelta(microseconds=offset)).on_absurd(app) as clock:
+        clock.hold(emitter.app._conn)
         emitter.emit_event(event, {"ok": True})
-    with clock_at(app, deadline + timedelta(seconds=1)):
+        clock.advance_to(deadline + timedelta(seconds=1))
         for _ in range(8):
             snap = app.fetch_task_result(task_id)
             if snap is not None and snap.state in ("completed", "failed"):

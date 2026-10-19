@@ -269,6 +269,9 @@ class _RecFaultCtx:
         self._trip("sleep")
         return self._ctx.sleep_until(when, name=name)
 
+    def clock(self) -> float:
+        return self._ctx.clock()
+
     def __getattr__(self, attr):
         return getattr(self._ctx, attr)
 
@@ -714,6 +717,9 @@ def test_supports_peek_unwraps_every_fork_ctx_wrapper():
         def sleep_until(self, when, /, *, name: Key | None = None):
             return None
 
+        def clock(self) -> float:
+            return time.time()
+
     bare = _NoPeekCtx()
     stack = SeedingCtx(RenamedAwaitCtx(bare, "cf"), {}, fork_point=Key.parse("review"))
     assert _supports_peek(bare) is False
@@ -952,7 +958,7 @@ def test_a_fork_point_inside_a_gather_region_is_refused(tmp_path, sqlite_app):
         run_fork(
             # a real ctx, never touched: the refusal precedes every other input's use, which is
             # what makes it a precondition rather than a failure discovered mid-run
-            SqliteTaskContext(app.conn, _UNUSED_TASK),
+            SqliteTaskContext(app.conn, _UNUSED_TASK, clock=app.clock),
             lambda: _decision_wf("r-fork"),
             child_run_id="r-fork",
             seed=seed,

@@ -89,7 +89,7 @@ def task(app):
 
 def test_v1_envelopes_askllm_and_meters_above_the_checkpoint(app, task):
     interp = MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
-    handler = DurableHandler(SqliteTaskContext(app.conn, task), interp)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task, clock=app.clock), interp)
 
     out = handler.run(_two_ask_wf)
 
@@ -105,7 +105,7 @@ def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app, task):
     """The F1 fix, as a poison-stub replay proof: the second run's domain RAISES if
     touched, yet the meter re-derives to the same total from the recorded envelopes."""
     h1 = DurableHandler(
-        SqliteTaskContext(app.conn, task),
+        SqliteTaskContext(app.conn, task, clock=app.clock),
         MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools),
     )
     h1.run(_two_ask_wf)
@@ -115,7 +115,7 @@ def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app, task):
         raise AssertionError("replay must not re-run the domain (F1: usage is recorded state)")
 
     h2 = DurableHandler(
-        SqliteTaskContext(app.conn, task),
+        SqliteTaskContext(app.conn, task, clock=app.clock),
         MeteredInterpreter(llm=_poison, tools=_poison),
     )
     out = h2.run(_two_ask_wf)
@@ -128,7 +128,7 @@ def test_a_bare_model_checkpoint_fails_loud_not_silent(app, task):
     """A model call recorded bare, as a release before the envelope wrote it, fails by name:
     read as `$0` it would mis-derive the trip."""
     DurableHandler(
-        SqliteTaskContext(app.conn, task),
+        SqliteTaskContext(app.conn, task, clock=app.clock),
         MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools),
     ).run(_two_ask_wf)
     app.conn.execute(
@@ -138,7 +138,7 @@ def test_a_bare_model_checkpoint_fails_loud_not_silent(app, task):
 
     with pytest.raises(RecordedValueRejected, match=r"\{result, usage\}"):
         DurableHandler(
-            SqliteTaskContext(app.conn, task),
+            SqliteTaskContext(app.conn, task, clock=app.clock),
             MeteredInterpreter(llm=_no_tools, tools=_no_tools),  # poison — never reached
         ).run(_two_ask_wf)
 
@@ -147,7 +147,7 @@ def test_v1_gather_folds_branch_subtotals_into_parent_in_index_order(app, task):
     """§4 / Lean Model B: each branch accrues into its own subtotal; the barrier folds
     them into the parent in branch-index order. Sequential ctx (no write_lock)."""
     interp = MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
-    handler = DurableHandler(SqliteTaskContext(app.conn, task), interp)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task, clock=app.clock), interp)
 
     out = handler.run(_gather_ask_wf)
 
@@ -252,7 +252,7 @@ def test_a_measured_budget_over_a_domain_that_reports_no_usage_is_refused(app, t
     )
     with pytest.raises(CompositionRefused, match="MeasuredBudget"):
         DurableHandler(
-            SqliteTaskContext(app.conn, task),
+            SqliteTaskContext(app.conn, task, clock=app.clock),
             hidden,
             budget=MeasuredBudget(overall=1.0, run_id="r"),
         )

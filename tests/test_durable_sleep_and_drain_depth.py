@@ -5,11 +5,12 @@
    raw SDK ctx and so around every deployed `DurableHandler`, must pass the step name first. A
    one-argument forward raises `TypeError`, and the task retries to death. The conformance
    workflow `_conformance.make_gather_sleep_wf` cannot see this: it sleeps *inside a gather*,
-   which routes to `_branch_sleep`, a pure clock compare that calls neither ctx.
+   which routes to `_branch_sleep`, a compare against the ctx's clock that calls no sleep.
 
-2. **A drain loop's `queue_depth` predicate** counts `state IN ('pending','sleeping')`, the
-   engine's own claim shape (`absurd.sql:937-940`). A run whose sleep has expired is claimable,
-   and a predicate on `state = 'pending'` alone misses it, so the drain exits with work queued.
+2. **A drain loop's depth, `claimable_runs`,** counts `state IN ('pending','sleeping')`, the
+   engine's own claim shape (`absurd.sql`'s candidate query). A run whose sleep has expired is
+   claimable, and a predicate on `state = 'pending'` alone misses it, so the drain exits with work
+   queued.
 
 The first hazard masks the second: a top-level sleep that never happens leaves no `sleeping` run
 to observe. Both divergences are Absurd-side, so a port is verified on the real engine and these
@@ -17,46 +18,37 @@ tests are pg-gated.
 """
 
 import datetime as dt
-import time
 import uuid
 from uuid import UUID
 
 import psycopg
 import pytest
-from _durable import DSN, absurd, clock_at, pg_ready
+from _clock import HeldClock
+from _durable import DSN, absurd, pg_ready
 
 from effective.api import sleep_until
 from effective.bridge_absurd import read_absurd_task
+from effective.engines import open
+from effective.engines.absurd import AbsurdEngine, claimable_runs, queue_table
 from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 
-# Both count queries are SCOPED TO ONE TASK NAME. The queue is shared with the rest of the
-# pg-gated suite, so a global count is not a measurement: it reads whatever else is mid-run, and
-# a global count here can break an unrelated test in the full-suite run.
+# The hazard's predicate is SCOPED TO ONE TASK NAME, on the run's own queue: a count over a shared
+# queue reads whatever else is mid-run.
 #
 # PEP 750 t-string SQL (psycopg >= 3.3): `{value}` is a bound parameter, never concatenation
 # — the house idiom, `bridge_absurd.py:31-44`.
 
 
-def _depth_fixed(task_name: str) -> int:
-    """A drain loop's `queue_depth` predicate: the engine's own claim shape."""
-    with psycopg.connect(DSN) as conn:
-        row = conn.execute(
-            t"SELECT count(*) FROM absurd.r_default r "
-            t"JOIN absurd.t_default t USING (task_id) WHERE t.task_name = {task_name} "
-            t"AND r.state IN ('pending', 'sleeping') AND r.available_at <= now()"
-        ).fetchone()
-        return row[0] if row else 0
-
-
-def _depth_old(task_name: str) -> int:
+def _depth_old(queue: str, task_name: str, at: dt.datetime) -> int:
     """The `state = 'pending'` predicate, which misses a due sleeper."""
+    runs, tasks = queue_table("r", queue), queue_table("t", queue)
     with psycopg.connect(DSN) as conn:
         row = conn.execute(
-            t"SELECT count(*) FROM absurd.r_default r "
-            t"JOIN absurd.t_default t USING (task_id) WHERE t.task_name = {task_name} "
-            t"AND r.state = 'pending' AND r.available_at <= now()"
+            t"SELECT count(*) FROM absurd.{runs:i} r "
+            t"JOIN absurd.{tasks:i} t USING (task_id) WHERE t.task_name = {task_name} "
+            t"AND r.state = 'pending' AND r.available_at <= {at}"
         ).fetchone()
         return row[0] if row else 0
 
@@ -132,7 +124,7 @@ def test_top_level_durable_sleep_completes_on_absurd():
         "SdkCtx.sleep_until is not forwarding the SDK's two-arg form"
     )
 
-    with clock_at(app, wake_at + dt.timedelta(seconds=1)):
+    with HeldClock(wake_at + dt.timedelta(seconds=1)).on_absurd(app):
         # `run_until_result`, not one `work_batch()`: an advanced clock makes every dormant
         # leftover in the shared queue claimable at once (measured: 1 -> 3), so a single
         # claim may land on somebody else's task. Drain until THIS one is terminal.
@@ -146,44 +138,33 @@ def test_top_level_durable_sleep_completes_on_absurd():
 
 def test_drain_depth_sees_a_run_whose_sleep_expired():
     """A run whose sleep expired counts toward depth; the pending-only predicate counts 0 here.
+    Both read at an instant either side of `wake_at`, on a queue of the test's own."""
+    queue = "depth_" + uuid.uuid4().hex[:12]
+    engine = open(DSN, queue=queue)
+    assert isinstance(engine, AbsurdEngine)
+    engine.app.create_queue()
+    try:
+        name = f"nap-{uuid.uuid4().hex[:8]}"
+        wake_at = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+        for task_name in (name, f"other-{name}"):  # due alike, and only the first is counted
+            _nap_task(engine, task_name, wake_at)
+            engine.work_batch()
 
-    **The one test here that still sleeps for real, and deliberately.** Its subject is
-    `queue_depth`'s SQL predicate, which reads `now()` on its own connection — the
-    transaction clock, not `absurd.current_time()`. `clock_at` moves the two clocks the
-    *engine* consults; it cannot move `now()`, and reaching into the predicate to make it
-    fakeable would be faking the thing under test. So the wait stays real and the MARGIN is
-    small: a second is still an order of magnitude above the gap between parking and the first
-    assertion."""
-    app = absurd()
-    name = f"nap-{uuid.uuid4().hex[:8]}"
-    wake_at = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=1)
+        def depth(at: dt.datetime | None = None) -> int:
+            with psycopg.connect(DSN) as conn:
+                return claimable_runs(conn, queue, task_name=name, at=at)
 
-    task_id = _nap_task(app, name, wake_at)
-    app.work_batch()
-
-    # Before the wake time: not due, so neither predicate counts it — the drain may exit,
-    # and that is the scale-to-zero win, not a bug.
-    assert _depth_fixed(name) == 0
-
-    time.sleep((wake_at - dt.datetime.now(dt.UTC)).total_seconds() + 0.2)
-
-    # After the wake time the run is claimable, and the drain must see it.
-    assert _depth_fixed(name) >= 1, "the fixed predicate must see a due sleeping run"
-    assert _depth_old(name) == 0, (
-        "the state='pending' predicate is expected to miss it: this assertion documents "
-        "the hazard; if it starts counting, Absurd changed how an expired sleep is stored"
-    )
-
-    # Leave nothing sleeping in the shared queue: an abandoned run gets claimed by whichever
-    # test calls work_batch() next, whose app has never heard of this task. `clock_at` is
-    # belt-and-braces here rather than load-bearing — real time has already passed `wake_at`,
-    # so both clocks agree without help. Measured: breaking `clock_at` either way reddens the
-    # three tests above and leaves this one green.
-    with clock_at(app, wake_at + dt.timedelta(seconds=1)):
-        app.work_batch()
-    snapshot = app.fetch_task_result(task_id)
-    assert snapshot is not None, "the napping task vanished"
-    assert snapshot.state == "completed"
+        # Before `wake_at` the run is not due, so the drain may exit and the service scale to zero.
+        assert (depth(), depth(wake_at - dt.timedelta(seconds=1))) == (0, 0)
+        past = wake_at + dt.timedelta(seconds=1)
+        assert depth(past) == 1, "the claim predicate must see a due sleeping run"
+        assert _depth_old(queue, name, past) == 0, (
+            "the state='pending' predicate is expected to miss it: this assertion documents "
+            "the hazard; if it starts counting, Absurd changed how an expired sleep is stored"
+        )
+    finally:
+        engine.app.drop_queue()
+        engine.close()
 
 
 # --- positional identity, on the real engine ---------------------------------------------
@@ -225,7 +206,7 @@ def test_two_sleeps_to_one_instant_get_two_durable_names():
 
     task_id = app.spawn(name, {"run_id": f"r-{name}"})
     app.work_batch()
-    with clock_at(app, wake_at + dt.timedelta(seconds=1)):
+    with HeldClock(wake_at + dt.timedelta(seconds=1)).on_absurd(app):
         app.run_until_result(task_id)
 
     snapshot = app.fetch_task_result(task_id)
@@ -270,7 +251,7 @@ def test_a_scoped_sleep_is_frame_qualified_on_the_durable_path():
 
     task_id = app.spawn(name, {"run_id": f"r-{name}"})
     app.work_batch()
-    with clock_at(app, wake_at + dt.timedelta(seconds=1)):
+    with HeldClock(wake_at + dt.timedelta(seconds=1)).on_absurd(app):
         app.run_until_result(task_id)
 
     snapshot = app.fetch_task_result(task_id)

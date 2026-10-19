@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 import pytest
+from _clock import HeldClock
 
 from effective.api import call_tool, quorum, race
 from effective.choice import (
@@ -53,38 +54,21 @@ A_LONG_WAY_OFF = timedelta(hours=1)
 its own. It orders nothing: a host slow enough to exhaust it buys one more wake and the same
 answer, and the rows run identically at one second and at ten days."""
 
-EARLY = (DEADLINE - A_LONG_WAY_OFF).timestamp()
-"""An instant the deadline is still ahead of, as a bare float for the rows that build a `Racing`
-of their own rather than running a workflow."""
-
 LONG = 20_000
 """Steps a looping branch takes before it returns on its own. A stopped branch stops long before
 this, and one nothing stops is seen returning."""
-
-
-class _Clock:
-    """The clock a race reads, held at an instant the row moves."""
-
-    def __init__(self, at: datetime) -> None:
-        self._at = at.timestamp()
-
-    def __call__(self) -> float:
-        return self._at
-
-    def move_to(self, at: datetime) -> None:
-        self._at = at.timestamp()
 
 
 class _Tools(Mapping[str, object]):
     """Answers every tool call with its own name, and moves the clock for the calls named in
     `moves`, so a branch ends on the instant the row chose."""
 
-    def __init__(self, clock: _Clock, moves: Mapping[str, datetime] | None = None) -> None:
+    def __init__(self, clock: HeldClock, moves: Mapping[str, datetime] | None = None) -> None:
         self._clock, self._moves = clock, dict(moves or {})
 
     def __getitem__(self, key: str) -> object:
         if (at := self._moves.get(key)) is not None:
-            self._clock.move_to(at)
+            self._clock.advance_to(at)
         if key.startswith("tool:"):
             return key.removeprefix("tool:")
         raise KeyError(key)
@@ -102,7 +86,7 @@ class _Held(_Tools):
 
     def __init__(
         self,
-        clock: _Clock,
+        clock: HeldClock,
         moves: Mapping[str, datetime],
         released: threading.Event,
         holds: tuple[str, ...] = ("tool:b",),
@@ -168,7 +152,7 @@ def test_a_deadline_the_race_never_reaches_answers_what_no_deadline_would(monkey
 
         return program
 
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF)
     bounded, _ = _run(monkeypatch, clock, racing(DEADLINE), _Tools(clock))
     unbounded, _ = _run(monkeypatch, clock, racing(None), _Tools(clock))
     assert bounded == unbounded == Chosen((Won(0, "a"),), (Won(0, "a"), Refusal(1, "no")))
@@ -187,7 +171,7 @@ def test_a_deadline_already_reached_stops_every_branch_before_one_runs(monkeypat
     def program():
         return (yield from race([_forever("a"), _forever("b")], deadline=DEADLINE))
 
-    clock = _Clock(held_at)
+    clock = HeldClock(held_at)
     answer, handler = _run(monkeypatch, clock, program, _Tools(clock))
     assert answer == TimedOut((Stopped(0), Stopped(1)))
     assert ReplayHandler(handler.trace).run(program) == answer
@@ -197,7 +181,7 @@ def test_a_timed_out_race_records_a_choice_that_names_no_winner(monkeypatch):
     def program():
         return (yield from race([_forever("a")], deadline=DEADLINE))
 
-    clock = _Clock(DEADLINE)
+    clock = HeldClock(DEADLINE)
     _, handler = _run(monkeypatch, clock, program, _Tools(clock))
     choice = next(e.result for e in handler.trace if e.key.stored() == "race:0;choice")
     assert choice == {"kind": "timeout", "winners": [], "batch": []}
@@ -222,7 +206,7 @@ def test_a_branch_that_ends_at_the_deadline_is_late_to_the_microsecond(
     def program():
         return (yield from race([_returns("a")], deadline=DEADLINE))
 
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF)
     answer, handler = _run(monkeypatch, clock, program, _Tools(clock, {"tool:a": ends_at}))
     assert answer == expected
     choice = next(e.result for e in handler.trace if e.key.stored() == "race:0;choice")
@@ -253,7 +237,7 @@ def test_a_deadline_stops_a_branch_that_is_already_running(monkeypatch):
     def program():
         return (yield from race([_returns("a"), _forever("b")], deadline=DEADLINE))
 
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF)
     moves = {"tool:a": DEADLINE + timedelta(seconds=1)}
     answer, handler = _run(monkeypatch, clock, program, _Held(clock, moves, choice_landed))
     assert answer == TimedOut((Unchosen(0, "a"), Stopped(1)))
@@ -275,7 +259,7 @@ def test_a_refusal_still_makes_a_bounded_race_impossible(monkeypatch):
     def program():
         return (yield from race([refuses], deadline=DEADLINE))
 
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF)
     answer, _ = _run(monkeypatch, clock, program, _Tools(clock))
     assert answer == Impossible((Refusal(0, "no"),))
 
@@ -286,7 +270,7 @@ def test_a_quorum_of_none_answers_before_it_reads_a_deadline(monkeypatch):
     def program():
         return (yield from quorum(0, [_returns("a")], deadline=DEADLINE))
 
-    clock = _Clock(DEADLINE + timedelta(seconds=1))
+    clock = HeldClock(DEADLINE + timedelta(seconds=1))
     answer, handler = _run(monkeypatch, clock, program, _Tools(clock))
     assert answer == Chosen((), (Stopped(0),))
     assert handler.trace == []
@@ -301,15 +285,14 @@ def test_a_sequential_race_reads_its_deadline_at_a_branch_boundary(monkeypatch, 
     """`Racing.in_order` drives a ctx whose branches cannot overlap, and a branch boundary is the
     only place it has to read a clock. The promise a sequential ctx can keep is that the deadline
     is read between branches, never inside one, and what branch 0 ended on decides the kind."""
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
-    monkeypatch.setattr(base, "race_time", clock)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF).on_races(monkeypatch)
     ran: list[int] = []
     decided_after: list[list[int]] = []
     chosen: list[Choice] = []
 
     def run(i: int) -> str:
         ran.append(i)
-        clock.move_to(ends_at)
+        clock.advance_to(ends_at)
         return f"branch {i}"
 
     def choose(choice: Choice) -> None:
@@ -385,7 +368,7 @@ def test_a_deadline_bounds_one_wake_and_the_barrier_waits_unbounded(monkeypatch)
 
     Measured: 4 reads, 30 runs of 30; a race that never stops bounding reads 25."""
     caller, choice_landed = threading.current_thread(), threading.Event()
-    clock = _Clock(DEADLINE - A_LONG_WAY_OFF)
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF)
     reads = [0]
 
     def counted() -> float:
@@ -432,13 +415,14 @@ def test_a_branch_that_ended_late_says_so_even_where_the_clock_reads_early(monke
     def program():
         return (yield from race([_returns("a")], deadline=DEADLINE))
 
-    answer, handler = _run(monkeypatch, stepped_back, program, _Tools(_Clock(DEADLINE)))
+    answer, handler = _run(monkeypatch, stepped_back, program, _Tools(HeldClock(DEADLINE)))
     assert answer == TimedOut((Unchosen(0, "a"),))
     assert ReplayHandler(handler.trace).run(program) == answer
 
 
-A_BREATH_OF_REAL_TIME = 0.05
-"""How far ahead of a RUNNING clock the one row below puts its deadline.
+UNTIL_THE_DEADLINE = 0.05
+"""The real seconds from the start of the one row below until its RUNNING clock reaches the
+deadline.
 
 Every other row holds the clock still, which cannot express the one property left: that the
 deadline WAKES a race whose branches are all still running. Nothing is ordered by this interval.
@@ -448,10 +432,11 @@ answering differently."""
 
 
 def test_the_deadline_wakes_a_race_whose_branches_are_all_still_running(monkeypatch):
-    """The wake the deadline bounds is the wake it ends. Both branches sit inside a domain call
-    until the choice is saved, so no completion can wake the race: only the deadline can."""
+    """The race waits on its branches with the deadline as the wait's timeout, and that timeout
+    ends the race. Both branches sit inside a domain call until the choice is saved, so no branch
+    can return first and end the wait."""
     choice_landed = threading.Event()
-    offset = DEADLINE.timestamp() - time.time() - A_BREATH_OF_REAL_TIME
+    offset = DEADLINE.timestamp() - time.time() - UNTIL_THE_DEADLINE
     read = base.Racing.read
 
     def reading(self: base.Racing, *args: Any) -> bool:
@@ -473,7 +458,7 @@ def test_the_deadline_wakes_a_race_whose_branches_are_all_still_running(monkeypa
     def program():
         return (yield from race([_forever("a"), _forever("b")], deadline=DEADLINE))
 
-    held = _Held(_Clock(DEADLINE), {}, choice_landed, holds=("tool:a", "tool:b"))
+    held = _Held(HeldClock(DEADLINE), {}, choice_landed, holds=("tool:a", "tool:b"))
     answer, handler = _run(monkeypatch, lambda: time.time() + offset, program, held)
     assert answer == TimedOut((Stopped(0), Stopped(1)))
     assert [timeout for timeout in waits if timeout is not None], (
@@ -491,22 +476,22 @@ def test_a_clock_crossing_between_two_reads_cannot_disarm_the_deadline(monkeypat
 
     The invariant, asserted over every wake: a wake is unbounded only after the race has
     something to show for it."""
-    crossed, released = threading.Event(), threading.Event()
-    monkeypatch.setattr(
-        base, "race_time", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
-    )
+    released, second_wait = threading.Event(), asyncio.Event()
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF).on_races(monkeypatch)
     waits: list[tuple[float | None, list[str]]] = []
     chosen: list[Choice] = []
     real_wait, read = asyncio.wait, base.Racing.read
 
     async def recording_wait(tasks: Any, **kw: Any) -> Any:
         waits.append((kw.get("timeout"), [choice.kind for choice in chosen]))
+        if len(waits) == 2:
+            second_wait.set()
         return await real_wait(tasks, **kw)
 
     def reading(self: base.Racing, batch: list[int], *rest: Any) -> bool:
         failing = read(self, batch, *rest)
         if batch:  # the batch has been ruled on and nothing decided; now the clock crosses
-            crossed.set()
+            clock.advance_to(DEADLINE)
         return failing
 
     monkeypatch.setattr(asyncio, "wait", recording_wait)
@@ -529,8 +514,7 @@ def test_a_clock_crossing_between_two_reads_cannot_disarm_the_deadline(monkeypat
 
     async def drive() -> list[Any]:
         task = asyncio.create_task(racing.concurrently())
-        while len(waits) < 2:
-            await asyncio.sleep(0)
+        await asyncio.wait_for(second_wait.wait(), 10)
         released.set()
         return await task
 
@@ -548,7 +532,7 @@ def test_a_naive_deadline_is_refused_because_it_names_no_instant():
         return (yield from race([_returns("a")], deadline=DEADLINE.replace(tzinfo=None)))
 
     with pytest.raises(CompositionRefused, match="absolute instant"):
-        RecordingHandler(responses=_Tools(_Clock(DEADLINE))).run(program)
+        RecordingHandler(responses=_Tools(HeldClock(DEADLINE))).run(program)
 
 
 @pytest.mark.parametrize(
@@ -565,7 +549,7 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
     the wake after it is the one under test. The last parameter is a race that arrives with
     nothing left to decide, which is a durable retry served its stored choice: there the wake
     under test is the first one."""
-    released, crossed = threading.Event(), threading.Event()
+    released = threading.Event()
     enclosing, chosen = [stops_it == "a choice saved before it began"], []
     waits: list[tuple[float | None, bool]] = []
     real_wait = asyncio.wait
@@ -578,9 +562,7 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
         return await real_wait(tasks, **kw)
 
     monkeypatch.setattr(asyncio, "wait", recording_wait)
-    monkeypatch.setattr(
-        base, "race_time", lambda: DEADLINE.timestamp() if crossed.is_set() else EARLY
-    )
+    clock = HeldClock(DEADLINE - A_LONG_WAY_OFF).on_races(monkeypatch)
 
     def run(i: int) -> Any:
         if i == 1:
@@ -593,7 +575,7 @@ def test_a_race_that_can_decide_no_more_stops_bounding_its_wakes(monkeypatch, st
             case "a choice saved before it began":
                 return "first"
             case _:
-                crossed.set()  # this branch's own completion is late, which decides the timeout
+                clock.advance_to(DEADLINE)  # this branch's completion is late: the timeout
                 return "first"
 
     read = base.Racing.read
@@ -639,4 +621,4 @@ def test_a_deadline_whose_zone_answers_no_offset_is_refused_too():
         return (yield from race([_returns("a")], deadline=DEADLINE.replace(tzinfo=_NoOffset())))
 
     with pytest.raises(CompositionRefused, match="absolute instant"):
-        RecordingHandler(responses=_Tools(_Clock(DEADLINE))).run(program)
+        RecordingHandler(responses=_Tools(HeldClock(DEADLINE))).run(program)

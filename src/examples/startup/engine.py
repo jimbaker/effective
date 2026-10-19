@@ -22,7 +22,7 @@ from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool, Judge
 from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
-from effective.parked import pending_key, read_sqlite_parked_conn
+from effective.parked import pending_key
 
 ENDED = frozenset({"completed", "failed", "cancelled"})
 
@@ -97,7 +97,7 @@ def _run(
     try:
         spawned = app.spawn("startup", {})
         while (done := app.run_until_result(spawned)) is not None and done.state not in ENDED:
-            parked = [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == spawned]
+            parked = [p for p in app.parked() if p.task_id == spawned]
             if not parked:
                 raise RuntimeError(f"the run is {done.state} with no event to answer")
             if deliver is None:

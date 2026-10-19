@@ -14,7 +14,7 @@ SQLite-only runs (and ``test-core``) stay clean and never need the server.
 import json
 import os
 import sqlite3
-import time
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from enum import StrEnum
 from typing import Any, assert_never
@@ -44,9 +44,9 @@ from effective.coding.verdicts import mechanical_judges
 from effective.combinators import Answered, Deeper, descend, recurse
 from effective.cost import MeteredInterpreter, RecordedFormat, Usage, marked
 from effective.domain import CallTool, DomainOp
-from effective.engines import TaskSnapshot, open
+from effective.engines import TaskSnapshot, open, wall_clock
 from effective.engines.absurd import AbsurdEngine
-from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
+from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import ForkOutcome
 from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Run, Segment, compose_key, scope_prefix
@@ -71,6 +71,7 @@ PG_DSN = os.environ.get(
     "DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective"
 )
 IMMEDIATE_RETRY = {"kind": "fixed", "base_seconds": 0}  # no backoff -> retry claimable at once
+SAFETY_NET = 20.0  # bounds a barrier wait; a met barrier decides every verdict
 
 
 # ── the identities this fixture and its drivers share ────────────────────────
@@ -151,33 +152,28 @@ def _spawn_params(run_id: str, admitted: Mapping[str, Any] | None = None) -> dic
 class CountingDomain:
     """Stable value per CallTool, recording each call (for exactly-once checks).
 
-    ``delay`` makes the tool work take time (to show concurrent gather branches overlap);
-    ``list.append`` is atomic under CPython, so concurrent calls don't corrupt ``calls`` —
-    only its order is a race (assert ``sorted``).
-
-    ``spans`` records each call's in-flight interval, which is how overlap is PROVEN rather
-    than timed. A wall-clock bound on the whole run says "fast enough to have been concurrent",
-    which is a claim about the machine: it read 1.975s against a 0.55s ceiling at load average
-    15 and 0.49s alone, on unchanged code. Two intervals intersect or they do not, at any
-    speed."""
+    ``meeting`` is a barrier every call waits at, so two gather branches complete only when
+    both tools are in flight at once; a serialized gather breaks it. ``list.append`` is atomic
+    under CPython, so concurrent calls don't corrupt ``calls``; only its order is a race
+    (assert ``sorted``)."""
 
     def __init__(
-        self, flaky: bool = False, delay: float = 0.0, incrementing: bool = False
+        self,
+        flaky: bool = False,
+        meeting: threading.Barrier | None = None,
+        incrementing: bool = False,
     ) -> None:
         self.calls: list[str] = []
-        self.spans: list[tuple[str, float, float]] = []
         self.flaky = flaky  # raise TransientError on the FIRST 'a'
-        self.delay = delay
+        self.meeting = meeting
         # incrementing: each call to a tool returns a *distinct* value, so a stale
         # checkpoint read (e.g. a key collision) is visible in the result, not just the count.
         self.incrementing = incrementing
 
     def run(self, op: DomainOp) -> Any:
         assert isinstance(op, CallTool)
-        entered = time.perf_counter()
-        if self.delay:
-            time.sleep(self.delay)
-        self.spans.append((op.name, entered, time.perf_counter()))
+        if self.meeting is not None:
+            self.meeting.wait(SAFETY_NET)
         self.calls.append(op.name)
         if self.flaky and op.name == "a" and self.calls.count("a") == 1:
             raise TransientError("flaky first 'a'")
@@ -561,7 +557,7 @@ def make_top_level_sleep_wf(wake_at):
     """A durable sleep at the TASK ROOT: the path `make_gather_sleep_wf` above does not take.
 
     A top-level `sleep_until` reaches `ctx.sleep_until`, while a sleep inside a gather branch
-    routes to `DurableHandler._branch_sleep`, a pure clock compare that calls neither ctx. So a
+    routes to `DurableHandler._branch_sleep`, a clock compare that calls no ctx's sleep. So a
     defect in `SdkCtx.sleep_until` (forwarding one argument where the SDK wants two) makes every
     top-level durable sleep on Absurd raise `TypeError` and retry to death while every
     branch-sleep test stays green. `sleep ∘ gather` and `sleep` alone are separate rows of the
@@ -1488,6 +1484,9 @@ class FaultCtx:
         self._trip_before("sleep")
         return self._ctx.sleep_until(when, name=name)
 
+    def clock(self) -> float:
+        return self._ctx.clock()
+
     def peek_step(self, name):
         self._trip_before(f"peek-step:{name.stored()}")
         return self._ctx.peek_step(name)
@@ -1618,8 +1617,8 @@ class SqliteBackend:
     name = "sqlite"
     mutation_error: type[Exception] = sqlite3.DatabaseError
 
-    def __init__(self) -> None:
-        opened = open("sqlite://")
+    def __init__(self, clock: Callable[[], float] = wall_clock) -> None:
+        opened = open("sqlite://", clock=clock)
         assert isinstance(opened, SqliteApp)
         self.engine = self.app = opened
 
@@ -1705,7 +1704,8 @@ class SqliteBackend:
     def parked(self, task_id: UUID) -> list[Any]:
         from effective.parked import read_sqlite_parked_conn
 
-        return [p for p in read_sqlite_parked_conn(self.app.conn) if p.task_id == task_id]
+        parked = read_sqlite_parked_conn(self.app.conn, clock=self.app.clock)
+        return [p for p in parked if p.task_id == task_id]
 
     def ledger_kinds(self, run_id: str) -> list[str]:
         rows = self.app.conn.execute(
@@ -1754,10 +1754,10 @@ class SqliteBackend:
     def unclaimed_ctx(self, task_id: UUID) -> Any:
         """A WRITABLE ctx bound to a task this process never claimed — the exposed surface.
 
-        Reproducing the hazard is the point: `SqliteTaskContext` is public and takes a connection,
-        a task id and a lock, so anything that can open the store can build one. The viewing tests
-        wrap this and assert the wrapper refuses what the bare ctx would have written."""
-        return SqliteTaskContext(self.app.conn, task_id, self.app.write_lock)
+        Reproducing the hazard is the point: the app hands a context to any caller holding a task
+        id, so anything that can open the store can build one. The viewing tests wrap this and
+        assert the wrapper refuses what the bare ctx would have written."""
+        return self.app.context(task_id)
 
     def register_body(self, name: str, body, *, deployed: bool = False) -> None:
         """A task whose body is `(params, ctx)`, over this engine's own ctx, which is also the
@@ -1808,13 +1808,14 @@ class SqliteBackend:
 
 
 class AbsurdBackend:
-    """Absurd/Postgres (0↔N), opened by URL; `app` is the driver's SDK app (PG-gated)."""
+    """Absurd/Postgres (0↔N), opened by URL on `queue`; `app` is the driver's SDK app."""
 
     name = "postgres"
 
-    def __init__(self) -> None:
-        opened = open(PG_DSN)
+    def __init__(self, queue: str = "default") -> None:
+        opened = open(PG_DSN, queue=queue)
         assert isinstance(opened, AbsurdEngine)
+        self.queue = queue
         self.engine = opened
         # Any: the SDK types retry_strategy/spawn strictly, and the dict-shaped IMMEDIATE_RETRY
         # is the established test convention.
@@ -1884,9 +1885,10 @@ class AbsurdBackend:
     def task_attempts(self, task_id: UUID) -> int:
         import psycopg
 
+        tasks = f"t_{self.queue}"
         with psycopg.connect(PG_DSN) as conn:
             row = conn.execute(
-                'SELECT attempts FROM absurd."t_default" WHERE task_id = %s::uuid', (task_id,)
+                t"SELECT attempts FROM absurd.{tasks:i} WHERE task_id = {task_id}"
             ).fetchone()
         assert row is not None
         return row[0]
@@ -1907,7 +1909,7 @@ class AbsurdBackend:
         from effective.checkpoints import keys
 
         with psycopg.connect(PG_DSN) as conn:
-            return list(keys(read_absurd_task(conn, task_id)))
+            return list(keys(read_absurd_task(conn, task_id, queue=self.queue)))
 
     def checkpoint_states(self, task_id: UUID) -> dict[Key, Any]:
         import psycopg
@@ -1915,7 +1917,10 @@ class AbsurdBackend:
         from effective.bridge_absurd import read_absurd_task
 
         with psycopg.connect(PG_DSN) as conn:
-            return {c.key: c.state for c in read_absurd_task(conn, task_id, exclude=())}
+            return {
+                c.key: c.state
+                for c in read_absurd_task(conn, task_id, queue=self.queue, exclude=())
+            }
 
     def parked(self, task_id: UUID) -> list[Any]:
         import psycopg
@@ -1934,7 +1939,7 @@ class AbsurdBackend:
         # `UUID` object. `type()` on the real return value (`_conformance.AbsurdBackend.spawn`,
         # run against the pg-test container) says `UUID`.
         with psycopg.connect(PG_DSN) as conn:
-            return [p for p in read_absurd_parked(conn) if p.task_id == task_id]
+            return [p for p in read_absurd_parked(conn, queue=self.queue) if p.task_id == task_id]
 
     def unclaimed_ctx(self, task_id: UUID) -> Any:
         """A WRITABLE ctx bound to a task this process never claimed — the exposed surface.
@@ -1965,10 +1970,10 @@ class AbsurdBackend:
         # actually happened is that the fixture threw it away. A viewing fixture that cannot
         # commit understates the hazard it exists to demonstrate.
         conn = psycopg.connect(PG_DSN, autocommit=True)
+        tasks = f"t_{self.queue}"
         row = conn.execute(
-            "SELECT last_attempt_run, task_name, attempts, params, headers, retry_strategy, "
-            'max_attempts FROM absurd."t_default" WHERE task_id = %s::uuid',
-            (task_id,),
+            t"SELECT last_attempt_run, task_name, attempts, params, headers, retry_strategy, "
+            t"max_attempts FROM absurd.{tasks:i} WHERE task_id = {task_id}"
         ).fetchone()
         assert row is not None, f"no task row for {task_id}"
         # Every field read from the REAL row rather than fabricated. Only `task_id` and `run_id`
@@ -1990,7 +1995,7 @@ class AbsurdBackend:
         ctx = object.__new__(TaskContext)
         ctx.task_id = str(task_id)  # as the SDK's own `_create_task_context` sets it
         ctx._conn = conn
-        ctx._queue_name = "default"
+        ctx._queue_name = self.queue
         ctx._task = claimed
         ctx._checkpoint_cache = {}
         ctx._step_name_counter = {}
@@ -2112,7 +2117,7 @@ class AbsurdBackend:
         if self._spawner_app is None:
             from absurd_sdk import Absurd
 
-            self._spawner_app = Absurd(PG_DSN, queue_name="default")
+            self._spawner_app = Absurd(PG_DSN, queue_name=self.queue)
         # Any, as `self.app` is: the dict-shaped IMMEDIATE_RETRY is the test convention.
         app: Any = self._spawner_app
         spawned = app.spawn(
@@ -2130,9 +2135,10 @@ class AbsurdBackend:
         """The id and params of every task enqueued under `name`, in enqueue order."""
         import psycopg
 
+        tasks = f"t_{self.queue}"
         with psycopg.connect(PG_DSN) as conn:
             return conn.execute(
-                t"SELECT task_id, params FROM absurd.t_default WHERE task_name = {name} "
+                t"SELECT task_id, params FROM absurd.{tasks:i} WHERE task_name = {name} "
                 t"ORDER BY task_id"
             ).fetchall()
 

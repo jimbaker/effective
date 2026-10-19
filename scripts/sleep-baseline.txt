@@ -1,0 +1,7 @@
+# Sleep baseline: files whose real sleeps are accepted, so the gate fails when a file's count grows.
+#
+# Format:  <path> :: <count> :: <what the duration stands for, and why no event replaces it>
+scripts/prose_run.py :: 1 :: the `--watch` drain's interval between claims; the engine announces no new work to a worker
+src/effective/layers.py :: 1 :: `retry_domain`'s backoff between in-process tries, which no shipped caller enables
+tests/test_absurd_deadline_park.py :: 1 :: `_until` polls a server lock wait, which no event announces; a safety net bounds it
+tests/test_openai_cancel.py :: 2 :: a coroutine a stop must interrupt; its duration bounds a stop that fails

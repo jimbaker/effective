@@ -235,7 +235,7 @@ def test_a_durable_judge_records_its_usage_and_replays_without_the_judge(app):
     call, asked = _judging(SCREENED)
     task = app.spawn("screen", {})
     first = DurableHandler(
-        SqliteTaskContext(app.conn, task),
+        SqliteTaskContext(app.conn, task, clock=app.clock),
         MeteredInterpreter(llm=_poison, tools=_poison, judge=call),
     )
     out = first.run(_screen)
@@ -244,7 +244,7 @@ def test_a_durable_judge_records_its_usage_and_replays_without_the_judge(app):
     assert first.meter == JEV_USAGE
 
     again = DurableHandler(
-        SqliteTaskContext(app.conn, task),
+        SqliteTaskContext(app.conn, task, clock=app.clock),
         MeteredInterpreter(llm=_poison, tools=_poison, judge=_poison),
     )
     assert again.run(_screen) == out

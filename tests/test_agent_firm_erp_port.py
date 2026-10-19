@@ -33,6 +33,7 @@ from uuid import uuid4
 import pytest
 from _odoo import ERPS, another_invoice, faulted, opened
 from _turns import Turns, schedules
+from _witness import WatchedLock
 
 from examples.agent_firm.cases import CLEAN, SLA_CAP
 from examples.agent_firm.erp.odoo import (
@@ -624,9 +625,11 @@ def test_the_fence_names_each_claim_the_adapter_reads():
 
 @pytest.mark.adversarial
 def test_the_scripted_fence_runs_as_one_transaction(monkeypatch):
-    """A second attempt of one apply under one key waits while the first is inside its match,
-    then answers from the first's claim and match."""
+    """A second attempt of one apply under one key waits at the lock while the first is inside
+    its match, then answers from the first's claim and match."""
     odoo, entered, go = ScriptedOdoo.seeded([SLA_CAP]), threading.Event(), threading.Event()
+    contended = threading.Event()
+    monkeypatch.setattr(odoo, "lock", WatchedLock(odoo.lock, contended))
     assign = odoo._assign
 
     def paused(one: int, other: int) -> None:
@@ -641,8 +644,7 @@ def test_the_scripted_fence_runs_as_one_transaction(monkeypatch):
     assert entered.wait(TIMEOUT)
     second = threading.Thread(target=lambda: answers.update(second=odoo.erp().perform(apply, key)))
     second.start()
-    second.join(0.5)
-    waited = second.is_alive()
+    waited = contended.wait(TIMEOUT)
     go.set()
     first.join(TIMEOUT)
     second.join(TIMEOUT)

@@ -46,7 +46,14 @@ from uuid import UUID, uuid7
 from pydantic_core import to_jsonable_python
 
 from effective.cost import RecordedFormat, marked
-from effective.engines import Failure, TaskSnapshot, TaskState, drain
+from effective.engines import (
+    REPARK_MARGIN,
+    Failure,
+    TaskSnapshot,
+    TaskState,
+    drain,
+    wall_clock,
+)
 from effective.handlers.base import Attempt, EngineSignal, failing_leaf
 from effective.keys import Key
 from effective.ops import (
@@ -388,8 +395,8 @@ def read_sqlite_params(conn: sqlite3.Connection, task_id: UUID) -> dict[str, Any
     return json.loads(row[0])
 
 
-def _deliver(conn: sqlite3.Connection, name: str, payload: Any) -> None:
-    """Write an event and wake EVERY task parked on it — the one place delivery is spelled.
+def _deliver(conn: sqlite3.Connection, name: str, payload: Any, now: float) -> None:
+    """Write an event and wake EVERY task parked on it at `now`: the one place delivery is spelled.
 
     Shared by the driver (`SqliteApp.emit_event`, an outside-in delivery) and the ctx
     (`SqliteTaskContext.emit_event`, a task emitting from inside its own run), so the
@@ -414,7 +421,6 @@ def _deliver(conn: sqlite3.Connection, name: str, payload: Any) -> None:
     to."""
     payload_json = json.dumps(to_jsonable_python(wire_payload(name, payload)))
     conn.execute("BEGIN IMMEDIATE")
-    now = time.time()
     try:
         conn.execute(
             *bind(
@@ -474,6 +480,8 @@ class SqliteTaskContext:
     the task is running as that attempt, raises ``ClaimLost`` otherwise, and extends the claim's
     lease as Absurd's checkpoint write does. A ctx built outside a claim passes ``None`` and
     writes unfenced.
+
+    ``clock`` is the app's, so every deadline the ctx compares reads the time its app reads.
     """
 
     def __init__(
@@ -483,10 +491,12 @@ class SqliteTaskContext:
         write_lock: threading.Lock | None = None,
         *,
         claimed_as: int | None = None,
+        clock: Callable[[], float],
     ) -> None:
         self._conn = conn
         self._task_id = task_id
         self.claimed_as = claimed_as
+        self._clock = clock
         self._guard: AbstractContextManager[Any] = write_lock or nullcontext()
         self.concurrent_safe = write_lock is not None
         # Wakes this execution has already spent, in memory and per claim: a wake belongs to the
@@ -558,7 +568,7 @@ class SqliteTaskContext:
         """Push the claim's lease out by a full lease while the task still runs as its attempt;
         called under the guard, right after a fenced checkpoint write landed."""
         task_id, claimed_as = self.task_id, self.claimed_as
-        expires_at = time.time() + CLAIM_LEASE_SECONDS
+        expires_at = self._clock() + CLAIM_LEASE_SECONDS
         self.conn.execute(
             *bind(
                 t"UPDATE tasks SET claim_expires_at={expires_at} WHERE task_id={task_id} "
@@ -652,7 +662,7 @@ class SqliteTaskContext:
         found, payload = self.peek_event(name)
         if found:
             return settled_wait(self.settle(decided, ["arrived", payload]))
-        if time.time() >= deadline:
+        if self._clock() >= deadline:
             return settled_wait(self.settle(decided, ["expired"]))
         raise _Suspend(event=name, until=deadline)
 
@@ -713,9 +723,12 @@ class SqliteTaskContext:
         # lands on `tasks.available_at` and no checkpoint row is written at all, so there is
         # nothing for an identity to key. The parameter exists because the seam is shared with
         # Absurd, where the timer really does have a checkpoint of its own.
-        if time.time() >= when.timestamp():
+        if self._clock() >= when.timestamp():
             return None
         raise _Suspend(until=when.timestamp())
+
+    def clock(self) -> float:
+        return self._clock()
 
     def emit_event(self, name: str, payload: Any, /) -> None:
         """Emit an event from INSIDE a running task — how a spawned child answers its parent.
@@ -732,20 +745,13 @@ class SqliteTaskContext:
         Wrapped in the write lock like every other write on this connection, so a child emitting
         while its own gather branches commit stays serialized."""
         with self._guard:
-            _deliver(self.conn, name, payload)
+            _deliver(self.conn, name, payload, self._clock())
 
     def repark(self, name: str, /) -> None:
-        """Park so the task re-queues immediately, burning no attempt (the
-        optional capability — ``TaskContext``'s docstring). Raises ``_Suspend``
-        directly rather than routing through ``sleep_until``, whose already-due
-        guard would turn an at-``now`` park into a silent no-op — the exact
-        opposite of parking. The ``_Suspend`` arm of ``work_batch`` marks the
-        task ``sleeping``/``available_at=now`` without touching ``attempt``
-        (only the exception arm increments), so the next ``work_batch`` claims
-        it for a fresh replay. ``name`` is unused here — SQLite sleeps are
-        nameless (no wake-time checkpoint) — but kept for the cross-engine
-        capability signature."""
-        raise _Suspend(until=time.time())
+        """Park the task `REPARK_MARGIN` past its clock, spending no attempt. `name` is
+        unused, since a SQLite sleep checkpoints no wake time, where Absurd's checkpoints one under
+        `name`."""
+        raise _Suspend(until=self._clock() + REPARK_MARGIN)
 
 
 class SqliteLedger:
@@ -865,8 +871,10 @@ class SqliteApp:
         *,
         require_wal: bool = True,
         default_max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        clock: Callable[[], float] = wall_clock,
     ) -> None:
-        """Open (or create) a store. ``require_wal=False`` accepts a rollback journal.
+        """Open (or create) a store whose every decision about time reads `clock`.
+        ``require_wal=False`` accepts a rollback journal.
 
         The flag exists because raising is a NARROWING and a narrowing needs an exit. A new file
         store is put into WAL and, by default, a store that *refuses* WAL is an error rather than
@@ -918,8 +926,15 @@ class SqliteApp:
             self.conn.executescript(_IDEMPOTENCY_INDEX)
         self.write_lock = threading.Lock()
         self.default_max_attempts = default_max_attempts
+        self.clock = clock
         self._tasks: dict[str, TaskFn] = {}
         self._max_attempts: dict[str, int] = {}
+
+    def context(self, task_id: UUID, *, claimed_as: int | None = None) -> SqliteTaskContext:
+        """A context over `task_id` on this store, reading this app's clock under its lock."""
+        return SqliteTaskContext(
+            self.conn, task_id, self.write_lock, claimed_as=claimed_as, clock=self.clock
+        )
 
     def register_task(
         self, name: str, *, default_max_attempts: int | None = None
@@ -990,7 +1005,7 @@ class SqliteApp:
         # `UUID`, lost task rows, and two DIFFERENT `idempotency_key`s handed the same `task_id`.
         # A read outside the insert's critical section would let two spawns of one key both
         # insert.
-        spawned_at = time.time()
+        spawned_at = self.clock()
         with self.write_lock:
             if idempotency_key is not None and (
                 existing := self.conn.execute(
@@ -1030,7 +1045,7 @@ class SqliteApp:
         gather runs), and `_deliver` is two statements (the insert and the wake) that a reader
         must not see half of."""
         with self.write_lock:
-            _deliver(self.conn, name, payload)
+            _deliver(self.conn, name, payload, self.clock())
 
     def cancel(self, task_id: UUID) -> None:
         """Cancel a task that has not finished, and deliver `Cancelled` to the parent that spawned
@@ -1055,7 +1070,9 @@ class SqliteApp:
                 case ("cancelled", params_json) if DONE_EVENT_PARAM in (
                     params := json.loads(params_json)
                 ):
-                    _deliver(self.conn, params[DONE_EVENT_PARAM], cancelled_payload())
+                    _deliver(
+                        self.conn, params[DONE_EVENT_PARAM], cancelled_payload(), self.clock()
+                    )
                 case _:
                     pass
 
@@ -1067,7 +1084,7 @@ class SqliteApp:
             return self._claim_locked()
 
     def _claim_locked(self) -> tuple[UUID, str, str, int, int] | None:
-        now = time.time()
+        now = self.clock()
         # A 'running' task whose lease has expired lost its worker mid-execution, and that
         # execution counts. On its last attempt the task fails here, as Absurd's claim sweep
         # fails it through `fail_run`; otherwise the reclaim below starts the next attempt.
@@ -1163,7 +1180,12 @@ class SqliteApp:
                 *bind(t"SELECT 1 FROM tasks WHERE task_id={task_id} AND attempt={claimed_as}")
             ).fetchone()
             if latest is not None and DONE_EVENT_PARAM in params:
-                _deliver(self.conn, params[DONE_EVENT_PARAM], failure_answer(leaf, raised))
+                _deliver(
+                    self.conn,
+                    params[DONE_EVENT_PARAM],
+                    failure_answer(leaf, raised),
+                    self.clock(),
+                )
 
     def work_batch(self) -> bool:
         """Claim and run one ready task. Returns False when nothing is claimable.
@@ -1176,7 +1198,7 @@ class SqliteApp:
             return False
         task_id, name, params_json, attempt, max_attempts = claimed
         params = json.loads(params_json)
-        ctx = SqliteTaskContext(self.conn, task_id, self.write_lock, claimed_as=attempt)
+        ctx = self.context(task_id, claimed_as=attempt)
         try:
             # Serialized inside the attempt, so a result no JSON can hold fails the attempt as the
             # body raising would. `to_jsonable_python`, not a bare `json.dumps`: the substrate's
@@ -1193,7 +1215,7 @@ class SqliteApp:
                 # 0 is "no deadline" for a `waiting` row, which is what `_claim_locked` and
                 # `read_sqlite_parked` test for. `woken` is the other reading of this column:
                 # the instant the task became claimable, written when the event is already here.
-                deadline, woken = s.until or 0.0, time.time()
+                deadline, woken = s.until or 0.0, self.clock()
                 with self.write_lock:
                     self.conn.execute(
                         *bind(
@@ -1235,7 +1257,7 @@ class SqliteApp:
                 case None:
                     # Re-queue as the next attempt, as `fail_run` does: committed checkpoints
                     # persist, so the retry resumes mid-task.
-                    following, requeued = attempt + 1, time.time()
+                    following, requeued = attempt + 1, self.clock()
                     with self.write_lock:
                         self.conn.execute(
                             *bind(
@@ -1279,7 +1301,7 @@ class SqliteApp:
         from effective.parked import read_sqlite_parked_conn
 
         with self.write_lock:
-            return read_sqlite_parked_conn(self.conn)
+            return read_sqlite_parked_conn(self.conn, clock=self.clock)
 
     def close(self) -> None:
         self.conn.close()

@@ -17,13 +17,13 @@ import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from _clock import HeldClock
 from _schedules import Turnstile
 from _shapes import allowed, cut_short_by_a_race, placed_step, run
 from test_race_durable import _described, _ReleasedByChoice, _Tools
 
 from effective.api import append_ledger, call_tool, direct_tool_key, quorum, race, scoped
 from effective.choice import Chosen
-from effective.handlers import base
 from effective.handlers.base import step_key
 from effective.keys import Index, Key, Run, compose_key, race_choice, race_prefix
 from effective.keys.frame import scope_prefix
@@ -198,7 +198,7 @@ def test_the_choice_decides_the_rows_and_not_the_answer(backend, hold):
 AT = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 """The deadline, and where branch 0's last call leaves the held clock. A fixed date."""
 
-AHEAD = (AT - timedelta(hours=1)).timestamp()
+AHEAD = AT - timedelta(hours=1)
 """Where the held clock starts: far enough before `AT` that the race launches both branches. It
 orders nothing, since nothing but branch 0's own call moves the clock."""
 
@@ -243,13 +243,12 @@ def test_the_allowance_forgives_an_op_the_turnstile_never_sees(backend, monkeypa
 
     The allowance is checked both ways in this one row: taken, the check passes; withheld, it
     names `b-tail` as the op nothing allows."""
-    clock = [AHEAD]
-    monkeypatch.setattr(base, "race_time", lambda: clock[0])
+    clock = HeldClock(AHEAD).on_races(monkeypatch)
     started, settled = threading.Event(), threading.Event()
 
     def onto_the_deadline() -> None:
         until(started)
-        clock[0] = AT.timestamp()
+        clock.advance_to(AT)
 
     tools = _Tools(
         {

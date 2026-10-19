@@ -123,7 +123,9 @@ def test_P3a_askllm_only_trip0_parity(app):
     assert grants == {}  # no grant delivered yet
 
     tail = _fork(_five_asks, "r", 0.0015, entries, grants)
-    assert tail.tripped_at.stored() == park_name(app.conn, tid) == "budget-grant:r,0"
+    assert (
+        tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
+    )
     assert [e.key.stored() for e in tail.trace] == ["step:ask0", "step:ask1"]
     assert tail.usage.cost == pytest.approx(0.002)
 
@@ -139,7 +141,9 @@ def test_P3b_calltool_interleave_parity_the_F2_regression(app):
     tail = _fork(_ask_tool_ask, "r", 0.0005, entries, {})
     # the fork matches: it too runs (replays) the tool, parks before ask:b
     assert [e.key.stored() for e in tail.trace] == ["step;ask:a", "step;tool:t"]
-    assert tail.tripped_at.stored() == park_name(app.conn, tid) == "budget-grant:r,0"
+    assert (
+        tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
+    )
 
 
 def test_P3c_trip_n_ge_1_needs_the_grant_export(app):
@@ -155,7 +159,7 @@ def test_P3c_trip_n_ge_1_needs_the_grant_export(app):
         "step:ask2",
     ]  # ask2 committed after the grant
     assert grants == {Key.parse("budget-grant:r,0"): Grant(add_dollars=0.001)}
-    assert park_name(app.conn, tid) == "budget-grant:r,1"
+    assert park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,1"
 
     # WITH the delivered grant, the fork re-derives the SAME park (:1, spend 0.003)
     tail = _fork(_five_asks, "r", 0.0015, entries, grants)
@@ -194,7 +198,9 @@ def test_L1_envelope_shaped_tool_result_is_not_mis_decoded(app):
         "step;ask:b",
         "step;ask:c",
     ]
-    assert tail.tripped_at.stored() == park_name(app.conn, tid) == "budget-grant:r,0"
+    assert (
+        tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
+    )
     assert tail.usage.cost == pytest.approx(0.003)  # NOT 0.006 — no phantom tool usage
 
     tool_entry = next(e for e in tail.trace if e.key.stored() == "step;tool:t")

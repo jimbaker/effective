@@ -43,6 +43,7 @@ from functools import partial
 from typing import Any
 
 import pytest
+from _clock import HeldClock
 from _shapes import (
     Program,
     Shape,
@@ -59,7 +60,6 @@ from effective.api import Effect, append_ledger, call_tool, quorum, scoped
 from effective.choice import Chosen, Impossible, TimedOut
 from effective.combinators import Answered, Decision, Deeper, Level, fix, unfold
 from effective.domain import CallTool, DomainOp
-from effective.handlers import base
 from effective.keys import Index, Key, Run, compose_key, race_prefix
 from effective.keys.grammar import TERM_SEPARATOR
 from effective.ops import LedgerRow
@@ -119,7 +119,7 @@ class Descent:
     catch its loss: appends moved inside the worker's transaction leave the judge counting
     fewer."""
 
-    def __init__(self, backend: Any, clock: Held, bound: datetime) -> None:
+    def __init__(self, backend: Any, clock: HeldClock, bound: datetime) -> None:
         self._backend, self._clock, self._bound = backend, clock, bound
         self.calls: list[str] = []
 
@@ -127,7 +127,7 @@ class Descent:
         match op:
             case CallTool(name="stamp", args={"depth": int(depth)}):
                 self.calls.append(f"stamp:{depth}")
-                self._clock.at(depth)
+                self._clock.advance_to(START + depth * A_LEVEL)
                 return depth
             case CallTool(name="bound", args={}):
                 self.calls.append("bound")
@@ -139,19 +139,6 @@ class Descent:
                 self.calls.append("progress")
                 return len(self._backend.ledger_payloads(run_id))
         raise TypeError(f"the descent answers stamp, bound, work and progress, not {op!r}")
-
-
-class Held:
-    """The clock every race in this file reads, standing where the deepest stamp put it."""
-
-    def __init__(self) -> None:
-        self._at = START.timestamp()
-
-    def __call__(self) -> float:
-        return self._at
-
-    def at(self, depth: int) -> None:
-        self._at = (START + depth * A_LEVEL).timestamp()
 
 
 # --- the level, written once and closed two ways ------------------------------------------------
@@ -249,12 +236,10 @@ that meets the bound writes none, so the judge counts what the descent got throu
 
 
 @pytest.fixture
-def held(monkeypatch):
-    """The clock the races read, replaced for the whole row: `agree` and `sweep` run many runs and
-    each of them stamps its own levels."""
-    clock = Held()
-    monkeypatch.setattr(base, "race_time", clock)
-    return clock
+def held(monkeypatch) -> Callable[[], HeldClock]:
+    """A fresh clock for each run, installed as the one the races read: `agree` and `sweep` run
+    many runs in turn, and each starts at level 0."""
+    return lambda: HeldClock(START).on_races(monkeypatch)
 
 
 @pytest.fixture(params=list(BOUNDS))
@@ -262,10 +247,10 @@ def bound(request) -> datetime:
     return BOUNDS[request.param]
 
 
-def watched_row(backend, held: Held, bound: datetime) -> Shape:
+def watched_row(backend, held: Callable[[], HeldClock], bound: datetime) -> Shape:
     return Shape(
         spellings=SPELLINGS,
-        domain=lambda: Descent(backend, held, bound),
+        domain=lambda: Descent(backend, held(), bound),
         answer=lambda: ANSWER,
         ledger_ids=expected_rows,
         calls=lambda descent: sorted(descent.calls),
@@ -305,7 +290,7 @@ def test_the_run_says_it_stopped_the_cut_level_and_no_other(backend, held, bound
     An allowance too generous would name a live level's branches, which ran to their end; one too
     narrow would name none, and the descent's own answer would be the only evidence a level was
     cut at all."""
-    outcome = run(backend, by_unfold, Descent(backend, held, bound))
+    outcome = run(backend, by_unfold, Descent(backend, held(), bound))
 
     assert outcome.snap.result == ANSWER
     assert cut_short_by_a_race(backend, outcome) == frozenset(

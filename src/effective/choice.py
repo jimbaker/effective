@@ -62,7 +62,8 @@ class Stopped:
 
 @dataclass(frozen=True)
 class Raised:
-    """A loser whose op raised a programming error after the choice was saved."""
+    """A loser whose branch raised before the race chose, or raised after it an error a retry would
+    raise again."""
 
     index: int
     error: str

@@ -5,6 +5,7 @@ recovers transient failures on the live tail, never fires on replay, and preserv
 (the budget cap stays live), which a `compose_domain` wrapper would hide.
 """
 
+import time
 from typing import Any
 
 import pytest
@@ -174,6 +175,9 @@ class _NullCtx:
 
     def sleep_until(self, when, /, *, name: Key | None = None) -> None:
         raise AssertionError("not driven")
+
+    def clock(self) -> float:
+        return time.time()
 
 
 class _PlainDomain(FlakyDomain):

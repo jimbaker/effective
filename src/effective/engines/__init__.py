@@ -13,6 +13,7 @@ command-line run does, also `Drives`. A spawn's idempotency key is the task's st
 repeat returns the task already spawned under it.
 """
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -116,6 +117,19 @@ class Drives(Protocol):
     def run_until_result(self, task_id: UUID, max_batches: int = 64) -> TaskSnapshot | None: ...
 
 
+REPARK_MARGIN = 0.25
+"""Seconds past its engine's clock at which a repark parks a task, the same on both engines.
+Absurd's SDK returns without parking for an instant its clock has passed, and reads that clock
+only after two checkpoint round trips, so the margin exceeds that latency on a localhost and on a
+managed Postgres."""
+
+
+def wall_clock() -> float:
+    """The process's clock, looked up in `time` at each read, so a clock patched there reaches
+    an engine built before the patch."""
+    return time.time()
+
+
 def drain(
     fetch: Callable[[UUID], TaskSnapshot | None],
     work_batch: Callable[[], bool],
@@ -142,8 +156,10 @@ def open(
     queue: str = "default",
     default_max_attempts: int = 5,
     require_wal: bool = True,
+    clock: Callable[[], float] = wall_clock,
 ) -> SqliteApp | AbsurdEngine:
-    """The engine at `url`. `queue` is Absurd's; `require_wal` is SQLite's."""
+    """The engine at `url`. `queue` is Absurd's; `require_wal` and `clock` are SQLite's. Absurd
+    reads its server's clock, which a test holds through `absurd.fake_now` on its sessions."""
     parts = urlsplit(url)
     match parts.scheme:
         case "sqlite" if parts.netloc or parts.query or parts.fragment:
@@ -155,6 +171,12 @@ def open(
                 parts.path.removeprefix("/") or ":memory:",
                 require_wal=require_wal,
                 default_max_attempts=default_max_attempts,
+                clock=clock,
+            )
+        case "postgresql" | "postgres" if clock is not wall_clock:
+            raise ValueError(
+                "Absurd reads its server's clock, so it takes no `clock`; hold `absurd.fake_now` "
+                "on its sessions instead"
             )
         case "postgresql" | "postgres":
             from effective.engines.absurd import AbsurdEngine

@@ -66,7 +66,8 @@ reads only the first entry.
 The order extends to whole policies: `P ≤ Q` when every entry of `P` is covered by some entry of
 `Q`. On canonical forms it is a partial order too, so `P ≤ Q` and `Q ≤ P` mean `P == Q`. That is
 the shape of attenuation's law, a child's permissions within its parent's, which makes the key
-algebra a candidate foundation for the authority algebra. Nothing pins `≤`, and no formal model states it.
+algebra a candidate foundation for the authority algebra. No test pins `≤`, and no formal model
+states it.
 
 ## Related
 

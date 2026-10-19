@@ -19,6 +19,7 @@ grant must key.
 
 import json
 import sqlite3
+from collections.abc import Callable
 from uuid import UUID
 
 from effective.budget import BUDGET_GRANT_LIKE, Grant, names_a_budget_grant
@@ -87,7 +88,9 @@ def export_measured_prefix(
     return entries, grants
 
 
-def park_name(conn: sqlite3.Connection, task_id: UUID) -> str | None:
+def park_name(
+    conn: sqlite3.Connection, task_id: UUID, *, clock: Callable[[], float]
+) -> str | None:
     """The pending measured park's event name — the name a probe grant keys, or `None`.
 
     **A grant is worth emitting, or the name is not worth returning**, which is why this reads
@@ -105,5 +108,5 @@ def park_name(conn: sqlite3.Connection, task_id: UUID) -> str | None:
     at 0.23 ms for a hundred and 2.4 ms for a thousand. Fine for the one-task question the fork
     probe asks, and a thing to change rather than to call per child across a fan-out."""
     wanted = str(task_id)  # both sides are a `UUID`, so the spellings cannot disagree
-    answerable = read_sqlite_parked_conn(conn)
+    answerable = read_sqlite_parked_conn(conn, clock=clock)
     return next((p.wake_event for p in answerable if str(p.task_id) == wanted), None)

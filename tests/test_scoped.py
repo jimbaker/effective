@@ -18,6 +18,7 @@ The scope atom is a `Key`, composed by the one composer, so its grammar is a pro
 how the atom is built.
 """
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -60,6 +61,9 @@ class _SeqCtx:
 
     def sleep_until(self, when: Any, *, name: Key | None = None) -> None:
         raise NotImplementedError
+
+    def clock(self) -> float:
+        return time.time()
 
 
 class _EchoDomain:

@@ -1316,8 +1316,7 @@ def test_the_live_role_set_is_complete():
     (every scanned root reached) rather than a count, which would fail as the tree grows."""
     from effective.lint import check_role_coverage
 
-    roots = ("src", "examples", "scripts")
-    scanned = [f for r in roots if Path(r).exists() for f in sorted(Path(r).rglob("*.py"))]
+    scanned = _expanded(r for r in ("src", "examples", "scripts") if Path(r).exists())
     assert {p.parts[0] for p in scanned} >= {"src", "examples"}, "the roots were reached"
     assert [str(v) for v in check_role_coverage(scanned)] == []
 

@@ -23,6 +23,7 @@ current rows all clear/park by a strict margin).
 """
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,9 @@ class _GrantCtx:
 
     def sleep_until(self, when: Any, *, name: Key | None = None) -> None:
         raise NotImplementedError
+
+    def clock(self) -> float:
+        return time.time()
 
 
 class _NoDomain:

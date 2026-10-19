@@ -12,6 +12,7 @@ lands, the tail re-parks, two sweep forks stay independent) needs real Absurd, w
 actually driven.
 """
 
+import time
 from datetime import datetime
 
 from effective.cost import NEWEST_FORMAT, RecordedFormat
@@ -41,6 +42,9 @@ class _BaseCtx:
 
     def sleep_until(self, when, /, *, name: Key | None = None) -> None:
         self.calls.append(("sleep", when))
+
+    def clock(self) -> float:
+        return time.time()
 
 
 class _PeekCtx(_BaseCtx):
@@ -113,6 +117,9 @@ def test_event_rename_composes_the_whole_chain_not_one_wrapper():
 
         def sleep_until(self, when, /, *, name: Key | None = None):
             return None
+
+        def clock(self) -> float:
+            return time.time()
 
     base = _Base()
     nested = RenamedAwaitCtx(RenamedAwaitCtx(base, "c1"), "c2")

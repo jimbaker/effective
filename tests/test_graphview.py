@@ -1094,7 +1094,7 @@ def test_a_parked_run_projects_a_pending_node_end_to_end_on_the_embedded_engine(
     app = sqlite_app(str(tmp_path / "e2e.db"))
     task_id = _run(app, "p", small_wf, "r-p", "m-p")  # parks at review:m-p; no answer emitted
 
-    (park,) = read_sqlite_parked_conn(app.conn)
+    (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     assert park.wake_event == "review:m-p"  # RAW, as the reader reports it
     recorded = list(keys(read_sqlite_conn(app.conn, task_id)))
     assert recorded == ["step:extract", "ledger;extracted:m-p"]
@@ -1117,7 +1117,9 @@ def test_a_parked_run_projects_a_pending_node_end_to_end_on_the_embedded_engine(
     assert snap is not None
     assert snap.state == "completed", snap
 
-    assert read_sqlite_parked_conn(app.conn) == ()  # no park, so no pending node to synthesize
+    assert (
+        read_sqlite_parked_conn(app.conn, clock=app.clock) == ()
+    )  # no park, so no pending node to synthesize
     after = list(keys(read_sqlite_conn(app.conn, task_id, exclude=())))
     assert after == [
         "step:extract",

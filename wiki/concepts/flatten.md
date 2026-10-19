@@ -57,16 +57,16 @@ was skipped here"*, and a `Template` as *"the decision happens here."* Ask what 
 
 ## It is a gate
 
-`scripts/fstring_sweep.py --gate --touched main src`, inside `just check`. Two designated
-positions are named in the script and never baselined: a processor's render backend and a
-structured exception's `__str__`. Every other entry records the processor it wants, a raise
-records `raise -> structured exception`, and each entry counts the sites sharing its
-`(path, statics)`. The gate fails on a **new** site and on a count nothing produces, so the record
-can only shrink. Quote the command, not the number; the count moves.
+`scripts/fstring_sweep.py --gate src`, inside `just check`. Two designated positions are named in
+the script and never baselined: a processor's render backend and a structured exception's `__str__`.
+Every other entry records the processor it wants, a raise records `raise -> structured exception`,
+and each entry counts the sites sharing its `(path, statics)`. The gate fails on a **new** site and
+on a count nothing produces, so the record can only shrink. Quote the command, not the number; the
+count moves.
 
-A raise that builds its message is refused outright on a line changed since `main`, so a change
-structures each exception it touches: plain fields, its own `__str__`, and `from` the lower
-domain's cause.
+With `--touched main`, run in the tree where changes are written, a raise that builds its message is
+refused outright on a line changed since `main`, so a change structures each exception it touches:
+plain fields, its own `__str__`, and `from` the lower domain's cause.
 
 A second hole is the one an author falls into: the gate scans for f-strings, and a `str.join` or a
 `+` that replaces a flagged one is the same flatten, invisible to it. Respelling turns the gate

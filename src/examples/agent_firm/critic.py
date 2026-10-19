@@ -18,7 +18,7 @@ from effective import MeteredInterpreter
 from effective.api import Effect
 from effective.channels import Repair
 from effective.checkpoints import read_sqlite_task
-from effective.engines.sqlite import SqliteApp, SqliteTaskContext
+from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
 from effective.viewing import ViewingCtx
 
@@ -92,7 +92,7 @@ def replay(db: Path) -> Review:
         ((task_id,),) = app.conn.execute("SELECT task_id FROM tasks").fetchall()
         task_id = UUID(str(task_id))
         tape = {checkpoint.key for checkpoint in read_sqlite_task(db, task_id)}
-        ctx = ViewingCtx(SqliteTaskContext(app.conn, task_id, app.write_lock), tape)
+        ctx = ViewingCtx(app.context(task_id), tape)
         interpreter = MeteredInterpreter(llm=_unasked, tools=_unasked, judge=_unasked)
         handler = DurableHandler(ctx, interpreter, ledger=None)
         return Review.model_validate(handler.run(critiqued))

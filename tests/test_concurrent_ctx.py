@@ -5,6 +5,7 @@ silently depends on: the Absurd SDK's begin/complete split, and `_PrefixedCtx` p
 the backend's `concurrent_safe` capability one level down (so nested gather stays parallel).
 """
 
+import time
 from datetime import datetime
 from typing import Any
 
@@ -44,6 +45,9 @@ class _FakeConcurrentCtx:
     def sleep_until(self, when: datetime, /, *, name: Key | None = None) -> None:
         return None
 
+    def clock(self) -> float:
+        return time.time()
+
 
 def test_prefixed_ctx_propagates_concurrent_safe():
     """A gather branch runs over a _PrefixedCtx; a *nested* gather inside it must still see the
@@ -70,6 +74,9 @@ def test_prefixed_ctx_namespaces_step_keys():
 
         def sleep_until(self, when, /, *, name: Key | None = None):
             return None
+
+        def clock(self) -> float:
+            return time.time()
 
     ctx = _PrefixedCtx(_Recorder(), "gather:2,1;")
     ctx.step(Key.parse("tool:a"), lambda: 7)

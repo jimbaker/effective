@@ -203,9 +203,9 @@ def _run_base(app: SqliteApp, message_id: str, decision: str = "reject") -> UUID
     # It PARKED — asserted, not assumed. A base that answered without ever registering a wake is
     # the M-2 failure (`test_fork_sweep_absurd.py`), and the seed a fork is about to take would
     # then be a prefix nobody ever paused at.
-    assert [(p.task_name, p.wake_event) for p in read_sqlite_parked_conn(app.conn)] == [
-        ("base", f"review:{message_id}")
-    ]
+    assert [
+        (p.task_name, p.wake_event) for p in read_sqlite_parked_conn(app.conn, clock=app.clock)
+    ] == [("base", f"review:{message_id}")]
     app.emit_event(f"review:{message_id}", {"decision": decision})
     snap = app.run_until_result(base_id)
     assert snap is not None
@@ -284,7 +284,7 @@ def test_a_sweep_at_an_authority_park_answers_each_delta_as_a_hypothetical(tmp_p
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    (park,) = read_sqlite_parked_conn(app.conn)
+    (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     answer(app, park, {"add_depth": 0}, by=Segment("principal"))
     assert app.run_until_result(base_id).state == "completed"
 
@@ -733,7 +733,7 @@ def test_a_generation_boundary_inside_a_fork_is_refused_and_names_promotion(tmp_
     assert task == ("failed", 1)
     # And no generation escaped: nothing but the fork's own genesis, no second task.
     assert [k for _, k, _ in _rows(app, "fork-approve")] == ["forked"]
-    assert list(read_sqlite_parked_conn(app.conn)) == []
+    assert list(read_sqlite_parked_conn(app.conn, clock=app.clock)) == []
 
 
 def _nesting_wf(message_id: str):
@@ -836,7 +836,7 @@ def test_a_composition_refusal_in_a_child_answers_instead_of_hanging_the_sweep(
 
     # Nothing is left parked — the liveness half, asserted positively rather than by the parent's
     # state alone (a task can be `completed` while a sibling hangs).
-    assert list(read_sqlite_parked_conn(app.conn)) == []
+    assert list(read_sqlite_parked_conn(app.conn, clock=app.clock)) == []
 
 
 def test_a_GOVERNED_denial_in_a_forked_tail_answers_the_parent(tmp_path, sqlite_app):
