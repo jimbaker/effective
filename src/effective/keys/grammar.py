@@ -91,14 +91,17 @@ grammar rather than by a convention. `KeyMap.project` is the only producer, and 
 Listed in `METACHARACTERS` for the rule stated there: a new byte that means something is a new
 fence. That is what stops `Segment("*")` from branding a forged projection as an atom."""
 
-METACHARACTERS = (
-    TERM_SEPARATOR,
-    ARITY_SEPARATOR,
-    PATH_SEPARATOR,
-    TAG_SEPARATOR,
-    OCCURRENCE_SIGIL,
-    PROJECTION_SIGIL,
-)
+METACHARACTER_ROLES = {
+    TERM_SEPARATOR: "frame delimiter",
+    ARITY_SEPARATOR: "arity separator",
+    PATH_SEPARATOR: "path separator",
+    TAG_SEPARATOR: "tag separator",
+    OCCURRENCE_SIGIL: "occurrence sigil",
+    PROJECTION_SIGIL: "projection sigil",
+}
+"""Each metacharacter, by the role a refusal names it with."""
+
+METACHARACTERS = tuple(METACHARACTER_ROLES)
 """Every byte that means something — the closed set an ATOM may not contain.
 
 This exists to be **enumerated by other modules**. `Segment.__new__` fences each of these with

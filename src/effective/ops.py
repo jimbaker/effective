@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Never
+from typing import Any, Never, assert_never
 
 from pydantic import BaseModel, ConfigDict
 from pydantic_core import PydanticSerializationError, to_jsonable_python
@@ -19,7 +19,13 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 from effective.domain import DomainOp
 from effective.keys import RESERVED_AUTHORITY_TAGS, Key, authored_key, frame_path
 from effective.keys.frame import ARM_TAGS, leads_with_an_arm
-from effective.keys.grammar import TERM_SEPARATOR, KeySyntaxError, parse
+from effective.keys.grammar import (
+    METACHARACTER_ROLES,
+    METACHARACTERS,
+    OCCURRENCE_SIGIL,
+    KeySyntaxError,
+    parse,
+)
 
 
 @dataclass(frozen=True)
@@ -590,6 +596,10 @@ class RecordedValueRejected(ValueError, Unretryable):
     waits keeps no attempt for it: a run that would rescue the value catches the error."""
 
 
+def _holds_structure(text: str) -> bool:
+    return any(byte in text for byte in METACHARACTERS)
+
+
 class CompositionRefused(ValueError, Unretryable):
     """The substrate refused a COMPOSITION: the `LOUD` cell of the composition table, typed.
 
@@ -601,6 +611,76 @@ class CompositionRefused(ValueError, Unretryable):
     One base for every composition refusal, so a refusal added later is `Unretryable` by
     construction. It subclasses `ValueError`, so an `except ValueError` at a call site still
     catches one."""
+
+
+class FormattedEventName(CompositionRefused):
+    """An event name given as text holding key structure.
+
+    Text cannot carry structure injectively: the subjects `("x,y", "z")` and `("x", "y,z")` would
+    serialize to one name, `ev:x,y,z`, where `Segment` refuses the colliding coordinate."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        held = " and ".join(
+            f"the {role} {byte!r}"
+            for byte, role in METACHARACTER_ROLES.items()
+            if byte in self.name
+        )
+        advice = (
+            "an occurrence is the runtime's, asked of the composed key as `.occurrence(n)`"
+            if OCCURRENCE_SIGIL in self.name
+            else "compose it with `compose_key`, or pass one tag"
+        )
+        return (
+            f"the event name {self.name!r} holds {held}, so its structure was formatted rather "
+            f"than composed: {advice}"
+        )
+
+
+class ReservedEventName(CompositionRefused):
+    """An await name in a reserved authority namespace that the substrate did not compose.
+
+    An event delivered by that name answers a substrate gate, by name and first-emit-wins across
+    the queue, so the await would consume the answer meant for the gate."""
+
+    def __init__(self, name: str, parsed: bool) -> None:
+        super().__init__(name, parsed)
+        self.name = name
+        self.parsed = parsed
+
+    def __str__(self) -> str:
+        how = (
+            "carries no scope, so it was parsed rather than composed; `Key.parse` is the read "
+            "boundary and confers no authority"
+            if self.parsed
+            else "was written as text"
+        )
+        return (
+            f"await name {self.name!r} is in a reserved authority namespace "
+            f"({' '.join(RESERVED_AUTHORITY_TAGS)}) and {how}: name the await on your own "
+            f"subject, or compose it through its `AuthorityTag` if you are the substrate"
+        )
+
+
+class OpIdentityAwaited(CompositionRefused):
+    """An await name that opens with an op arm: an op's own identity, which no emitter delivers.
+
+    `event;step;tool:foo` is well formed and asks for an event named after a step's checkpoint
+    key. The arm set is closed (`ARM_TAGS`), so whether anything could mint the name is a check."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return (
+            f"await name {self.name!r} opens with an op ARM ({' '.join(ARM_TAGS)}), so it is an "
+            f"op's own identity, and no emitter delivers an event named after a checkpoint: "
+            f"await an author subject or a substrate authority key"
+        )
 
 
 class PlacedWriterCollision(CompositionRefused):
@@ -1021,25 +1101,6 @@ def refuse_absolute_await_under_a_rename(op: WorkflowOp, rename: str) -> Never:
     )
 
 
-def _refuse_an_op_identity_as_an_address(name: str) -> None:
-    """An await's name is an ADDRESS; a key that opens with an ARM is an op's own identity.
-
-    `event;step;tool:foo` is well formed and unmintable — it says "await an event whose name is a
-    step's checkpoint key", and nothing emits one. The grammar cannot tell those apart on its own
-    because the arm's payload is typed `Key`, i.e. ANY key; this is where the domain narrows it.
-
-    Reachability is decidable here precisely because the arm set is CLOSED (`ARM_TAGS`) — the key
-    space is a qualification scheme over a finite tag alphabet, not a Turing-complete one, so
-    "could anything mint this?" is a check rather than a search."""
-    if leads_with_an_arm(name):
-        raise ValueError(
-            f"await name {name!r} opens with an op ARM ({' '.join(ARM_TAGS)}), so it is an op's "
-            f"own identity and not an ADDRESS. Nothing emits an event named after a checkpoint, "
-            f"so this await could never be answered. Await the name an emitter actually delivers "
-            f"to — an author subject, or a substrate authority key."
-        )
-
-
 def _leading_tag(name: str) -> str | None:
     """The tag of an author name's first term, or `None` when it is not in the language.
 
@@ -1053,88 +1114,71 @@ def _leading_tag(name: str) -> str | None:
 
 
 def event_name(name: str | Key) -> Key:
-    """Validate an author-supplied await name, or accept an already-composed one.
+    """The `Key` an await parks on, built from an author's name: the await axis's `op_key`.
 
-    The await axis is the other place an author names an identity, and the only one where a
-    reserved namespace has to be REFUSED rather than fenced off structurally. A step name
-    composes under its own arm — `step_key("approve;tool:act")` is `step;approve;tool:act` — so
-    it is disjoint from the permission layer's `approve` park by construction. An await name
-    carries no arm: it is delivered as written. Absurd delivers events by name, first-emit-wins,
-    across the whole queue, so an unguarded `await_event("approve;tool:act")` would park on the
-    name the permission layer's `human` tier parks on and consume the approval meant for the
-    gate. These names ARE the authorization.
+    ==========================================  ================================
+    `name`                                      the await
+    ==========================================  ================================
+    a `Key` leading with an op arm              refused: `OpIdentityAwaited`
+    a parsed `Key` in a reserved namespace      refused: `ReservedEventName`
+    any other `Key`                             parks on it
+    text leading with an op arm                 refused: `OpIdentityAwaited`
+    text in a reserved namespace                refused: `ReservedEventName`
+    text holding a metacharacter                refused: `FormattedEventName`
+    one tag as text                             parks on that tag
+    ==========================================  ================================
 
-    **A `Key` is trusted and a `str` is checked**, which is the marker-type idiom rather than a
-    trust-by-location rule: a `Key` came from `compose_key`, so it is registry-visible and the
-    substrate's own parks (`depth_grant_name`, an `approve:` gate) pass one. Author text has made
-    no such promise. So the substrate's call sites pass their composed names as `Key`s and never
-    launder them back to text to satisfy a `str` parameter.
-
-    **It returns a `Key`, so it is a constructor and not a validator that hands back text.** This
-    is the await axis's `op_key`: every await writer goes through here the way every checkpoint
-    writer goes through `op_key`, which is what licenses `TaskContext.await_event` to type its
-    parameter (`handlers.base`, and see `step` there for the same argument on the checkpoint
-    axis). The `str` arm ends at `Key.parse` — the named read boundary, and a cast
-    consciously accepted — but it is a *checked* one: the two refusals below run first, so author
-    text reaches the typed world only after the reserved-namespace and frame-delimiter guards
-    have passed on it."""
-    # **The DECISION TABLE, not an `isinstance` split.** An `isinstance` chain is
-    # the smell here; what this wants is a total structural pattern match — a decision table. An
-    # `if isinstance(name, Key): … return name` short-circuit is exactly where a defect hides:
-    # the `Key` arm answers "trusted" without ever naming the case where a `Key` is NOT
-    # trustworthy. A table has to name its cases, which is what makes a missing arm visible.
-    #
-    # Order is load-bearing and the comments say why, arm by arm. Total by the wildcard.
+    An await name has no arm of its own: it is delivered as written, by name, first-emit-wins
+    across the queue. So an author's await in the `approve` namespace would park beside the human
+    tier's parks and could consume an approval meant for that gate; the reserved namespaces are
+    refused by name for that reason. The substrate's own parks pass a composed `Key`, which
+    carries the `Scope` its `AuthorityTag` gave it, and `Key.parse` attaches none."""
+    # A decision table over the name's type and shape; the arms run in order.
     match name:
-        # An op's own identity is never an ADDRESS, whichever type it arrives as. FIRST for the
-        # `str` arms too: a `;`-bearing identity would otherwise be refused as a forged frame,
-        # which is true and unhelpful — it names the wrong defect.
+        # An op identity first, for text too: `event;review:m1` would otherwise be refused as
+        # formatted text, which names the wrong defect.
         case Key() if leads_with_an_arm(name):
-            _refuse_an_op_identity_as_an_address(name.stored())
-            raise AssertionError("unreachable — the call above raises")  # pragma: no cover
-        # A reserved-authority `Key` carrying NO scope was PARSED, not composed. Every authority
-        # namespace is declared as an `AuthorityTag`, so the substrate's own park names carry a
-        # `Scope` and `Key.parse` never attaches one — which is what separates "I am the
-        # substrate" from an author who reached for the read boundary as a shortcut.
+            raise OpIdentityAwaited(name.stored())
+        # A substrate park carries the `Scope` its `AuthorityTag` gave it; `Key.parse` attaches
+        # none, so an unscoped authority key was read rather than composed.
         case Key(scope=None) if _leading_tag(name.stored()) in RESERVED_AUTHORITY_TAGS:
-            raise ValueError(
-                f"await name {name.stored()!r} is in a reserved authority namespace "
-                f"({' '.join(RESERVED_AUTHORITY_TAGS)}) and carries no scope, so it was PARSED "
-                f"rather than composed. An event delivered by that name answers a substrate gate, "
-                f"and Absurd delivers first-emit-wins across the queue — so this await would "
-                f"consume the answer meant for it. Compose it through its `AuthorityTag` if you "
-                f"ARE the substrate; `Key.parse` is the READ boundary and confers no authority."
-            )
-        # Any other composed `Key` — including a scoped authority name, which is the substrate's
-        # own park, and including `depth_grant_name(...).occurrence(2)`.
+            raise ReservedEventName(name.stored(), parsed=True)
+        # A scoped authority name and an occurrence of one, such as
+        # `depth_grant_name(...).occurrence(2)`, are the substrate's own parks.
         case Key():
             return name
         case str() if leads_with_an_arm(name):
-            _refuse_an_op_identity_as_an_address(name)
-            raise AssertionError("unreachable — the call above raises")  # pragma: no cover
+            raise OpIdentityAwaited(name)
         case str() if _leading_tag(name) in RESERVED_AUTHORITY_TAGS:
-            raise ValueError(
-                f"await name {name!r} is in a reserved authority namespace "
-                f"({' '.join(RESERVED_AUTHORITY_TAGS)}): an event delivered by that name "
-                f"answers a substrate gate — an approval, a grant, a park — and Absurd delivers "
-                f"by name "
-                f"first-emit-wins across the queue, so this await would consume the answer meant "
-                f"for it. Name the await on your own subject, or compose a `Key` if you ARE the "
-                f"substrate."
-            )
-        case str() if TERM_SEPARATOR in name:
-            raise ValueError(
-                f"await name {name!r} contains the frame delimiter {TERM_SEPARATOR!r}, which "
-                f"forges a `scoped(...)` boundary: inside one scope this name parks where a real "
-                f"nested scope would, so two different parks share one name. Express nesting with "
-                f"`scoped(...)` and keep the await's own name flat."
-            )
-        # The author boundary: `authored_key` refuses an occurrence, which is the RUNTIME's to
-        # assign. The `Key` arms are deliberately NOT checked for one — the substrate's own second
-        # ask of an authority name IS `depth_grant_name(...).occurrence(2)`.
+            raise ReservedEventName(name, parsed=False)
+        case str() if _holds_structure(name):
+            raise FormattedEventName(name)
         case str():
             return authored_key(name)
         case _:
             raise TypeError(
                 f"an await name is a `str` or a composed `Key`, not {type(name).__name__}."
             )
+
+
+def emitted_name(name: str | Key) -> Key:
+    """The name an emitter delivers on.
+
+    ===================================  ====================================
+    `name`                               delivered on
+    ===================================  ====================================
+    a `Key`                              the key as it stands
+    one tag as text                      that tag
+    text holding a metacharacter         refused: `FormattedEventName`
+    ===================================  ====================================
+
+    A name read back from a store is structured, so its reader passes `Key.parse(text)`."""
+    match name:
+        case Key():
+            return name
+        case str() if _holds_structure(name):
+            raise FormattedEventName(name)
+        case str():
+            return Key.parse(name)
+        case unreachable:
+            assert_never(unreachable)

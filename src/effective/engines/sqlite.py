@@ -61,6 +61,7 @@ from effective.ops import (
     LedgerRow,
     WaitOutcome,
     Writer,
+    emitted_name,
     noted,
     refuse_a_lineage_collision,
     refuse_placed_writer_collision,
@@ -730,7 +731,7 @@ class SqliteTaskContext:
     def clock(self) -> float:
         return self._clock()
 
-    def emit_event(self, name: str, payload: Any, /) -> None:
+    def emit_event(self, name: str | Key, payload: Any, /) -> None:
         """Emit an event from INSIDE a running task — how a spawned child answers its parent.
 
         Delivery is BROADCAST, keyed by name alone across the queue, the same as the reference
@@ -745,7 +746,7 @@ class SqliteTaskContext:
         Wrapped in the write lock like every other write on this connection, so a child emitting
         while its own gather branches commit stays serialized."""
         with self._guard:
-            _deliver(self.conn, name, payload, self._clock())
+            _deliver(self.conn, emitted_name(name).stored(), payload, self._clock())
 
     def repark(self, name: str, /) -> None:
         """Park the task `REPARK_MARGIN` past its clock, spending no attempt. `name` is
@@ -1028,7 +1029,7 @@ class SqliteApp:
             ).fetchone()
         return inserted[0]
 
-    def emit_event(self, name: str, payload: Any) -> None:
+    def emit_event(self, name: str | Key, payload: Any) -> None:
         """Deliver an event and wake EVERY task parked on it (the resume side of await).
 
         Events are immutable once emitted — first write wins, mirroring the
@@ -1045,7 +1046,7 @@ class SqliteApp:
         gather runs), and `_deliver` is two statements (the insert and the wake) that a reader
         must not see half of."""
         with self.write_lock:
-            _deliver(self.conn, name, payload, self.clock())
+            _deliver(self.conn, emitted_name(name).stored(), payload, self.clock())
 
     def cancel(self, task_id: UUID) -> None:
         """Cancel a task that has not finished, and deliver `Cancelled` to the parent that spawned

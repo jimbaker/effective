@@ -366,7 +366,9 @@ def test_a_depth_grant_park_through_run_id_extends_the_hops(backend):
         str(parked.wake_event) == depth_grant_name(outcome.run_id, depth=2, generation=0).stored()
     )
 
-    backend.emit_event(outcome.task, parked.wake_event, ruled(Grant(add_depth=4).model_dump()))
+    backend.emit_event(
+        outcome.task, Key.parse(parked.wake_event), ruled(Grant(add_depth=4).model_dump())
+    )
     snap = backend.run_until_result(outcome.task)
     assert snap.state == "completed", snap
     assert snap.result is False

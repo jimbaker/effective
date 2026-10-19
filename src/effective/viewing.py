@@ -227,7 +227,7 @@ class ViewingCtx:
         self._reached.append(name)
         return self.peek_step(name)[1]
 
-    def emit_event(self, name: str, payload: Any, /) -> Never:
+    def emit_event(self, name: str | Key, payload: Any, /) -> Never:
         """Always refuses. An emission is a durable write and the one a viewer is most likely to
         reach for, since answering a park looks like the natural thing to do from a pane holding a
         ctx. It is not this seam's to make: `effective.parked.answer` takes the park a reader

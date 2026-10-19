@@ -145,7 +145,7 @@ def test_a_wait_whose_deadline_is_decades_out_parks_and_takes_its_arrival(backen
     name = review_name(str(uuid4()))
     outcome = run(backend, lambda _run_id: _waits_for_an_absolute_arrival(name), _Tool())
     assert outcome.snap.state == "waiting", outcome.snap
-    backend.emit_event(outcome.task, name.stored(), {"ok": True})
+    backend.emit_event(outcome.task, name, {"ok": True})
     assert backend.run_until_result(outcome.task).result == "Arrived"
 
 
@@ -270,7 +270,7 @@ def test_the_op_runs_end_to_end_on_the_embedded_engine(tmp_path) -> None:
 
         task = app.spawn("waiter", {})
         app.work_batch()
-        app.emit_event("ev:x", {"n": 7})
+        app.emit_event(NAME, {"n": 7})
         snap = app.run_until_result(task)
         assert snap is not None
         assert snap.state == "completed", snap
@@ -422,7 +422,7 @@ def test_a_layer_injected_wait_settles_clear_of_the_op_it_wraps(tmp_path) -> Non
             return DurableHandler(ctx, _Tool(), op_layers=(wait_first,)).run(wf)
 
         app.spawn("waiter", {})
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(NAME, {"n": 1})
         app.work_batch()
         stored = dict(app.conn.execute("SELECT name, state FROM checkpoints").fetchall())
         assert stored.get("step:s1") == "1", f"the step's checkpoint holds {stored!r}"
@@ -522,7 +522,7 @@ def test_a_wake_is_spent_by_the_wait_it_answers(tmp_path) -> None:
         app.conn.execute(
             "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(NAME, {"n": 1})
         app.run_until_result(task)
         assert answers == ["expired", "arrived"], f"the wake answered twice: {answers}"
     finally:
@@ -547,7 +547,7 @@ def test_an_authored_wait_settles_under_its_own_name(tmp_path) -> None:
             return DurableHandler(ctx, _Tool()).run(wf)
 
         task = app.spawn("waiter", {})
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(NAME, {"n": 1})
         app.run_until_result(task)
         names = [r[0] for r in app.conn.execute("SELECT name FROM checkpoints").fetchall()]
         assert names == ["event;ev:x"], f"the first ask settled at {names}"
@@ -636,7 +636,7 @@ def test_a_reclaim_reads_the_store_rather_than_a_dead_claims_wake(tmp_path) -> N
         app.conn.execute(
             "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(NAME, {"n": 1})
         assert _row(app, task) == ("waiting", "ev:x")
 
         # a worker claims it and dies holding the wake

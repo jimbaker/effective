@@ -44,7 +44,7 @@ from effective.graphview import (
 from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Index, Key, Segment, compose_key
+from effective.keys import Index, Key, Segment, Subject, compose_key
 from effective.ops import AwaitEvent, LedgerRow, Step
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked_conn
 
@@ -676,7 +676,7 @@ def small_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    decision = yield from await_event(f"review:{message_id}", dict)
+    decision = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"reviewed:{Segment(message_id)}"), kind="reviewed")
     )
@@ -769,7 +769,7 @@ def _run(
     task_id = app.spawn(name, {"run_id": run_id, "message_id": message_id})
     _no_failure(app.run_until_result(task_id, max_batches=8))
     if answer is not None:
-        app.emit_event(f"review:{message_id}", answer)
+        app.emit_event(compose_key(t"review:{Subject(message_id)}"), answer)
         _no_failure(app.run_until_result(task_id, max_batches=8))
     return task_id
 
@@ -1112,7 +1112,7 @@ def test_a_parked_run_projects_a_pending_node_end_to_end_on_the_embedded_engine(
     )  # ...and it survives the fold
 
     # --- the resume transition ---------------------------------------------------------------
-    app.emit_event("review:m-p", {"decision": "approve"})
+    app.emit_event(compose_key(t"review:{Subject('m-p')}"), {"decision": "approve"})
     snap = app.run_until_result(task_id, max_batches=8)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1183,7 +1183,7 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
     answer_at = fork_event_name("r-fork", compose_key(t"review:{Segment(message_id)}"))
     child_id = app.spawn("child", {"run_id": "r-fork"})
     app.run_until_result(child_id, max_batches=8)
-    app.emit_event(answer_at.stored(), {"decision": "approve"})
+    app.emit_event(answer_at, {"decision": "approve"})
     snap = app.run_until_result(child_id, max_batches=8)
     assert snap is not None
     assert snap.state == "completed", snap

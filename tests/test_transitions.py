@@ -23,7 +23,16 @@ from typing import Any
 import pytest
 from test_futile_retries import Flaky, ReparkReturns, Tools, ok_branch
 
-from effective.api import await_event, await_until, call_tool, gather, race, sleep_until
+from effective.api import (
+    GatherBranch,
+    await_event,
+    await_until,
+    call_tool,
+    gather,
+    qualified_event_name,
+    race,
+    sleep_until,
+)
 from effective.engines.absurd import AbsurdEngine, ConcurrentAbsurdCtx, sdk_signals
 from effective.govern import Refused, all_refusals
 from effective.handlers import base, durable
@@ -520,7 +529,10 @@ def bounded():
 WORKLOADS = {
     "steps": (steps, [("go", {"ok": True})]),
     "a failing tool": (a_failing_tool, []),
-    "a gather of awaits": (a_gather_of_awaits, [("gather:0,0;ev", {"ok": True})]),
+    "a gather of awaits": (
+        a_gather_of_awaits,
+        [(qualified_event_name(GatherBranch(0, 0), name="ev"), {"ok": True})],
+    ),
     "a gather of sleeps": (a_gather_of_sleeps, []),
     "a gather of past sleeps": (a_gather_of_past_sleeps, []),
     "a race": (a_race, []),
@@ -712,7 +724,7 @@ def test_a_wake_race_an_engine_answers_is_tabled(engine, missing, repark):
     def workflow():
         return (yield from gather([lambda: await_event("ev", dict)]))
 
-    engine.emit_event("gather:0,0;ev", {"ok": True})
+    engine.emit_event(qualified_event_name(GatherBranch(0, 0), name="ev"), {"ok": True})
     attempts = observe(engine, workflow, set(), [], missing=missing)
     assert ("DurableHandler._join", "repark", repark) in seen_in(attempts)
     assert seen_in(attempts) - TRANSITIONS.keys() == set()

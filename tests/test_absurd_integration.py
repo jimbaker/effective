@@ -109,7 +109,7 @@ def test_hitl_suspends_then_resumes_and_ledger_records_review():
         assert mid_snap.state != "completed"  # parked at the event, not done yet
     assert _ledger_kinds(mid) == ["assessment"]  # only the pre-suspension event so far
 
-    app.emit_event(review_name(mid).stored(), {"decision": "approve", "actor": "approver"})
+    app.emit_event(review_name(mid), {"decision": "approve", "actor": "approver"})
     snap = _run_until_result(app, spawned["task_id"])
 
     assert snap is not None

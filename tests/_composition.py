@@ -101,7 +101,7 @@ from effective.fork import join_fork, spawn_fork
 from effective.handlers.base import step_key
 from effective.handlers.durable import spawn_done_name
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended
-from effective.keys import Key, Name, compose_key
+from effective.keys import Index, Key, Name, compose_key
 from effective.ops import Writer
 from effective.skills import Pin
 from effective.spawning import ChildAnswer, Returned
@@ -404,8 +404,10 @@ promoted durable subset rather than the infra-free grid); and the task-addressin
 
 CHILD_RUN_ID = "c1"
 SPAWN_KEY = "tool:spawn,c1"
-DONE_EVENT = spawn_done_name(Writer(task=str(uuid4()), placement=Key.parse(SPAWN_KEY))).stored()
+DONE_KEY = spawn_done_name(Writer(task=str(uuid4()), placement=Key.parse(SPAWN_KEY)))
 """What the CHILD task emits, from its own params — unframed, because it has never seen ours."""
+DONE_EVENT = DONE_KEY.stored()
+"""`DONE_KEY` on the wire, for the assertions that read text."""
 FORK_ANSWER = ChildAnswer(answer=Returned(value=None))
 """A fork child's answer, as the child emits it."""
 
@@ -482,13 +484,11 @@ def expected_keys(*chain: Built, leaf_name: str = LEAF) -> list[str]:
     enclosing: tuple[Frame, ...] = ()
     for built in chain:
         keys += [
-            qualified_event_name(
-                *enclosing, *pro.frames, name=step_key(pro.name).stored()
-            ).stored()
+            qualified_event_name(*enclosing, *pro.frames, name=step_key(pro.name)).stored()
             for pro in built.overhead
         ]
         enclosing += built.frames
-    keys.append(qualified_event_name(*enclosing, name=step_key(leaf_name).stored()).stored())
+    keys.append(qualified_event_name(*enclosing, name=step_key(leaf_name)).stored())
     return keys
 
 
@@ -510,7 +510,7 @@ def expected_responses(*chain: Built) -> dict[str, Any]:
     enclosing: tuple[Frame, ...] = ()
     for built in chain:
         canned |= {
-            qualified_event_name(*enclosing, *pro.frames, name=pro.name).stored(): value
+            qualified_event_name(*enclosing, *pro.frames, name=Key.parse(pro.name)).stored(): value
             for pro, value in _prologue_responses(built)
         }
         enclosing += built.frames
@@ -518,7 +518,7 @@ def expected_responses(*chain: Built) -> dict[str, Any]:
     return canned
 
 
-PARK_EVENT = "ev:1"
+PARK_EVENT = compose_key(t"ev:{Index(1)}")
 """The name the parking leaf awaits — RELATIVE, so the frames must complete it."""
 
 
@@ -655,7 +655,7 @@ TERMINALS: Mapping[str, Terminal] = {
         name="fork",
         prologue=spawn_at_root,
         body=lambda handle: lambda: join_fork(handle),
-        responses={SPAWN_KEY: Spawned(task_id=uuid4(), done_event=Key.parse(DONE_EVENT))},
+        responses={SPAWN_KEY: Spawned(task_id=uuid4(), done_event=DONE_KEY)},
         outcome=Suspended,
         refusal_names=(DONE_EVENT, "is an ABSOLUTE event name", "loop", "marginal_sweep"),
     ),

@@ -13,7 +13,7 @@ from typing import Any, ClassVar, assert_never
 from uuid import uuid4
 
 import pytest
-from _authority import ruled
+from _authority import ruled, run_scoped_approval
 from _conformance import (
     RULING_GOAL,
     Approval,
@@ -84,7 +84,7 @@ from effective.api import (
     qualified_event_name,
     sleep_until,
 )
-from effective.budget import Grant, depth_grant_name
+from effective.budget import Grant, budget_grant_name, depth_grant_name
 from effective.cost import FORMAT_PARAM, RecordedFormat, Usage, serve
 from effective.domain import CallTool, DomainOp
 from effective.engines import REPARK_MARGIN
@@ -92,7 +92,7 @@ from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
 from effective.handlers.base import op_key, step_key
 from effective.handlers.durable import DurableHandler, SeedingCtx, fork_event_name
-from effective.keys import Key, Segment, compose_key, frame_path
+from effective.keys import Index, Key, Run, Segment, compose_key, frame_path
 from effective.layers import retry, retry_domain
 from effective.machine.spec import Ctx
 from effective.machine.trampoline import appending_states, canonical_violations
@@ -107,7 +107,7 @@ from effective.ops import (
     Writer,
 )
 from effective.parked import answer, pending_key
-from effective.permission import APPROVE, Allow, Deny, Escalate, as_policy, cascade, human, rules
+from effective.permission import Allow, Deny, Escalate, as_policy, cascade, human, rules
 from effective.viewing import OutranTheTape, ViewingCtx
 
 # The cross-engine `backend` fixture now lives in `conftest.py` — two modules need it
@@ -251,7 +251,7 @@ def test_suspend_resume_via_event(backend):
     assert snap.state != "completed"  # parked on the event (engine-specific state name)
     assert domain.calls == ["a"]
 
-    backend.emit_event(task_id, review_name(run_id).stored(), {"ok": True})
+    backend.emit_event(task_id, review_name(run_id), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -293,7 +293,7 @@ def test_parked_reader_finds_the_park_and_drops_it_on_resume(backend):
     assert park.params["run_id"] == run_id  # run_id is a params convention, not a column (L-2)
     assert park.state == PARKED  # normalized: 'waiting' on SQLite, 'sleeping' on Absurd
 
-    backend.emit_event(task_id, review_name(run_id).stored(), {"ok": True})
+    backend.emit_event(task_id, review_name(run_id), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -327,7 +327,7 @@ def test_the_parked_run_projects_the_SAME_pending_node_on_both_engines(backend):
     ]
     assert f'{{{{"event;review:{run_id}<br/>(parked)"}}}}' in to_mermaid(graph)
 
-    backend.emit_event(task_id, review_name(run_id).stored(), {"ok": True})
+    backend.emit_event(task_id, review_name(run_id), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -358,21 +358,21 @@ def test_parked_reader_reports_one_branch_of_a_parked_gather(backend):
 
     (park,) = backend.parked(task_id)
     assert (
-        park.wake_event == branched(0, 0, compose_key(t"ev0:{Segment(run_id)}")).stored()
+        park.wake_event == branched(0, 0, compose_key(t"ev:{Index(0)},{Run(run_id)}")).stored()
     )  # branch 2 is parked too, and unlisted
 
     backend.emit_event(
-        task_id, branched(0, 0, compose_key(t"ev0:{Segment(run_id)}")).stored(), {"n": 0}
+        task_id, branched(0, 0, compose_key(t"ev:{Index(0)},{Run(run_id)}")), {"n": 0}
     )
     backend.run_until_result(task_id)
     (park,) = backend.parked(task_id)
     assert (
-        park.wake_event == branched(0, 2, compose_key(t"ev2:{Segment(run_id)}")).stored()
+        park.wake_event == branched(0, 2, compose_key(t"ev:{Index(2)},{Run(run_id)}")).stored()
     )  # a new park, not a completion
 
     # Finish the run: the shared queue rule is that a spawned task reaches a TERMINAL state.
     backend.emit_event(
-        task_id, branched(0, 2, compose_key(t"ev2:{Segment(run_id)}")).stored(), {"n": 2}
+        task_id, branched(0, 2, compose_key(t"ev:{Index(2)},{Run(run_id)}")), {"n": 2}
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -391,8 +391,8 @@ def test_event_emission_is_first_write_wins(backend):
     backend.register(name, gated_wf, domain, Fault(None), ())
     task_id = backend.spawn(name, run_id)
     backend.run_until_result(task_id)  # park on the review event
-    backend.emit_event(task_id, review_name(run_id).stored(), {"n": 1})
-    backend.emit_event(task_id, review_name(run_id).stored(), {"n": 999})  # must NOT overwrite
+    backend.emit_event(task_id, review_name(run_id), {"n": 1})
+    backend.emit_event(task_id, review_name(run_id), {"n": 999})  # must NOT overwrite
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -450,7 +450,7 @@ def test_durable_scoped_await_parks_on_the_scoped_event_name(backend):
     assert snap.state != "completed"  # parked (engine-specific state name)
 
     # The BARE name is not what it parked on — the scope is real, not decoration.
-    backend.emit_event(task_id, review_name(run_id).stored(), {"ok": False})
+    backend.emit_event(task_id, review_name(run_id), {"ok": False})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state != "completed", "the bare event name must not wake a scoped await"
@@ -458,7 +458,7 @@ def test_durable_scoped_await_parks_on_the_scoped_event_name(backend):
     backend.emit_event(
         task_id,
         # lint: terminal-hole — a `Key` splice
-        scoped_by(compose_key(t"rec:{0}"), review_name(run_id)).stored(),
+        scoped_by(compose_key(t"rec:{0}"), review_name(run_id)),
         {"ok": True},
     )
     snap = backend.run_until_result(task_id)
@@ -475,8 +475,8 @@ def test_durable_park_carries_every_frame_through_a_nested_gather(backend):
     here, not spelled, so this asserts the engine agrees with the emitter contract rather than
     with a literal that could drift alongside a bug."""
     contract_for = lambda run_id: qualified_event_name(  # noqa: E731 — one expression, used twice
-        GatherBranch(0, 0), compose_key(t"s:{0}"), GatherBranch(0, 0), name=f"ev:{run_id}"
-    ).stored()
+        GatherBranch(0, 0), compose_key(t"s:{0}"), GatherBranch(0, 0), name=ev_name(run_id)
+    )
     # ARMED with a fault: a crash before each ctx op, so the frames are re-derived by
     # RE-EXECUTION on every resume rather than only on the first pass. k=0 is the no-crash control.
     for k in range(0, 4):
@@ -492,9 +492,7 @@ def test_durable_park_carries_every_frame_through_a_nested_gather(backend):
         assert snap.state != "completed", f"k={k}: {snap}"
 
         # The name a frame-dropping park would have used — must NOT wake it.
-        backend.emit_event(
-            task_id, branched(0, 0, branched(0, 0, ev_name(run_id))).stored(), {"ok": False}
-        )
+        backend.emit_event(task_id, branched(0, 0, branched(0, 0, ev_name(run_id))), {"ok": False})
         snap = backend.run_until_result(task_id)
         assert snap is not None, f"k={k}"
         assert snap.state != "completed", f"k={k}: a frame-short name must not wake a scoped park"
@@ -557,7 +555,7 @@ def test_scoped_park_crash_at_every_op_resumes_on_the_scoped_name(backend):
         backend.emit_event(
             task_id,
             # lint: terminal-hole — a `Key` splice
-            scoped_by(compose_key(t"rec:{0}"), review_name(run_id)).stored(),
+            scoped_by(compose_key(t"rec:{0}"), review_name(run_id)),
             {"ok": True},
         )
         snap = backend.run_until_result(task_id)
@@ -626,7 +624,7 @@ def test_durable_gather_branch_await_parks_and_resumes(backend):
     assert domain.calls == ["a"]  # the sibling ran to completion in the round
 
     backend.emit_event(
-        task_id, branched(0, 1, ev_name(run_id)).stored(), {"ok": True}
+        task_id, branched(0, 1, ev_name(run_id)), {"ok": True}
     )  # the QUALIFIED name
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -652,14 +650,14 @@ def test_durable_gather_two_parked_branches_serialized_wakes(backend):
     assert domain.calls == ["a"]  # the tool branch committed in the first round
 
     backend.emit_event(
-        task_id, branched(0, 2, compose_key(t"ev2:{Segment(run_id)}")).stored(), {"n": 2}
+        task_id, branched(0, 2, compose_key(t"ev:{Index(2)},{Run(run_id)}")), {"n": 2}
     )  # out of order: no wake
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed"), snap  # still parked on branch 0
 
     backend.emit_event(
-        task_id, branched(0, 0, compose_key(t"ev0:{Segment(run_id)}")).stored(), {"n": 0}
+        task_id, branched(0, 0, compose_key(t"ev:{Index(0)},{Run(run_id)}")), {"n": 0}
     )  # the armed event
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -682,12 +680,12 @@ def test_durable_gather_park_keys_distinct_across_two_same_shaped_gathers(backen
     assert snap is not None
     assert snap.state not in ("completed", "failed"), snap
 
-    backend.emit_event(task_id, branched(0, 1, ev_name(run_id)).stored(), {"g": 1})
+    backend.emit_event(task_id, branched(0, 1, ev_name(run_id)), {"g": 1})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed"), snap  # now parked on gather 1's await
 
-    backend.emit_event(task_id, branched(1, 1, ev_name(run_id)).stored(), {"g": 2})
+    backend.emit_event(task_id, branched(1, 1, ev_name(run_id)), {"g": 2})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -709,9 +707,7 @@ def test_durable_nested_gather_park_composes_the_prefix(backend):
     assert snap.state not in ("completed", "failed"), snap
     assert domain.calls == ["b"]  # the outer sibling committed
 
-    backend.emit_event(
-        task_id, branched(0, 0, branched(0, 0, ev_name(run_id))).stored(), {"deep": True}
-    )
+    backend.emit_event(task_id, branched(0, 0, branched(0, 0, ev_name(run_id))), {"deep": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -739,7 +735,9 @@ def test_durable_descend_leaf_parks_on_the_gather_qualified_grant(backend):
     # The unqualified name a call-site reader would guess: no wake.
     backend.emit_event(
         task_id,
-        f"rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
+        qualified_event_name(
+            compose_key(t"rec:{1}"), name=depth_grant_name(run_id, depth=1, generation=0)
+        ),
         ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
@@ -748,7 +746,11 @@ def test_durable_descend_leaf_parks_on_the_gather_qualified_grant(backend):
 
     backend.emit_event(
         task_id,
-        f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
+        qualified_event_name(
+            GatherBranch(0, 1),
+            compose_key(t"rec:{1}"),
+            name=depth_grant_name(run_id, depth=1, generation=0),
+        ),
         ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
@@ -776,7 +778,11 @@ def test_durable_descend_multi_grant_round_trip(backend):
 
     backend.emit_event(
         task_id,
-        f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
+        qualified_event_name(
+            GatherBranch(0, 1),
+            compose_key(t"rec:{1}"),
+            name=depth_grant_name(run_id, depth=1, generation=0),
+        ),
         ruled({"add_depth": 2}),
     )
     snap = backend.run_until_result(task_id)
@@ -786,7 +792,11 @@ def test_durable_descend_multi_grant_round_trip(backend):
 
     backend.emit_event(
         task_id,
-        f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=3, generation=0).stored()}",
+        qualified_event_name(
+            GatherBranch(0, 1),
+            compose_key(t"rec:{1}"),
+            name=depth_grant_name(run_id, depth=3, generation=0),
+        ),
         ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
@@ -843,7 +853,7 @@ def test_durable_gather_park_crash_at_every_op(backend):
         snap = backend.run_until_result(task_id)
         assert snap is not None, f"k={k}"
         if snap.state not in ("completed", "failed"):  # parked — deliver and drain
-            backend.emit_event(task_id, branched(0, 1, ev_name(run_id)).stored(), {"ok": True})
+            backend.emit_event(task_id, branched(0, 1, ev_name(run_id)), {"ok": True})
             snap = backend.run_until_result(task_id)
         assert snap is not None, f"k={k}"
         assert snap.state == "completed", f"k={k}: {snap}"
@@ -902,7 +912,7 @@ def test_durable_gather_wake_race_reparks_and_completes_without_burning_an_attem
     snap = backend.run_until_result(baseline_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed")
-    backend.emit_event(baseline_id, branched(0, 1, ev_name(run_id)).stored(), {"ok": True})
+    backend.emit_event(baseline_id, branched(0, 1, ev_name(run_id)), {"ok": True})
     snap = backend.run_until_result(baseline_id)
     assert snap is not None
     assert snap.state == "completed"
@@ -974,13 +984,13 @@ def test_durable_double_wake_race_still_burns_no_attempt(held_backend):
     assert snap is not None
     assert snap.state not in ("completed", "failed")
     backend.emit_event(
-        baseline_id, branched(0, 0, compose_key(t"ev1:{Segment(run_id)}")).stored(), {"n": 1}
+        baseline_id, branched(0, 0, compose_key(t"ev1:{Segment(run_id)}")), {"n": 1}
     )
     snap = backend.run_until_result(baseline_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed")  # now parked on the second await
     backend.emit_event(
-        baseline_id, branched(0, 0, compose_key(t"ev2:{Segment(run_id)}")).stored(), {"n": 2}
+        baseline_id, branched(0, 0, compose_key(t"ev2:{Segment(run_id)}")), {"n": 2}
     )
     snap = backend.run_until_result(baseline_id)
     assert snap is not None
@@ -1095,7 +1105,7 @@ def test_an_absolute_await_reroutes_around_a_scope_on_both_engines(backend):
     task_id = backend.spawn(name, run_id, max_attempts=1)
     backend.run_until_result(task_id)
 
-    backend.emit_event(task_id, sub_scope(run_id).stored(), {"ok": True})
+    backend.emit_event(task_id, sub_scope(run_id), {"ok": True})
     snap = backend.run_until_result(task_id)
 
     assert snap is not None
@@ -1240,6 +1250,10 @@ def _gate_send_email(op):
     return Allow()
 
 
+SEND_EMAIL_ACTION = Key.parse("step;code:action,0,c;tool:send_email")
+"""The op key the code minter gives `run_code_wf`'s action, spelled: that minter is private."""
+
+
 def test_durable_run_code_action_parks_for_human_approval(backend):
     """Mid-code HITL: the cascade's human tier injects an AwaitEvent at the action
     op — the task parks durably *between two code segments*, with the function
@@ -1254,19 +1268,8 @@ def test_durable_run_code_action_parks_for_human_approval(backend):
     cascades must scope the event name the same way (the gated_wf rule)."""
     domain = CodeActionDomain()
     run_id = f"r-{uuid4().hex[:8]}"
-    approve_event = f"approve:{run_id};step;code:action,0,c;tool:send_email"
-    scoped = human(
-        Approval,
-        # Composed, not f-stringed: a `Key` has no `__str__`, so an f-string here would
-        # bake `Key(_value=...)` into the park name; and the composer is where a
-        # run-scoped approval name belongs regardless.
-        event_name=lambda op: compose_key(
-            # lint: terminal-hole — `op_key` returns a `Key`, which the composer splices by
-            # INDUCTION; wrapping it in a `Segment` would be a regression, and since `Segment`
-            # takes a `str` it now refuses one outright.
-            t"{APPROVE}:{Segment(run_id)};{op_key(op):domain=identity}"
-        ),
-    )
+    approve_event = run_scoped_approval(run_id, SEND_EMAIL_ACTION)
+    scoped = human(Approval, event_name=lambda op: run_scoped_approval(run_id, op_key(op)))
     name = f"code-{run_id}"
     gate = cascade([rules(_gate_send_email), scoped])
     backend.register(name, run_code_wf, domain, Fault(None), (gate,))
@@ -1381,18 +1384,7 @@ def test_durable_run_code_gather_with_human_tier_parks_per_branch(backend):
     (serialized wakes), each action fires exactly once, and the world is untouched while parked."""
     domain = CodeActionDomain()
     run_id = f"r-{uuid4().hex[:8]}"
-    scoped = human(
-        Approval,
-        # Composed, not f-stringed: a `Key` has no `__str__`, so an f-string here would
-        # bake `Key(_value=...)` into the park name; and the composer is where a
-        # run-scoped approval name belongs regardless.
-        event_name=lambda op: compose_key(
-            # lint: terminal-hole — `op_key` returns a `Key`, which the composer splices by
-            # INDUCTION; wrapping it in a `Segment` would be a regression, and since `Segment`
-            # takes a `str` it now refuses one outright.
-            t"{APPROVE}:{Segment(run_id)};{op_key(op):domain=identity}"
-        ),
-    )
+    scoped = human(Approval, event_name=lambda op: run_scoped_approval(run_id, op_key(op)))
     layers = (cascade([rules(_gate_send_email), scoped]),)
     name = f"code-{run_id}"
     backend.register(name, gather_run_code_wf, domain, Fault(None), layers)
@@ -1403,14 +1395,22 @@ def test_durable_run_code_gather_with_human_tier_parks_per_branch(backend):
     assert snap.state not in ("completed", "failed"), snap  # parked on branch 0's approval
     assert domain.action_calls == []  # the world untouched while parked
 
-    approve = f"approve:{run_id};step;code:action,0,c;tool:send_email"
-    backend.emit_event(task_id, f"gather:0,0;{approve}", ruled({"decision": "approve"}))
+    approve = run_scoped_approval(run_id, SEND_EMAIL_ACTION)
+    backend.emit_event(
+        task_id,
+        qualified_event_name(GatherBranch(0, 0), name=approve),
+        ruled({"decision": "approve"}),
+    )
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed"), snap  # branch 1 still needs ITS approval
     assert len(domain.action_calls) == 1  # branch 0's action fired, exactly once
 
-    backend.emit_event(task_id, f"gather:0,1;{approve}", ruled({"decision": "approve"}))
+    backend.emit_event(
+        task_id,
+        qualified_event_name(GatherBranch(0, 1), name=approve),
+        ruled({"decision": "approve"}),
+    )
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1435,7 +1435,7 @@ def _drain_with_grants(backend, task_id, run_id, grant, *, max_parks=6):
         assert snap is not None
         if snap.state in ("completed", "failed", "cancelled"):
             return snap, parks
-        backend.emit_event(task_id, f"budget-grant:{run_id},{parks}", ruled(grant))
+        backend.emit_event(task_id, budget_grant_name(run_id, parks), ruled(grant))
         parks += 1
     return backend.run_until_result(task_id), parks
 
@@ -1752,7 +1752,7 @@ def test_checkpoint_reader_excludes_the_engines_await_bookkeeping(backend):
     backend.register(name, gated_wf, domain, Fault(), ())
     task_id = backend.spawn(name, run_id)
     backend.run_until_result(task_id)  # parks on review:{run_id}
-    backend.emit_event(task_id, review_name(run_id).stored(), {"decision": "approve"})
+    backend.emit_event(task_id, review_name(run_id), {"decision": "approve"})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1831,19 +1831,17 @@ def test_a_seeded_prefix_value_survives_this_ENGINE_s_own_store(backend):
 
         return seeded_wf
 
-    base_await = compose_key(t"review:{Segment(subject)}").stored()
-    # `Key.parse`: this name is the SUBSTRATE's (`fork_event_name` composes it on the real
+    base_await = compose_key(t"review:{Segment(subject)}")
+    # This name is the SUBSTRATE's (`fork_event_name` composes it on the real
     # path), hand-built here to stand in for the ctx rename. Author text may not name `fork:`.
-    child_await = fork_event_name(subject, Key.parse(base_await))
+    child_await = fork_event_name(subject, base_await)
     seeded_wf = make_wf(base_await)
     base_run = f"seedbase-{subject}"
     base_name = f"seed-base-{subject}"
     backend.register(base_name, seeded_wf, domain, Fault(), ())
     base_id = backend.spawn(base_name, base_run)
     backend.run_until_result(base_id)
-    backend.emit_event(
-        base_id, compose_key(t"review:{Segment(subject)}").stored(), {"decision": "reject"}
-    )
+    backend.emit_event(base_id, compose_key(t"review:{Segment(subject)}"), {"decision": "reject"})
     snap = backend.run_until_result(base_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1871,7 +1869,7 @@ def test_a_seeded_prefix_value_survives_this_ENGINE_s_own_store(backend):
     )
     child_id = backend.spawn(child_name, child_run)
     backend.run_until_result(child_id)
-    backend.emit_event(child_id, child_await.stored(), {"decision": "approve"})
+    backend.emit_event(child_id, child_await, {"decision": "approve"})
     snap = backend.run_until_result(child_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1947,7 +1945,7 @@ def test_durable_park_inside_recurses_fold_carries_the_fold_frames(backend):
     # They were one string before the arm, which is why this assertion could compare them. Ask
     # `step_key` for the leaf rather than re-spelling it, so the two stay derived from the same
     # minters the emitter contract uses.
-    committed = qualified_event_name(*fold_frames, name=step_key("merge").stored())
+    committed = qualified_event_name(*fold_frames, name=step_key("merge"))
     assert committed.stored() in set(backend.checkpoint_keys(task_id)), (
         "the merge step must commit UNDER the fold frames"
     )
@@ -1957,7 +1955,7 @@ def test_durable_park_inside_recurses_fold_carries_the_fold_frames(backend):
     assert committed.stored() == address.stored().replace(";merge", ";step:merge")
 
     # The name a fold-frame-blind park would have used — must not wake it.
-    backend.emit_event(task_id, branched(1, 0, ev_name(run_id)).stored(), {"extra": 99})
+    backend.emit_event(task_id, branched(1, 0, ev_name(run_id)), {"extra": 99})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed"), (
@@ -1965,7 +1963,7 @@ def test_durable_park_inside_recurses_fold_carries_the_fold_frames(backend):
     )
 
     backend.emit_event(
-        task_id, qualified_event_name(*fold_frames, name=f"ev:{run_id}").stored(), {"extra": 5}
+        task_id, qualified_event_name(*fold_frames, name=ev_name(run_id)), {"extra": 5}
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -2034,7 +2032,9 @@ def test_an_event_emitted_before_the_await_is_still_found_on_both_engines(backen
     token = _fresh_token()
     backend.register(f"early-{token}", _awaiting_shared_name(token), None, Fault(), ())
     task_id = backend.spawn(f"early-{token}", "run-early")
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # nothing is parked yet
+    backend.emit_event(
+        task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # nothing is parked yet
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2058,7 +2058,9 @@ def test_one_emit_wakes_EVERY_waiter_on_the_name_on_both_engines(backend):
     parked = [backend.run_until_result(t).state for t in (first, second)]
     assert all(state in ("waiting", "sleeping") for state in parked), parked
 
-    backend.emit_event(first, f"shared:{token}", {"ok": True})  # ONE emit, at `first`
+    backend.emit_event(
+        first, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # ONE emit, at `first`
     assert backend.run_until_result(first).state == "completed"
     assert backend.run_until_result(second).state == "completed"
 
@@ -2089,7 +2091,9 @@ def test_a_bounded_wait_takes_an_event_already_emitted_on_both_engines(backend):
     deadline = datetime.now().astimezone() + timedelta(hours=1)
     backend.register(f"bw-early-{token}", _waiting_until(token, deadline), None, Fault(), ())
     task_id = backend.spawn(f"bw-early-{token}", "run-bw-early")
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # nothing is parked yet
+    backend.emit_event(
+        task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # nothing is parked yet
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2109,7 +2113,7 @@ def test_a_bounded_wait_parks_then_takes_its_event_on_both_engines(backend):
     parked = backend.run_until_result(task_id)
     assert parked.state in ("waiting", "sleeping"), parked
 
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})
+    backend.emit_event(task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2170,8 +2174,10 @@ def test_a_bounded_wait_that_expired_ignores_a_later_event_on_both_engines(backe
     parked = backend.run_until_result(task_id)
     assert parked.state in ("waiting", "sleeping"), parked
 
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # the late event
-    backend.emit_event(task_id, f"release:{token}", {"ok": True})
+    backend.emit_event(
+        task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # the late event
+    backend.emit_event(task_id, compose_key(t"release:{Segment(token)}"), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2214,7 +2220,9 @@ def test_an_event_after_the_deadline_leaves_an_expired_wait_alone_on_both_engine
     assert parked.state in ("waiting", "sleeping"), parked
 
     clock.advance_to(deadline + A_SECOND)
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # after the deadline
+    backend.emit_event(
+        task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # after the deadline
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2236,7 +2244,9 @@ def test_an_event_a_wait_never_parked_for_is_taken_on_both_engines(backend):
     behind = datetime.now().astimezone() - timedelta(seconds=2)
     backend.register(f"bw-first-{token}", _waiting_until(token, behind), None, Fault(), ())
     task_id = backend.spawn(f"bw-first-{token}", "run-bw-first")
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})  # before the wait is ever run
+    backend.emit_event(
+        task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # before the wait is ever run
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2283,7 +2293,7 @@ def test_a_wake_does_not_outlive_the_park_it_ended_on_both_engines(held_backend)
 
     clock.advance_to(deadline + A_SECOND)
     backend.run_until_result(task_id)  # the clock ends the first wait; the sleep begins
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})
+    backend.emit_event(task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     clock.advance_to(wake_at)
 
     snap = backend.run_until_result(task_id)
@@ -2332,7 +2342,7 @@ def test_two_bounded_waits_on_one_name_answer_independently_on_both_engines(back
     backend.register(f"bw-two-{token}", body, None, Fault(), ())
     task_id = backend.spawn(f"bw-two-{token}", "run-bw-two")
     backend.run_until_result(task_id)
-    backend.emit_event(task_id, f"shared:{token}", {"ok": True})
+    backend.emit_event(task_id, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -2436,8 +2446,8 @@ def _settled_keeps_its_answer(backend, clock, token):
     body = _answering_then_parking(token, clock.at - timedelta(seconds=2))
     task = _start(backend, token, body, "settled")
     _parks(backend, task)  # on the release, with the first wait already decided
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
-    backend.emit_event(task, f"release:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
+    backend.emit_event(task, compose_key(t"release:{Segment(token)}"), {"ok": True})
     return _answer(backend, task)
 
 
@@ -2446,27 +2456,29 @@ def _the_clock_reached_a_parked_wait(backend, clock, token):
     task = _start(backend, token, _answering(token, deadline), "clock")
     _parks(backend, task)
     clock.advance_to(deadline + A_SECOND)
-    backend.emit_event(task, f"shared:{token}", {"ok": True})  # too late for this wait
+    backend.emit_event(
+        task, compose_key(t"shared:{Segment(token)}"), {"ok": True}
+    )  # too late for this wait
     return _answer(backend, task)
 
 
 def _its_event_reached_a_parked_wait(backend, clock, token):
     task = _start(backend, token, _answering(token, clock.at + timedelta(hours=1)), "event")
     _parks(backend, task)
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     return _answer(backend, task)
 
 
 def _never_parked_with_its_event(backend, clock, token):
     task = _start(backend, token, _answering(token, clock.at + timedelta(hours=1)), "stored")
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     return _answer(backend, task)
 
 
 def _never_parked_past_its_deadline_with_its_event(backend, clock, token):
     deadline = clock.at - timedelta(seconds=2)
     task = _start(backend, token, _answering(token, deadline), "late-stored")
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     return _answer(backend, task)
 
 
@@ -2481,7 +2493,7 @@ def _a_later_wait_on_the_same_claim(backend, clock, token):
     task = _start(backend, token, body, "again")
     _parks(backend, task)
     clock.advance_to(deadline + A_SECOND)
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     return _answer(backend, task)
 
 
@@ -2515,7 +2527,7 @@ def _a_later_wait_across_a_sleep(backend, clock, token):
     _parks(backend, task)
     clock.advance_to(deadline + A_SECOND)
     _parks(backend, task)  # the clock ends the first wait, and the sleep begins
-    backend.emit_event(task, f"shared:{token}", {"ok": True})
+    backend.emit_event(task, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     clock.advance_to(wake_at)
     return _answer(backend, task)
 
@@ -2605,7 +2617,7 @@ def test_an_event_OUTLIVES_its_task_on_both_engines(backend):
     token = _fresh_token()
     backend.register(f"outlive-{token}", _awaiting_shared_name(token), None, Fault(), ())
     done = backend.spawn(f"outlive-{token}", "run-first")
-    backend.emit_event(done, f"shared:{token}", {"ok": True})
+    backend.emit_event(done, compose_key(t"shared:{Segment(token)}"), {"ok": True})
     assert backend.run_until_result(done).state == "completed"
 
     later = backend.spawn(f"outlive-{token}", "run-later")  # never emitted to
@@ -2669,7 +2681,7 @@ def test_two_runs_under_distinct_gates_are_isolated_on_both_engines(backend):
         tasks[run] = backend.spawn(f"gated-{run}", run)
         parks[run] = GateState(
             run_id=run, gate=gate, op_key=step_key("tool:charge_card").stored(), occurrence=0
-        ).park_name.stored()
+        ).park_name
 
     first, second = (f"{token}a", f"{token}b")
     assert parks[first] != parks[second], "the run coordinate did not reach the park name"

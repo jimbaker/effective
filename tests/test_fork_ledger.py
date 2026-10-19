@@ -26,7 +26,8 @@ from effective.counterfactual import (
     fork_unscoped,
 )
 from effective.engines.sqlite import SqliteLedger
-from effective.keys import Key, Segment, compose_key
+from effective.handlers.durable import fork_event_name
+from effective.keys import Key, Segment, Subject, compose_key
 from effective.keys.grammar import KeySyntaxError
 from effective.lineage import marginal
 from effective.ops import LedgerRow
@@ -276,7 +277,7 @@ def _seal_scenario(
         yield from append_ledger(
             LedgerRow(event_id=compose_key(t"extracted:{Segment(mid)}"), kind="extracted")
         )
-        approval = yield from await_event(f"review:{mid}", dict)
+        approval = yield from await_event(compose_key(t"review:{Subject(mid)}"), dict)
         yield from append_ledger(
             LedgerRow(
                 event_id=compose_key(t"reviewed:{Segment(mid)}"),
@@ -302,7 +303,7 @@ def _seal_scenario(
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(f"review:{mid}", {"decision": "reject"})
+    app.emit_event(compose_key(t"review:{Subject(mid)}"), {"decision": "reject"})
     app.run_until_result(base_id)
     seed = dict(
         fork_seed(
@@ -330,7 +331,9 @@ def _seal_scenario(
 
     fid = app.spawn("fork", {"run_id": "r-fork"}, max_attempts=4)
     app.run_until_result(fid)
-    app.emit_event(f"fork:r-fork;review:{mid}", {"decision": "approve"})
+    app.emit_event(
+        fork_event_name("r-fork", compose_key(t"review:{Subject(mid)}")), {"decision": "approve"}
+    )
     snap = app.run_until_result(fid)
     kinds = [
         k

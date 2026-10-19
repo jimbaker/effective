@@ -798,7 +798,7 @@ def _parking(backend: Any, shape: str, race_of: Callable[[], Any], layers: list[
     parked = backend.run_until_result(task)
     assert parked is None or parked.state not in ("completed", "failed"), parked
     at_park = list(tools.calls)
-    backend.emit_event(task, review_name(run_id).stored(), {"ok": True})
+    backend.emit_event(task, review_name(run_id), {"ok": True})
     return backend.run_until_result(task), at_park
 
 

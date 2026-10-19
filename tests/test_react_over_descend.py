@@ -138,7 +138,7 @@ def run_granted(backend, fault: Fault):
         snap = backend.run_until_result(task_id)
         assert snap.state not in ("completed", "failed"), (depth, snap)
         park = depth_grant_name(run_id, generation=0, depth=depth)
-        backend.emit_event(task_id, park.stored(), ruled(grant))
+        backend.emit_event(task_id, park, ruled(grant))
         depth += grant.get("add_depth", 0)
     return backend.run_until_result(task_id), domain
 
@@ -193,9 +193,9 @@ def test_a_human_ask_parks_inside_its_turns_frame_on_both_engines(backend):
     park = qualified_event_name(
         compose_key(t"shipping:{Run(run_id)}"),
         compose_key(t"d:{Index(0)}"),
-        name=compose_key(t"ask:{Index(0)}").stored(),
+        name=compose_key(t"ask:{Index(0)}"),
     )
-    backend.emit_event(task_id, park.stored(), {"text": "ship it"})
+    backend.emit_event(task_id, park, {"text": "ship it"})
     snap = backend.run_until_result(task_id)
     assert snap.state == "completed", snap
     assert snap.result == "ship it"

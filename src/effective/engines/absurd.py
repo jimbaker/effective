@@ -26,7 +26,7 @@ from effective.cost import RecordedFormat, marked
 from effective.engines import REPARK_MARGIN, Failure, TaskFn, TaskSnapshot, TaskState, drain
 from effective.handlers.base import Attempt
 from effective.keys import Key
-from effective.ops import DONE_EVENT_PARAM, WaitOutcome, settled_wait
+from effective.ops import DONE_EVENT_PARAM, WaitOutcome, emitted_name, settled_wait
 from effective.parked import ParkedTask, read_absurd_parked
 from effective.ruling import wire_payload
 from effective.spawning import cancelled_payload
@@ -358,8 +358,9 @@ class SdkCtx:
             self._recorded_format = sdk_recorded_format(self._ctx)
         return self._recorded_format
 
-    def emit_event(self, name: Key, payload: Any, /) -> None:
-        return self._ctx.emit_event(name.stored(), wire_payload(name.stored(), payload))
+    def emit_event(self, name: str | Key, payload: Any, /) -> None:
+        wire = emitted_name(name).stored()
+        return self._ctx.emit_event(wire, wire_payload(wire, payload))
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
@@ -657,7 +658,7 @@ class ConcurrentAbsurdCtx:
                 self._recorded_format = sdk_recorded_format(self._ctx)
             return self._recorded_format
 
-    def emit_event(self, name: Key, payload: Any, /) -> None:
+    def emit_event(self, name: str | Key, payload: Any, /) -> None:
         """Emit an event from inside a running task, under the write lock like every other
         write on this connection (a child answering its parent while its own gather branches
         commit must not race them).
@@ -666,8 +667,9 @@ class ConcurrentAbsurdCtx:
         so the name IS the address. Both engines' signatures are `(name, payload)`, so a green
         SQLite test cannot assert an isolation the deployed engine lacks, and
         `effective.spawning.deliver` is a single call rather than a branch."""
+        wire = emitted_name(name).stored()
         with self.write_lock:
-            self._ctx.emit_event(name.stored(), wire_payload(name.stored(), payload))
+            self._ctx.emit_event(wire, wire_payload(wire, payload))
 
     def repark(self, name: str, /) -> None:
         """Park so the task re-queues ~immediately, burning no attempt (the
@@ -758,8 +760,9 @@ class AbsurdEngine:
         )
         return UUID(str(spawned["task_id"]))
 
-    def emit_event(self, name: str, payload: Any) -> None:
-        self.app.emit_event(name, to_jsonable_python(wire_payload(name, payload)))
+    def emit_event(self, name: str | Key, payload: Any) -> None:
+        wire = emitted_name(name).stored()
+        self.app.emit_event(wire, to_jsonable_python(wire_payload(wire, payload)))
 
     def cancel(self, task_id: UUID) -> None:
         """Cancel a task that has not finished, and deliver `Cancelled` to the parent that spawned

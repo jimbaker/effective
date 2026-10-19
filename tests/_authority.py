@@ -106,6 +106,12 @@ def approve_park(op_key: Key, *, generation: int = 0) -> Key:
     return compose_key(t"{APPROVE}:generation={generation:default=0};{op_key:domain=any}")
 
 
+def run_scoped_approval(run_id: str, op_key: Key) -> Key:
+    """A human tier's park for `op_key`, scoped on the run, as a test's tier names it."""
+    # lint: terminal-hole: `op_key` is a `Key`, which the composer splices by induction.
+    return compose_key(t"{APPROVE}:{Segment(run_id)};{op_key:domain=identity}")
+
+
 AUTHORITY_PARKS: list[tuple[str, Minter]] = [
     # Through the minters at BOTH levels, which is this file's own thesis applied to itself: a
     # hand-composed `t"{APPROVE};{Segment(run_id)}"` would put a run id in TERM-HEAD position, a

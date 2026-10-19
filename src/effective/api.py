@@ -28,7 +28,6 @@ from effective.judgment import (
     gathered,
 )
 from effective.keys import Index, Key, Name, compose_key, scope_prefix
-from effective.keys.marker import authored_key
 from effective.ops import (
     Addressing,
     AppendLedgerRow,
@@ -135,41 +134,30 @@ def await_event[T](
 ) -> Effect[T]:
     """Park until `name` is delivered, then resume with its payload decoded as `schema`.
 
-    **`name` must be FORK-STABLE — scope it on the run's SUBJECT, never on its run id.** This is
-    the one authoring rule the await surface has, and it is easy to get backwards, because the
-    obvious way to make a name unique across runs is the one way that breaks forking:
+    `name` is an identity: a composed `Key`, or one tag as text.
 
-        await_event(f"review:{message_id}", Decision)   # the subject — forkable
-        await_event(f"review:{run_id}", Decision)       # REFUSED on any fork of this workflow
+        await_event(compose_key(t"review:{Subject(message_id)}"), Decision)  # parks on review:m1
 
-    A fork re-runs *this same generator* over the base's subject under a **different run id**, so
-    a run-scoped name is a name the base never parked on. Measured, both arms, on a real fork
-    (`tests/test_fork_sweep.py::decision_wf`): a run-scoped await gives `ForkedPrefixAwait: …
-    awaited 'review:r-fork', which is not the fork point 'review:r-base'`, and run-scoped ledger
-    ids give `SeedBoundaryError` for the same underlying reason — the child's key is not in the
-    seed it was handed.
+    Text holding key structure is refused (`FormattedEventName`): the subjects `("x,y", "z")` and
+    `("x", "y,z")` would serialize to one name, `ev:x,y,z`, where `Segment` refuses either
+    coordinate. A reserved authority namespace and an op's own identity are refused too
+    (`ops.event_name`).
 
-    **Uniqueness is a real requirement; it just is not yours.** Absurd delivers events by name
-    across the whole queue, so a bare constant *does* collide between concurrent runs. The subject
-    supplies uniqueness and fork-stability at once (a fresh `message_id` per logical unit of
-    work), and the substrate supplies the rest:
-    `RenamedAwaitCtx` parks a child at `fork:{child_run_id};{name}`, and a gather branch is
-    prefixed per branch. **Reaching for the run id is doing the substrate's job with the one
-    variable a fork changes.**
+    **Scope the name on the run's subject.** A fork re-runs this generator over the base's subject
+    under a different run id, so a run-scoped name is one the base never parked on, and the fork
+    raises `ForkedPrefixAwait` (`tests/test_fork_sweep.py::decision_wf`). Absurd delivers events by
+    name across the queue, so the subject also supplies uniqueness; the substrate frames the rest,
+    a forked child at `fork:{child_run_id};{name}` and a gather branch at `gather:{g},{i};{name}`.
 
-    Prefer `compose_key(t"review:{Segment(message_id)}")` to an f-string here: this is an
-    *identity*, and the composer is what makes it injective. A composed `Key` is also what the
-    substrate passes for its own parks, and the difference is enforced: author text may not name a
-    reserved authority namespace or carry the frame delimiter (`ops.event_name`).
+    ============  ===============================  ==========================================
+    addressing    the wire name                    its emitter
+    ============  ===============================  ==========================================
+    RELATIVE      `name` under the await's frames  completes it with `qualified_event_name`
+    ABSOLUTE      `name` as written                another task, from its own params
+    ============  ===============================  ==========================================
 
-    **`addressing` is almost never yours to set, and it is a different axis from the SUBJECT
-    rule above.** That rule is about what to EMBED in a name; this is about whether the handler's
-    frames COMPLETE it. It defaults to `RELATIVE` — an author's await is completed by its frames,
-    so two scopes awaiting the same bare name are two questions, and an emitter that knows the
-    structure completes it with `qualified_event_name`. (`review:{message_id}` is subject-scoped
-    *and* relative; the two rules do not compete.) Pass `ABSOLUTE` only when the emitter is a
-    *different task* running from its own params and so cannot complete anything — the substrate
-    does this for `fork.join_fork` and `compose.spawn_subagent_task`, the only two today."""
+    `RELATIVE` is the default, and the one an author passes. The substrate passes `ABSOLUTE` where
+    a joining parent awaits a child's answer (`fork.join_fork`, `compose.spawn_subagent_task`)."""
     raw = yield AwaitEvent(name=event_name(name), schema=schema, addressing=addressing)
     return cast(T, raw)
 
@@ -402,52 +390,47 @@ def gather_frame(g: int, i: int, qualified: Key) -> Key:
     #
     # Frames appearing INSIDE a narrowed position are a different question and are handled:
     # `grammar.admits` looks past them, so `parked.py` can declare `address` for a value that
-    # arrives as `gather:0,0;ev0:r1`.
+    # arrives as `gather:0,0;ev:0,r1`.
     return compose_key(t"gather:{Index(g)},{Index(i)};{qualified:domain=any}")
 
 
-def qualified_event_name(*path: GatherBranch | Key, name: str) -> Key:
-    """The fully-qualified event name an EMITTER uses to wake a park — the importable anchor
-    of the qualified-emitter contract, for **every** kind of frame a park can sit under.
+def qualified_event_name(*path: GatherBranch | Key, name: str | Key) -> Key:
+    """The wire name an emitter wakes a park on: the frames around it, then the await's `name`.
 
-        qualified_event_name(GatherBranch(0, 1), compose_key(t"rec:{0}"), name="grant:d1")
-        # -> Key('gather:0,1;rec:0;grant:d1')
+        grant = depth_grant_name("r1", generation=0, depth=1)
+        qualified_event_name(GatherBranch(0, 1), compose_key(t"rec:{0}"), name=grant)
+        # -> Key('gather:0,1;rec:0;depth-grant:r1,0,depth=1')
 
-    A park's name on the wire is the path to it, outermost frame first, then the bare name the
-    workflow passed to ``await_event``. Two frame kinds exist and they compose freely, so they
-    are one argument list rather than two helpers: a **`GatherBranch`** contributes
-    ``gather:{g},{i};`` and a **`Key`** contributes a ``scoped(...)`` atom as a leading term. Both
-    are handler-side and invisible at the await's call site, which is exactly why an emitter
-    needs this: emitting the bare ``name`` does not resolve the park (the conformance suite
-    pins that sharp edge on both engines).
+    ==================  ====================================
+    a frame             contributes
+    ==================  ====================================
+    `GatherBranch`      `gather:{g},{i};`
+    a `Key`             a `scoped(...)` atom, as a leading term
+    ==================  ====================================
 
-    **This replaces ``gather_event_name``, which covered one frame kind and left the composite
-    case to hand-assembly** — the real shape is `gather:{g},{i};{scope};{name}`, and callers
-    were concatenating two spellings by hand at an identity boundary. Nesting is now the
-    argument list, not nested calls.
+    The handler adds both frames at the await, out of the author's sight, so an emitter of the
+    bare `name` misses the park.
 
-    Returns a ``Key``, not text: this is an identity, and the old helper composed a ``Key``
-    only to return its string, laundering both ends. Take ``.stored()`` at the wire boundary
-    where the emitting API needs text.
+    ==================  ====================================================
+    `name`              is taken
+    ==================  ====================================================
+    text                through `await_event`'s door (`ops.event_name`)
+    a `Key`             as it stands, a substrate park's stored name included
+    ==================  ====================================================
 
-    Two orthogonal rules meet here: ``name`` must already carry its own uniqueness — Absurd
-    events are global per queue and no prefix supplies it — and the path qualifies per frame.
-    **Scope that name on the run's SUBJECT, not its run id**; see ``await_event`` for the rule
-    and the measured failure (a run-scoped await makes the workflow unforkable). The
-    substrate's own run-scoped parks are not a counterexample: ``budget-grant:{run_id},{trip}``
-    is composed by the handler, and a fork that hits one in its prefix is also refused unless
-    ``transplanted`` relaxes it (``SeedingCtx``), which grants authored names nothing.
+    A second ask of a settlement namespace is the composed
+    key's occurrence, as `parked` reports it:
 
-    ``name`` goes through ``authored_key``, so text may not carry an occurrence: the suffix has
-    one producer, ``Key.occurrence``, which the walk applies where a ``SETTLEMENT`` namespace is
-    asked again. An emitter waking that second ask asks the composed key for it::
+        qualified_event_name(GatherBranch(0, 0), name=grant).occurrence(2)
 
-        qualified_event_name(GatherBranch(0, 0), name=grant.stored()).occurrence(2)
-
-    which is the registration ``parked`` reports, rather than appending ``#2`` to ``name``.
-
-    Inside a workflow you never need this — awaits are prefixed automatically."""
-    qualified = authored_key(name)
+    A workflow's own awaits are qualified by its handler."""
+    match name:
+        case Key():
+            qualified = name
+        case str():
+            qualified = event_name(name)
+        case unreachable:
+            assert_never(unreachable)
     for frame in reversed(path):
         match frame:
             case GatherBranch(gather=g, index=i):

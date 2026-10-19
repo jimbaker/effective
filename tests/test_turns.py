@@ -138,7 +138,7 @@ def test_the_choices_go_on_across_a_park(backend):
         snap = backend.run_until_result(task)
         assert snap.state not in ("completed", "failed"), snap
         for i, event in enumerate(events.values()):
-            backend.emit_event(task, branched(0, i, event).stored(), 1)
+            backend.emit_event(task, branched(0, i, event), 1)
         snap = backend.run_until_result(task)
         turns.settle()
         assert snap.state == "completed", snap

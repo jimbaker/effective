@@ -60,14 +60,13 @@ from pathlib import Path
 
 import pytest
 
-from effective.api import GatherBranch, qualified_event_name
 from effective.code import _action_key, _segment_key
 from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.domain import CallTool
 from effective.govern import GateState
 from effective.handlers.base import op_key, step_key
 from effective.handlers.durable import fork_event_name
-from effective.keys import Key, Segment, Tag, compose_key
+from effective.keys import Key, Segment, Subject, Tag, compose_key
 from effective.keys.grammar import (
     METACHARACTERS,
     TERM_SEPARATOR,
@@ -926,7 +925,8 @@ def test_an_author_may_not_park_on_a_substrate_authority_name():
         with pytest.raises(ValueError, match="reserved authority namespace"):
             event_name(f"{reserved};mine")
 
-    assert event_name("review:m1").stored() == "review:m1"  # an author's own subject is untouched
+    # an author's own subject is untouched
+    assert event_name(compose_key(t"review:{Subject('m1')}")).stored() == "review:m1"
     # The substrate's own, composed — `approve:x`, not `approve;x`. The `:` here is a TAG
     # separator, not a term separator, and an expected value is exactly where a mechanical rewrite
     # of one for the other lands unseen: no producer changes, and the assertion still passes.
@@ -1743,17 +1743,10 @@ _DOORS = [
         "act:t0",
         "code;action:1;tool:read_file;act:t0",
     ),
-    ("event_name(str)", event_name, "review:m1#2", "review:m1", "review:m1"),
-    (
-        "api/qualified_event_name",
-        lambda n: qualified_event_name(GatherBranch(0, 1), name=n),
-        "review:m1#2",
-        "review:m1",
-        "gather:0,1;review:m1",
-    ),
 ]
 """Each door that parses an author's structured name: a name with an occurrence, the same name
-without one, and the key the door stores for it."""
+without one, and the key the door stores for it. An event name's doors take one tag as text, so
+they refuse an occurrence as they refuse every other metacharacter (`test_event_names`)."""
 _DOOR_COLUMNS = ("door", "mint", "forged", "plain", "stored")
 _DOOR_IDS = [d[0] for d in _DOORS]
 
@@ -1789,9 +1782,8 @@ def test_op_keys_event_arm_takes_a_key_and_will_not_parse_author_text(text):
     shut: a route that parsed the plain name would parse the suffixed one too."""
     with pytest.raises(TypeError, match="mint it with `event_name"):
         op_key(AwaitEvent(name=text, schema=str))
-    assert (
-        op_key(AwaitEvent(name=event_name("review:m1"), schema=str)).stored() == "event;review:m1"
-    )
+    review = compose_key(t"review:{Subject('m1')}")
+    assert op_key(AwaitEvent(name=event_name(review), schema=str)).stored() == "event;review:m1"
 
 
 def test_the_runtime_still_mints_the_occurrence_the_doors_refuse():
@@ -1904,7 +1896,8 @@ _ARMS = [
     ("str + authority tag", lambda: "depth-grant:r1,0", "reserved authority namespace"),
     ("str + frame delimiter", lambda: "a;b", "frame delimiter"),
     ("str + occurrence", lambda: "review:m1#2", "occurrence"),
-    ("ordinary str", lambda: "review:m1", None),
+    ("str + tag", lambda: "review:m1", "formatted rather than composed"),
+    ("one-atom str", lambda: "review", None),
     ("neither", lambda: 7, "not int"),
 ]
 
@@ -1940,11 +1933,9 @@ def test_event_name_decides_every_arm_of_its_table(arm, build, refusal):
 ARMS_IN_THE_TABLE = 8
 """How many `case` arms `event_name`'s match has — pinned so adding one forces a row above.
 
-**Rows outnumber arms (10 vs 8), deliberately.** Two arms carry more than one behaviour: `str()`
-delegates to `authored_key`, which refuses an occurrence inside it, so `ordinary str` and
-`str + occurrence` share an arm; and the two accepting `Key` rows (`composed authority` and
-`ordinary`) exercise the same arm from opposite sides of the guard above it. A row-per-arm
-equality would be tidier and would assert something false."""
+Rows outnumber arms: the structured-text arm refuses three rows (`str + frame delimiter`,
+`str + occurrence`, `str + tag`), and the accepting `Key` arm takes two (`composed authority Key`
+and `ordinary Key`) from opposite sides of the guard above it."""
 
 
 def test_the_arms_table_covers_the_whole_decision_table():

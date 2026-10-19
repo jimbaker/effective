@@ -65,13 +65,13 @@ KA = compose_key(t"ka:{Segment(MID)}")
 KB = compose_key(t"kb:{Segment(MID)}")
 
 
-def _forked(child: str, name: Key) -> str:
+def _forked(child: str, name: Key) -> Key:
     """The name a fork CHILD awaits — the parent's identity re-scoped to the child run.
 
     A splice, not a concatenation: `name` arrives as a `Key`, so a child id carrying a delimiter
     cannot forge a frame, and the fork arm's shape lives in one template instead of twelve."""
     # lint: terminal-hole — `name` is a `Key`, which is why it can be spliced at all.
-    return compose_key(t"fork:{Segment(child)};{name:domain=address}").stored()
+    return compose_key(t"fork:{Segment(child)};{name:domain=address}")
 
 
 def _decision_wf(_rid: str):
@@ -79,7 +79,7 @@ def _decision_wf(_rid: str):
     fork point), then a `reviewed` row and a branch — reject returns, approve commits."""
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     yield from append_ledger(
         LedgerRow(
             event_id=REVIEWED,
@@ -139,7 +139,7 @@ def test_run_fork_substitutes_the_decision_and_diverges_on_the_hypothetical_ledg
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)  # parks at review:m1
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     base_snap = app.run_until_result(base_id)
     assert base_snap is not None
     assert base_snap.result == "rejected"
@@ -293,7 +293,7 @@ def test_the_fork_child_survives_crash_at_every_op(tmp_path, sqlite_app):
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     app.run_until_result(base_id)
     base_before = _rows(app, "r-base")
     seed = fork_seed(read_sqlite_task(str(db), base_id), through=LEDGER_EXTRACTED.stored())
@@ -331,9 +331,7 @@ def test_the_fork_child_survives_crash_at_every_op(tmp_path, sqlite_app):
 
         fid = app.spawn(f"crash-{i}", {"run_id": rid}, max_attempts=8)
         app.run_until_result(fid)  # crash+retry -> park (prefix crash), or park then crash (tail)
-        app.emit_event(
-            fork_event_name(rid, Key.parse(REVIEW.stored())).stored(), {"decision": "approve"}
-        )
+        app.emit_event(fork_event_name(rid, REVIEW), {"decision": "approve"})
         snap = app.run_until_result(fid)
         assert fault.fired, f"target={target}: the fault never fired"
         assert target in fault.fired[0], f"target={target}: fired at {fault.fired[0]!r} (aliased!)"
@@ -366,7 +364,7 @@ def _run_base(app, db_path: str, wf):
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     app.run_until_result(base_id)
     return base_id
 
@@ -395,7 +393,7 @@ def test_forking_an_iterative_workflow_seeds_each_occurrence(tmp_path, sqlite_ap
         a = yield from ask_llm("extract", [], dict)
         b = yield from ask_llm("extract", [], dict)  # duplicate step name
         yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-        approval = yield from await_event(REVIEW.stored(), dict)
+        approval = yield from await_event(REVIEW, dict)
         yield from append_ledger(
             LedgerRow(
                 event_id=REVIEWED,
@@ -413,7 +411,7 @@ def test_forking_an_iterative_workflow_seeds_each_occurrence(tmp_path, sqlite_ap
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     app.run_until_result(base_id)
     seed = fork_seed(read_sqlite_task(str(db), base_id), through=LEDGER_EXTRACTED.stored())
     # the seed map is keyed by IDENTITY — a `str` lookup would simply miss, silently
@@ -541,7 +539,7 @@ def test_forking_a_v1_metered_base_decodes_the_envelope(tmp_path, sqlite_app):
     def wf(_r):
         assessment = yield from ask_llm("extract", [], dict)
         yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-        approval = yield from await_event(REVIEW.stored(), dict)
+        approval = yield from await_event(REVIEW, dict)
         yield from append_ledger(
             LedgerRow(
                 event_id=REVIEWED,
@@ -593,7 +591,7 @@ def _sleeping_wf(rid: str, wake):
     rejects) never sleeps and the FORK (which approves) reaches the sleep in its tail."""
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     if approval["decision"] == "approve":
         yield from sleep_until(wake)
         yield from append_ledger(
@@ -655,7 +653,7 @@ def test_an_already_elapsed_sleep_in_the_replayed_PREFIX_passes_through(tmp_path
         yield from ask_llm("extract", [], dict)
         yield from sleep_until(past)  # in the PREFIX, and already elapsed
         yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-        approval = yield from await_event(REVIEW.stored(), dict)
+        approval = yield from await_event(REVIEW, dict)
         yield from append_ledger(
             LedgerRow(
                 event_id=REVIEWED,
@@ -803,7 +801,7 @@ def _budgeted_wf(_rid: str):
     for i in range(3):
         yield from step(f"ask{i}", AskLLM(messages="m", response_schema=str))
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     yield from append_ledger(
         LedgerRow(
             event_id=REVIEWED,
@@ -829,10 +827,10 @@ def _budgeted_base(app, db: str) -> UUID:
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
     assert _waiting_on(app, base_id) == GRANT_NAME.stored()  # the mid-prefix park, for real
-    app.emit_event(GRANT_NAME.stored(), ruled({"add_dollars": 0.01}))
+    app.emit_event(GRANT_NAME, ruled({"add_dollars": 0.01}))
     app.run_until_result(base_id)
     assert _waiting_on(app, base_id) == REVIEW.stored()  # now at the fork point
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     snap = app.run_until_result(base_id)
     assert snap is not None
     assert snap.result == "reject"
@@ -892,7 +890,9 @@ def test_a_prefix_budget_grant_park_is_refused_not_deadlocked(tmp_path, sqlite_a
     assert _waiting_on(app, fork_id) is None  # and not parked on anything
     assert "ForkedPrefixAwait" in str(snap.failure)
     assert GRANT_NAME.stored() in str(snap.failure)  # the await that would have deadlocked
-    assert _forked("r-fork", GRANT_NAME) in str(snap.failure)  # the name it would have parked on
+    assert _forked("r-fork", GRANT_NAME).stored() in str(
+        snap.failure
+    )  # the name it would have parked on
     assert "transplanted" in str(snap.failure)  # the opt-out, named
 
     # The delta emit is provably irrelevant: the run is over. (Under a deadlock this emit tells
@@ -996,7 +996,7 @@ def _tail_gather_wf(run_id: str):
 
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     results = yield from gather([branch("a", "ka"), branch("b", "kb")])
     return {"decision": approval["decision"], "results": results}
 
@@ -1020,7 +1020,7 @@ def _nested_gather_wf(run_id: str):
 
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     results = yield from gather([inner()])
     return {"decision": approval["decision"], "results": results}
 
@@ -1074,7 +1074,7 @@ def _base_for(app, db: str, wf) -> UUID:
 
     base_id = app.spawn("gbase", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(REVIEW.stored(), {"decision": "reject"})
+    app.emit_event(REVIEW, {"decision": "reject"})
     app.run_until_result(base_id)
     return base_id
 
@@ -1120,7 +1120,7 @@ def _colliding_tail_gather_wf(run_id: str):
 
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     results = yield from gather([branch("a"), branch("b")])
     return {"decision": approval["decision"], "results": results}
 
@@ -1175,9 +1175,7 @@ def test_the_forked_tails_gather_survives_a_crash_at_every_branch_op(tmp_path, s
             app, seed, rid, _tail_gather_wf, ctx_wrap=lambda c, _f=fault: _RecFaultCtx(c, _f)
         )
         app.run_until_result(fid)
-        app.emit_event(
-            fork_event_name(rid, Key.parse(REVIEW.stored())).stored(), {"decision": "approve"}
-        )
+        app.emit_event(fork_event_name(rid, REVIEW), {"decision": "approve"})
         snap = app.run_until_result(fid)
 
         assert fault.fired, f"target={target}: never fired"
@@ -1290,7 +1288,7 @@ def _spawning_tail_wf(rid: str):
     counterfactual that spawns counterfactuals" (`fork.py`), so the substrate designs for this."""
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     handle = yield from spawn_fork(
         "grandchild",
         child_run_id=_GRANDCHILD,
@@ -1340,13 +1338,13 @@ def test_spawn_and_join_at_the_BASE_run_completes(tmp_path, sqlite_app):
 
     task_id = app.spawn("f2base", {"run_id": "r-base"})
     app.run_until_result(task_id)
-    app.emit_event(REVIEW.stored(), {"decision": "approve"})
+    app.emit_event(REVIEW, {"decision": "approve"})
     app.run_until_result(task_id)
 
     # Parked on the child's own name, unframed because nothing framed it.
     (handed,) = dom.done_events
     assert _waiting_on(app, task_id) == handed
-    app.emit_event(handed, {"answer": {"kind": "returned", "value": "completed"}})
+    app.emit_event(Key.parse(handed), {"answer": {"kind": "returned", "value": "completed"}})
     snap = app.run_until_result(task_id)
 
     assert snap is not None
@@ -1409,7 +1407,7 @@ def test_a_fork_child_that_spawns_and_joins_a_grandchild_is_refused_not_deadlock
     # The counterexample, kept checkable now that the guard makes it unreachable — and COMPUTED
     # through the same function the ctx applies, so it cannot drift from what the rename does.
     parked = fork_event_name("r-fork", Key.parse(handed)).stored()
-    assert parked == _forked("r-fork", Key.parse(handed))
+    assert parked == _forked("r-fork", Key.parse(handed)).stored()
     assert parked != handed, "the rename is what makes the join unwakeable"
 
     assert [k for _, k, _ in _rows(app, "r-fork")] == ["forked"]  # genesis only; no seal
@@ -1425,7 +1423,7 @@ def _transplanted_join_wf(_rid: str):
     """A tail whose ABSOLUTE join the CALLER answers under the child's renamed name."""
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     outcome = yield from await_event(_done(_GRANDCHILD), Answered, addressing=Addressing.ABSOLUTE)
     return f"{approval['decision']}/{outcome.child_run_id}"
 
@@ -1469,7 +1467,7 @@ def test_a_transplanted_absolute_await_under_a_rename_is_NOT_refused(tmp_path, s
 
     # It parked on the RENAMED name — which is exactly what `transplanted` declares the caller
     # will emit — rather than being refused.
-    assert _waiting_on(app, fork_id) == _forked("r-fork", done)
+    assert _waiting_on(app, fork_id) == _forked("r-fork", done).stored()
     app.emit_event(_forked("r-fork", done), {"child_run_id": _GRANDCHILD, "status": "completed"})
     snap = app.run_until_result(fork_id)
 
@@ -1488,7 +1486,7 @@ def _prefix_absolute_wf(_rid: str):
     """An ABSOLUTE await in the replayed PREFIX — before the fork point."""
     yield from ask_llm("extract", [], dict)
     yield from await_event(_done(_GRANDCHILD), Answered, addressing=Addressing.ABSOLUTE)
-    approval = yield from await_event(REVIEW.stored(), dict)
+    approval = yield from await_event(REVIEW, dict)
     return approval["decision"]
 
 

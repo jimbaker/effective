@@ -29,6 +29,8 @@ from fakes import (
     pydantic_ai_model,
 )
 
+from effective.keys import Key
+
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 HERE = Path(__file__).parent
 QUESTION = "When was the Rosetta Stone found?"
@@ -173,7 +175,7 @@ def effective_approval() -> int:
         assert parked_run is not None
         assert not parked_run.state.terminal, "the review parks the run"
         (parked,) = worker.app.parked()
-        worker.app.emit_event(parked.wake_event, True)
+        worker.app.emit_event(Key.parse(parked.wake_event), True)
         done = worker.app.run_until_result(run)
         worker.close()
         assert done is not None

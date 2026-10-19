@@ -114,7 +114,7 @@ def test_two_policies_park_ONCE_and_one_resolution_settles_both():
 
         # ONE event name, carrying BOTH answers — the whole point of merged-park.
         app.emit_event(
-            _park_name(mid).stored(),
+            _park_name(mid),
             ruled(
                 Resolution(
                     answers={
@@ -154,7 +154,7 @@ def test_a_merged_park_survives_worker_death_and_resumes_on_a_fresh_worker():
     domain2 = CannedDomain(amount="42.00")
     _register(app2, name, mid, domain2, _policies(mid))
     app2.emit_event(
-        _park_name(mid).stored(),
+        _park_name(mid),
         ruled(
             Resolution(
                 answers={

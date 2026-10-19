@@ -47,7 +47,7 @@ class HumanAnswer(BaseModel):
 def make_act(ask_tools: Set[str] = frozenset({ASK_HUMAN})) -> Act:
     """An `act` that suspends on an Ask tool and dispatches everything else normally.
 
-    A request whose name is in `ask_tools` yields `await_event("ask:<turn>", …)` — the
+    A request whose name is in `ask_tools` awaits `ask:{turn}`, so the
     loop parks (the handler returns `Suspended`; on the durable path the task suspends)
     until the named answer is delivered, then the answer's text becomes the observation.
     Every other request is an opaque `call_tool` (a plain tool *or* a subagent).

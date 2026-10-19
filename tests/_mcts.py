@@ -42,7 +42,7 @@ from effective.api import (
     scoped,
 )
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Segment, compose_key
+from effective.keys import Segment, Subject, compose_key
 from effective.keys.grammar import KeySyntaxError, parse
 from effective.ops import LedgerRow
 from effective.search import best_child, mcts
@@ -138,7 +138,7 @@ def _move(candidates: tuple[str, ...], route_id: str, leg: int) -> Effect[Dispat
         # A poor estimate asks before the truck moves. The name is scoped on the ROUTE, which is
         # this question's subject; `approve:` is a substrate authority namespace and is refused
         # for an authored await.
-        approved = yield from await_event(f"clear:{route_id}", str)
+        approved = yield from await_event(compose_key(t"clear:{Subject(route_id)}"), str)
     # THE WORLD CHANGES HERE — one row per move, at one program point, in a plain loop.
     yield from append_ledger(
         LedgerRow(

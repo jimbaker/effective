@@ -110,7 +110,7 @@ def park_address(case: Case, depth: int) -> Key:
     The property it carries: a grant park sits at the DESCENT's own scope, never inside the
     level's, so the address gains a `gather:` frame when the drill runs in a branch and never a
     `d:{depth}` one however deep the drill has gone."""
-    name = depth_grant_name(RUN_ID, depth=depth, generation=0).stored()
+    name = depth_grant_name(RUN_ID, depth=depth, generation=0)
     if case.in_gather:
         return qualified_event_name(GatherBranch(0, 0), name=name)
     return qualified_event_name(name=name)

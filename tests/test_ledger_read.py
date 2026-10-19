@@ -13,7 +13,7 @@ from effective.counterfactual import ForkLedger, fork_scoped
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
-from effective.keys import Key, Name, Segment, compose_key
+from effective.keys import Key, Name, Run, Segment, compose_key
 from effective.ops import LedgerRow, ReadLedgerRow, UnreadLedger
 from effective.sandbox import inspect_only
 
@@ -59,7 +59,7 @@ def test_the_recorder_reads_the_row_it_holds():
 
 def _read_then_waited(fact: str, run_id: str):
     read = yield from read_ledger(_fact(fact))
-    yield from await_event(f"go:{run_id}", dict)
+    yield from await_event(compose_key(t"go:{Run(run_id)}"), dict)
     return read
 
 
@@ -70,7 +70,7 @@ def test_a_replay_reads_what_the_first_attempt_read(backend):
     task_id = backend.spawn(run_id, run_id)
     backend.run_until_result(task_id)
     backend.ledger_append("writer", _fact(fact).stored(), "terms")
-    backend.emit_event(task_id, f"go:{run_id}", {})
+    backend.emit_event(task_id, compose_key(t"go:{Run(run_id)}"), {})
     snapshot = backend.run_until_result(task_id)
     assert (snapshot.state, snapshot.result) == ("completed", None)
 

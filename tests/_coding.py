@@ -43,7 +43,7 @@ from effective.api import (
     scoped,
 )
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Segment, compose_key
+from effective.keys import Run, Segment, compose_key
 from effective.keys.grammar import KeySyntaxError, ParsedKey, parse
 from effective.ops import LedgerRow
 
@@ -102,7 +102,7 @@ def _plan(task: Task, run_id: str) -> Effect[str]:
     yield from ask_llm("draft", f"Plan the work: {task.goal}", str)
     # `review:`, not `approve:` — the latter is a substrate authority namespace and is refused for
     # an authored await. The name is scoped on the RUN, which is this question's subject.
-    return (yield from await_event(f"review:{run_id}", str))
+    return (yield from await_event(compose_key(t"review:{Run(run_id)}"), str))
 
 
 def _explore(task: Task, run_id: str) -> Effect[str]:

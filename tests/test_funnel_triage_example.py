@@ -21,7 +21,7 @@ from _keymap import including
 from effective.api import GatherBranch, qualified_event_name
 from effective.graphview import bare_name, fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Segment, compose_key
+from effective.keys import Run, Segment, compose_key
 
 # Journey role: one realistic path end to end, over the deepest composition the suite drives.
 pytestmark = pytest.mark.journey
@@ -71,7 +71,7 @@ def test_material_flag_parks_in_the_lane():
     assert parked.awaiting == qualified_event_name(
         GatherBranch(0, index),
         compose_key(t"talk:{Segment(ident)}"),
-        name="review:cfp-2026",
+        name=compose_key(t"review:{Run('cfp-2026')}"),
     )
     # nothing merges while parked, and the rank barrier certainly hasn't run
     assert not any("rank;" in entry.key.stored() for entry in handler.trace)

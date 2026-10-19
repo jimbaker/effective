@@ -80,9 +80,9 @@ def converse(backend, domain: Scripted, fault: Fault) -> tuple[Any, int]:
     backend.register_body(name, body)
     for n, line in enumerate(LINES):
         park = qualified_event_name(
-            compose_key(t"smol:{Run(run_id)}"), name=compose_key(t"user:{Index(n)}").stored()
+            compose_key(t"smol:{Run(run_id)}"), name=compose_key(t"user:{Index(n)}")
         )
-        backend.emit_event(uuid4(), park.stored(), {"text": line})  # an event is addressed by name
+        backend.emit_event(uuid4(), park, {"text": line})  # an event is addressed by name
     backend.spawn(name, run_id)
     ran = 0
     snap = None
@@ -223,9 +223,9 @@ def test_an_event_payload_shaped_like_a_cancel_is_refused_by_its_schema(backend)
     domain.spawn = spawn_tool(backend.spawner)
     backend.register_body(name, body)
     park = qualified_event_name(
-        compose_key(t"smol:{Run(run_id)}"), name=compose_key(t"user:{Index(0)}").stored()
+        compose_key(t"smol:{Run(run_id)}"), name=compose_key(t"user:{Index(0)}")
     )
-    backend.emit_event(uuid4(), park.stored(), {"__cancelled__": {}})
+    backend.emit_event(uuid4(), park, {"__cancelled__": {}})
     snap = backend.run_until_result(backend.spawn(name, run_id, max_attempts=1))
     assert snap.state == "failed", snap
     assert "validation error for UserLine" in str(snap.failure), snap.failure

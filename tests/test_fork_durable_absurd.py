@@ -25,7 +25,7 @@ from effective.bridge_absurd import read_absurd_task
 from effective.cost import MeteredInterpreter, Usage, marked
 from effective.fork import fork_seed, run_fork
 from effective.handlers.durable import DurableHandler, fork_event_name
-from effective.keys import Key, Segment, compose_key
+from effective.keys import Segment, Subject, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow
 
@@ -64,7 +64,7 @@ def sleeping_decision_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    approval = yield from await_event(f"review:{message_id}", dict)
+    approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     yield from append_ledger(
         LedgerRow(
             event_id=compose_key(t"reviewed:{Segment(message_id)}"),
@@ -104,7 +104,7 @@ def test_an_elapsed_prefix_sleep_replays_on_the_DEPLOYED_engine(conn):
         {"run_id": base_rid, "message_id": message_id},
     )
     app.run_until_result(base_id)
-    app.emit_event(f"review:{message_id}", {"decision": "reject"})
+    app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "reject"})
     snap = app.run_until_result(base_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -135,7 +135,7 @@ def test_an_elapsed_prefix_sleep_replays_on_the_DEPLOYED_engine(conn):
     fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid})
     app.run_until_result(fork_id)
     app.emit_event(
-        fork_event_name(fork_rid, Key.parse(f"review:{message_id}")).stored(),
+        fork_event_name(fork_rid, compose_key(t"review:{Subject(message_id)}")),
         {"decision": "approve"},
     )
     snap = app.run_until_result(fork_id)
@@ -153,7 +153,7 @@ def repeating_decision_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    approval = yield from await_event(f"review:{message_id}", dict)
+    approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     yield from ask_llm("probe", [], dict)
     yield from ask_llm("probe", [], dict)  # -> `probe#2`, composed by the SDK from the name
     yield from append_ledger(
@@ -195,7 +195,7 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
         {"run_id": base_rid, "message_id": message_id},
     )
     app.run_until_result(base_id)
-    app.emit_event(f"review:{message_id}", {"decision": "reject"})
+    app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "reject"})
     snap = app.run_until_result(base_id)
     assert snap is not None
     assert snap.state == "completed"
@@ -225,7 +225,7 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
     fork_id = app.spawn(f"child-{base_rid}", {"run_id": fork_rid})
     app.run_until_result(fork_id)
     app.emit_event(
-        fork_event_name(fork_rid, Key.parse(f"review:{message_id}")).stored(),
+        fork_event_name(fork_rid, compose_key(t"review:{Subject(message_id)}")),
         {"decision": "approve"},
     )
     snap = app.run_until_result(fork_id)

@@ -304,7 +304,7 @@ def answer(app: SqliteApp | AbsurdEngine, park: ParkedTask, payload: Any, *, by:
 
     Marks the task claimable; it does NOT resume it. A drain must still run, because nothing polls.
     """
-    app.emit_event(park.wake_event, ruled_answer(park.wake_event, payload, by=by))
+    app.emit_event(Key.parse(park.wake_event), ruled_answer(park.wake_event, payload, by=by))
     return park.wake_event
 
 

@@ -502,9 +502,7 @@ def _heard_at_the_point(backend, *, direct: bool) -> set[str]:
         },
     )
     backend.engine.run_until_result(task)
-    backend.engine.emit_event(
-        fork_event_name(child, Key.parse("review")).stored(), {"decision": "reject"}
-    )
+    backend.engine.emit_event(fork_event_name(child, Key.parse("review")), {"decision": "reject"})
     backend.engine.run_until_result(task)
     return {answer["decision"] for answer in heard}
 

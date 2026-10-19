@@ -31,6 +31,7 @@ from effective.govern import GateState, Proceed, govern
 from effective.handlers.base import step_key
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
+from effective.keys import Key
 from effective.ops import Step
 
 GATE, RUN = "spend", "r-1"
@@ -54,14 +55,12 @@ def _two_gated_calls():
     return [a, b]
 
 
-def _park_name(op_name: str, pass_n: int = 0) -> str:
+def _park_name(op_name: str, pass_n: int = 0) -> Key:
     """The name the gate mints for a gated `call_tool` — derived, not hard-coded, so this test
     cannot drift from `GateState.park_name`."""
-    # `.stored()` — every consumer here wants the WIRE name: `emit_event` addresses by it, and
-    # the substring check below is a claim about the composed text.
     return GateState(
         run_id=RUN, gate=GATE, pass_n=pass_n, op_key=step_key(f"tool:{op_name}").stored()
-    ).park_name.stored()
+    ).park_name
 
 
 def _run(tmp_path, sqlite_app, policy, *, max_attempts: int = 12):
@@ -86,7 +85,7 @@ def _gated(op) -> bool:
 def test_the_park_name_is_op_scoped():
     """Two ops under one gate mint two names. The property, stated directly."""
     assert _park_name("charge_card") != _park_name("wire_transfer")
-    assert "tool:charge_card" in _park_name("charge_card")
+    assert "tool:charge_card" in _park_name("charge_card").stored()
 
 
 def test_one_approval_settles_exactly_one_gated_op(tmp_path, sqlite_app):
@@ -218,12 +217,10 @@ class _Amounts(_Dom):
         return super().run(op)
 
 
-def _occ_name(occ: int, op_name: str = "charge_card") -> str:
-    # `.stored()` — like `_park_name` above, every consumer is `emit_event`, which addresses
-    # by the wire name.
+def _occ_name(occ: int, op_name: str = "charge_card") -> Key:
     return GateState(
         run_id=RUN, gate=GATE, op_key=step_key(f"tool:{op_name}").stored(), occurrence=occ
-    ).park_name.stored()
+    ).park_name
 
 
 def test_each_occurrence_of_one_tool_needs_its_own_approval(tmp_path, sqlite_app):
@@ -340,7 +337,7 @@ def test_the_gate_state_is_not_carried_in_a_factory_closure():
     for _ in range(2):
         RecordingHandler(responses=names, op_layers=(shared_gate,)).run(_one_charge)
 
-    assert names.asked == [_occ_name(0), _occ_name(0)], (
+    assert names.asked == [_occ_name(0).stored(), _occ_name(0).stored()], (
         f"run B did not restart the occurrence counter: {names.asked} — the gate state leaked "
         "through the factory closure"
     )
@@ -391,4 +388,4 @@ def test_the_occurrence_counter_does_advance_within_one_run():
     names = _AskedNames()
     RecordingHandler(responses=names, op_layers=(gate,)).run(_repeated_charges)
 
-    assert names.asked == [_occ_name(0), _occ_name(1)], names.asked
+    assert names.asked == [_occ_name(0).stored(), _occ_name(1).stored()], names.asked

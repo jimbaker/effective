@@ -31,7 +31,7 @@ from effective.api import append_ledger, ask_llm, await_event
 from effective.channels import Field, render, skill
 from effective.domain import AskLLM, CallTool, DomainOp
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key
+from effective.keys import Key, Run, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import LedgerRow
 from effective.skills import DISCLOSE_TOOL, SkillRegistry, activate_skill, refresh_skill
@@ -68,7 +68,7 @@ def skilled(run_id: str, *, park: bool):
     pin1 = yield from activate_skill("advice")
     first = yield from ask_llm("use:1", _use(pin1), Note)
     if park:
-        yield from await_event(f"resume:{run_id}", ResumeEvent)
+        yield from await_event(compose_key(t"resume:{Run(run_id)}"), ResumeEvent)
     pin2 = yield from refresh_skill("advice", 1)
     second = yield from ask_llm("use:2", _use(pin2), Note)
     yield from append_ledger(
@@ -239,7 +239,7 @@ def test_parked_run_resumes_on_recorded_pins_after_worker_death():
         app2 = absurd()
         domain2 = SkillDomain(version="V3", bump_to=None)
         register(app2, domain2)
-        app2.emit_event(f"resume:{rid}", {"actor": "approver"})
+        app2.emit_event(compose_key(t"resume:{Run(rid)}"), {"actor": "approver"})
         snap = app2.run_until_result(spawned)
 
         assert snap is not None

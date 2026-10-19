@@ -19,7 +19,7 @@ from effective.govern import GateState, Policy, Proceed, Resolution, govern
 from effective.handlers.base import _walk_run, walk_run
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
-from effective.keys import Run, compose_key
+from effective.keys import Key, Run, compose_key
 from effective.layers import current_meter
 from effective.ops import CompositionRefused, Step, WorkflowOp
 
@@ -112,7 +112,7 @@ def test_a_grant_resumes_on_the_spend_the_replay_derives(backend, grants):
         assert backend.checkpoint_keys(task) == ["step:a", "step:b"]
         (parked,) = backend.parked(task)
         names.append(parked.wake_event)
-        backend.emit_event(task, parked.wake_event, ruled(granted(dollars)))
+        backend.emit_event(task, Key.parse(parked.wake_event), ruled(granted(dollars)))
         snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert backend.checkpoint_keys(task) == ["step:a", "step:b", "step:c"]

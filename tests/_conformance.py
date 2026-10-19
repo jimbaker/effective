@@ -49,7 +49,7 @@ from effective.engines.absurd import AbsurdEngine
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import ForkOutcome
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key, Run, Segment, compose_key, scope_prefix
+from effective.keys import Index, Key, Run, Segment, compose_key, scope_prefix
 from effective.layers import TransientError
 from effective.ledgerread import pg_payloads, sqlite_payloads
 from effective.machine.evidence import CommandRun, Predicate
@@ -435,8 +435,8 @@ def double_await_wf(run_id: str):
 
     def double_branch():
         def thunk():
-            first = yield from await_event(f"ev1:{run_id}", dict)
-            second = yield from await_event(f"ev2:{run_id}", dict)
+            first = yield from await_event(compose_key(t"ev1:{Run(run_id)}"), dict)
+            second = yield from await_event(compose_key(t"ev2:{Run(run_id)}"), dict)
             return [first, second]
 
         return thunk
@@ -460,7 +460,7 @@ def multi_park_wf(run_id: str):
 
     def await_branch(i: int):
         def thunk():
-            return (yield from await_event(f"ev{i}:{run_id}", dict))
+            return (yield from await_event(compose_key(t"ev:{Index(i)},{Run(run_id)}"), dict))
 
         return thunk
 
@@ -1687,7 +1687,7 @@ class SqliteBackend:
     def failure_kind(self, snapshot: TaskSnapshot) -> str | None:
         return failure_kind(snapshot)
 
-    def emit_event(self, task_id: UUID, event: str, payload: Any) -> None:
+    def emit_event(self, task_id: UUID, event: str | Key, payload: Any) -> None:
         self.app.emit_event(event, payload)
 
     def checkpoint_keys(self, task_id: UUID) -> list[str]:
@@ -1899,7 +1899,7 @@ class AbsurdBackend:
     def run_until_result(self, task_id: UUID, max_batches: int = 24) -> TaskSnapshot:
         return drained(self.engine.run_until_result(task_id, max_batches))
 
-    def emit_event(self, task_id: UUID, event: str, payload: Any) -> None:
+    def emit_event(self, task_id: UUID, event: str | Key, payload: Any) -> None:
         self.engine.emit_event(event, payload)  # Absurd events are by name
 
     def checkpoint_keys(self, task_id: UUID) -> list[str]:

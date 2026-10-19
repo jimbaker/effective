@@ -16,7 +16,7 @@ from pydantic_core import to_jsonable_python
 from effective import RecordingHandler, call_tool
 from effective.api import await_event
 from effective.handlers.durable import DurableHandler
-from effective.keys import RECORDED, Key
+from effective.keys import RECORDED, Key, Subject, compose_key
 from effective.layers import drive_through
 from effective.ops import AppendLedgerRow, LedgerRow, Step
 from effective.permission import Allow, Deny, Escalate, Refused, cascade, human, rules
@@ -164,7 +164,7 @@ def test_a_policy_a_step_returned_survives_its_checkpoint_and_a_resume(sqlite_ap
 
     def wf():
         policy = yield from call_tool("pick_policy", {}, PermitPolicy)
-        yield from await_event("go:x", _Go)
+        yield from await_event(compose_key(t"go:{Subject('x')}"), _Go)
         return [entry.stored() for entry in policy.allow]
 
     class _Picks:
@@ -177,7 +177,7 @@ def test_a_policy_a_step_returned_survives_its_checkpoint_and_a_resume(sqlite_ap
 
     task_id = app.spawn("pick", {"run_id": "r1"})
     assert app.run_until_result(task_id).state == "waiting"
-    app.emit_event("go:x", {"ok": True})
+    app.emit_event(compose_key(t"go:{Subject('x')}"), {"ok": True})
     snap = app.run_until_result(task_id)
     assert (snap.state, snap.result) == ("completed", ["tool:read_file"])
 

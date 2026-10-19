@@ -104,14 +104,14 @@ def test_one_approval_settles_one_scope_entry(backend):
     backend.run_until_result(task_id)
     (first,) = backend.parked(task_id)
 
-    backend.emit_event(task_id, first.wake_event, ruled({"decision": "approve"}))
+    backend.emit_event(task_id, Key.parse(first.wake_event), ruled({"decision": "approve"}))
     snapshot = backend.run_until_result(task_id)
     assert snapshot.state != "completed", snapshot
     assert domain.calls == ["act"]
     (second,) = backend.parked(task_id)
     assert second.wake_event != first.wake_event
 
-    backend.emit_event(task_id, second.wake_event, ruled({"decision": "approve"}))
+    backend.emit_event(task_id, Key.parse(second.wake_event), ruled({"decision": "approve"}))
     snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
     assert domain.calls == ["act", "act"]
@@ -136,13 +136,13 @@ def test_a_grant_park_in_a_scope_entered_twice_is_asked_twice(backend):
     backend.run_until_result(task_id)
     (first,) = backend.parked(task_id)
 
-    backend.emit_event(task_id, first.wake_event, ruled({"add_depth": 0}))
+    backend.emit_event(task_id, Key.parse(first.wake_event), ruled({"add_depth": 0}))
     snapshot = backend.run_until_result(task_id)
     assert snapshot.state != "completed", snapshot
     (second,) = backend.parked(task_id)
     assert second.wake_event != first.wake_event
 
-    backend.emit_event(task_id, second.wake_event, ruled({"add_depth": 0}))
+    backend.emit_event(task_id, Key.parse(second.wake_event), ruled({"add_depth": 0}))
     snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
     assert snapshot.result == ["ctx", "ctx"]

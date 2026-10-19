@@ -48,7 +48,7 @@ from effective.cost import Usage, marked
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import fork_seed, run_fork
 from effective.handlers.durable import DurableHandler, fork_event_name
-from effective.keys import Key, Segment, compose_key
+from effective.keys import Segment, Subject, compose_key
 from effective.ops import LedgerRow
 from effective.sql import bind
 
@@ -66,7 +66,7 @@ def _wf(prefix_ops: int):
         yield from append_ledger(
             LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
         )
-        approval = yield from await_event(f"review:{message_id}", dict)
+        approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
         yield from append_ledger(
             LedgerRow(
                 event_id=compose_key(t"reviewed:{Segment(message_id)}"),
@@ -111,7 +111,7 @@ def _run_sweep(app: SqliteApp, db: str, prefix_ops: int, forks: int) -> tuple[in
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(f"review:{message_id}", {"decision": "reject"})
+    app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "reject"})
     app.run_until_result(base_id)
 
     # `through` is the LAST op before the fork point, not the last one you feel like copying:
@@ -145,7 +145,7 @@ def _run_sweep(app: SqliteApp, db: str, prefix_ops: int, forks: int) -> tuple[in
         fid = app.spawn(f"fork-{i}", {"run_id": rid})
         app.run_until_result(fid)
         app.emit_event(
-            fork_event_name(rid, Key.parse(f"review:{message_id}")).stored(),
+            fork_event_name(rid, compose_key(t"review:{Subject(message_id)}")),
             {"decision": "approve"},
         )
         snap = app.run_until_result(fid)

@@ -138,7 +138,7 @@ def test_sqlite_writes_no_await_checkpoint_at_all():
 
     task_id = app.spawn("two", {"run_id": "r1"})
     app.work_batch()
-    app.emit_event(NAME.stored(), ANSWER)
+    app.emit_event(NAME, ANSWER)
     snapshot = app.run_until_result(task_id)
     names = [
         row[0]
@@ -221,7 +221,7 @@ def test_absurd_is_the_ONE_walk_that_already_has_the_coordinate():
     spawned = app.spawn(task_name, {"run_id": "r1"})
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
-    app.emit_event(name.stored(), ANSWER)
+    app.emit_event(name, ANSWER)
     app.run_until_result(task_id)
 
     with psycopg.connect(DSN) as conn:
@@ -299,12 +299,12 @@ def test_ONE_answer_no_longer_settles_both_asks_on_sqlite():
 
     task_id = app.spawn("two-grants", {"run_id": "r1"})
     app.work_batch()
-    app.emit_event(GRANT.stored(), GRANT_RULING)  # ONE answer, to the first ask
+    app.emit_event(GRANT, GRANT_RULING)  # ONE answer, to the first ask
     parked = app.run_until_result(task_id)
 
     # ... and the second occurrence is answerable, so this is a distinct live question rather
     # than a name nothing can ever satisfy.
-    app.emit_event(GRANT.occurrence(2).stored(), GRANT_RULING)
+    app.emit_event(GRANT.occurrence(2), GRANT_RULING)
     finished = app.run_until_result(task_id)
     app.close()
 
@@ -318,7 +318,7 @@ def test_an_emitter_composes_the_second_asks_registration_rather_than_writing_it
 
     The sanctioned spelling is the composed key's own `occurrence`, and it has to equal the
     registration the run waits on, or waking the second ask is guesswork."""
-    composed = qualified_event_name(name=GRANT.stored()).occurrence(2)
+    composed = qualified_event_name(name=GRANT).occurrence(2)
 
     app = SqliteApp(":memory:")
 
@@ -328,10 +328,10 @@ def test_an_emitter_composes_the_second_asks_registration_rather_than_writing_it
 
     task_id = app.spawn("two-grants", {"run_id": "r1"})
     app.work_batch()
-    app.emit_event(GRANT.stored(), GRANT_RULING)
+    app.emit_event(GRANT, GRANT_RULING)
     app.run_until_result(task_id)
     waiting = [park.wake_event for park in read_sqlite_parked_conn(app.conn, clock=app.clock)]
-    app.emit_event(composed.stored(), GRANT_RULING)
+    app.emit_event(composed, GRANT_RULING)
     finished = app.run_until_result(task_id)
     app.close()
 
@@ -394,8 +394,8 @@ def test_absurds_own_duplicate_name_rule_does_not_fire():
     spawned = app.spawn(task_name, {"run_id": "r1"})
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
-    app.emit_event(grant.stored(), GRANT_RULING)
-    app.emit_event(grant.occurrence(2).stored(), GRANT_RULING)
+    app.emit_event(grant, GRANT_RULING)
+    app.emit_event(grant.occurrence(2), GRANT_RULING)
     app.run_until_result(task_id)
 
     with psycopg.connect(DSN) as conn:
@@ -446,7 +446,7 @@ def _one_answer_leaves_it_parked(app: Any) -> bool:
     spawned = app.spawn(task_name, {"run_id": "r-probe"})
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
-    app.emit_event(grant.stored(), GRANT_RULING)  # ONE answer
+    app.emit_event(grant, GRANT_RULING)  # ONE answer
     snapshot = app.run_until_result(task_id, max_batches=4)
     return snapshot is None or snapshot.state != "completed"
 

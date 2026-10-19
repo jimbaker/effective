@@ -30,7 +30,7 @@ from effective.cost import Usage
 from effective.domain import AskLLM, CallTool
 from effective.fork import measured_drive
 from effective.handlers.base import artifact_id
-from effective.keys import Key
+from effective.keys import Key, Subject, compose_key
 from effective.ops import AppendLedgerRow, AwaitEvent, StoreArtifact
 
 RUN = "run-a1"
@@ -202,7 +202,7 @@ def test_a_prefix_sleep_diverges_between_fork_at_and_measured_drive():
     def prog():
         yield from ask_llm("first", [], str)
         yield from sleep_until(datetime(2026, 1, 1, tzinfo=UTC))
-        return (yield from await_event("review:x", str))
+        return (yield from await_event(compose_key(t"review:{Subject('x')}"), str))
 
     base = RecordingHandler(responses={"first": "a1"})
     parked = base.run(prog)

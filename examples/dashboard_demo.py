@@ -33,7 +33,7 @@ from effective.cost import MeteredInterpreter, Usage
 from effective.dashboard import dashboard
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key, Run, compose_key
+from effective.keys import Index, Key, Run, compose_key
 from effective.ops import LedgerRow
 
 
@@ -72,7 +72,9 @@ def batch_wf(run_id: str):
 
     def parked(i: int):
         def branch():
-            return (yield from await_event(f"item{i}:{run_id}", dict))
+            return (
+                yield from await_event(compose_key(t"batch-item:{Index(i)},{Run(run_id)}"), dict)
+            )
 
         return branch
 

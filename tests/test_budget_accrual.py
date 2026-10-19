@@ -12,7 +12,7 @@ import pytest
 from _authority import ruled
 
 from effective.api import ask_llm, gather
-from effective.budget import MeasuredBudget
+from effective.budget import MeasuredBudget, budget_grant_name
 from effective.cost import (
     FORMAT_PARAM,
     NEWEST_FORMAT,
@@ -219,7 +219,7 @@ def test_measured_trip_parks_then_a_grant_resumes(app):
     assert snap is not None
     assert snap.state == "waiting"  # parked on the 3rd ask's trip, not complete
 
-    app.emit_event("budget-grant:r1,0", ruled({"add_dollars": 0.01}))  # trip_n=0
+    app.emit_event(budget_grant_name("r1", 0), ruled({"add_dollars": 0.01}))  # trip_n=0
     snap = app.run_until_result(tid)
     assert snap is not None
     assert snap.state == "completed"
@@ -239,7 +239,7 @@ def test_measured_trip_stop_grant_refuses_the_over_budget_ask(app):
     tid = _spawn_measured(app, "r1", limit=0.0015, on_exhaust="park", max_attempts=1)
 
     app.run_until_result(tid)  # parks on budget-grant:r1,0
-    app.emit_event("budget-grant:r1,0", ruled({"stop": True}))  # answer with what you have
+    app.emit_event(budget_grant_name("r1", 0), ruled({"stop": True}))  # answer with what you have
     snap = app.run_until_result(tid)
     assert snap is not None
     assert snap.state == "failed"

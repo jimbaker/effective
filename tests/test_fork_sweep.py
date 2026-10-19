@@ -33,7 +33,7 @@ from effective.engines.sqlite import SqliteApp, SqliteLedger, read_sqlite_params
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
-from effective.keys import Key, Segment, compose_key
+from effective.keys import Key, Segment, Subject, compose_key
 from effective.ops import LedgerRow
 from effective.parked import answer, read_sqlite_parked_conn
 from effective.spawning import Failed, Returned
@@ -98,7 +98,7 @@ def decision_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    approval = yield from await_event(f"review:{message_id}", dict)
+    approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     decision = approval["decision"]
     yield from append_ledger(
         LedgerRow(
@@ -206,7 +206,7 @@ def _run_base(app: SqliteApp, message_id: str, decision: str = "reject") -> UUID
     assert [
         (p.task_name, p.wake_event) for p in read_sqlite_parked_conn(app.conn, clock=app.clock)
     ] == [("base", f"review:{message_id}")]
-    app.emit_event(f"review:{message_id}", {"decision": decision})
+    app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": decision})
     snap = app.run_until_result(base_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -382,7 +382,7 @@ def _stopping_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    approval = yield from await_event(f"review:{message_id}", dict)
+    approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     if approval["decision"] == "reject":
         yield from call_tool("stop", {}, str)
     return approval["decision"]
@@ -407,7 +407,7 @@ def test_a_child_cancelled_in_its_tail_answers_its_parent_as_a_cancel(tmp_path, 
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
-    app.emit_event(f"review:{message_id}", {"decision": "approve"})
+    app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "approve"})
     assert app.run_until_result(base_id).state == "completed"
 
     app.register_task("child")(
@@ -559,7 +559,7 @@ def test_ask_leaves_the_fork_point_open_for_a_human(tmp_path, sqlite_app):
     )
 
     # a human answers, in the child's own namespace — and the counterfactual completes
-    app.emit_event(waiting_event, {"decision": "approve"})
+    app.emit_event(Key.parse(waiting_event), {"decision": "approve"})
     while app.work_batch():
         pass
     assert [k for _, k, _ in _rows(app, "fork-hitl")] == [
@@ -649,7 +649,7 @@ def _chaining_tail_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    yield from await_event(f"review:{message_id}", dict)
+    yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
 
     def step(state: ChainCarry, _turn):
         return Again(ChainCarry(n=state.n + 1))
@@ -746,7 +746,7 @@ def _nesting_wf(message_id: str):
     yield from append_ledger(
         LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
     )
-    approval = yield from await_event(f"review:{message_id}", dict)
+    approval = yield from await_event(compose_key(t"review:{Subject(message_id)}"), dict)
     handle = yield from spawn_fork(
         "child",
         child_run_id="grandchild",

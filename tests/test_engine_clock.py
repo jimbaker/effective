@@ -28,7 +28,7 @@ from effective.handlers.durable import (
     _PrefixedCtx,
     _StoreCalls,
 )
-from effective.keys import Key
+from effective.keys import Key, Subject, compose_key
 from effective.ops import DONE_EVENT_PARAM
 from effective.steering import SteeringCtx
 from effective.viewing import ReachedThePark, ViewingCtx
@@ -200,7 +200,9 @@ def _app(sqlite_app: Any, offset: timedelta) -> tuple[SqliteApp, HeldClock]:
 
 def _waiter(app: SqliteApp, deadline: datetime) -> Any:
     def waits():
-        outcome = yield from await_until("ev:x", dict, deadline=deadline)
+        outcome = yield from await_until(
+            compose_key(t"ev:{Subject('x')}"), dict, deadline=deadline
+        )
         return type(outcome).__name__
 
     app.register_task("waits")(lambda params, ctx: DurableHandler(ctx, _NoDomain()).run(waits))
@@ -221,7 +223,7 @@ def test_an_event_after_the_apps_deadline_wakes_no_wait_and_names_no_park(sqlite
     app.work_batch()
     clock.advance(timedelta(minutes=20))
     assert (app.parked(), park_name(app.conn, task, clock=app.clock)) == ((), None)
-    app.emit_event("ev:x", {})
+    app.emit_event(compose_key(t"ev:{Subject('x')}"), {})
     snap = app.run_until_result(task)
     assert snap is not None
     assert snap.result == "Expired"
@@ -231,7 +233,7 @@ def test_an_app_behind_real_time_claims_what_it_spawned_and_woke(sqlite_app):
     app, clock = _app(sqlite_app, -AN_HOUR)
     task = _waiter(app, clock.at + timedelta(minutes=10))
     assert app.work_batch() is True
-    app.emit_event("ev:x", {})
+    app.emit_event(compose_key(t"ev:{Subject('x')}"), {})
     snap = app.run_until_result(task)
     assert snap is not None
     assert (snap.state, snap.result) == (TaskState.COMPLETED, "Arrived")
@@ -279,7 +281,9 @@ def _awaiting(app: SqliteApp, name: str) -> Any:
 def test_an_emit_from_inside_a_task_wakes_its_waiter_at_the_apps_clock(sqlite_app):
     app, _ = _app(sqlite_app, -AN_HOUR)
     waiter = _awaiting(app, "ev:x")
-    app.register_task("emits")(lambda params, ctx: ctx.emit_event("ev:x", {"n": 1}))
+    app.register_task("emits")(
+        lambda params, ctx: ctx.emit_event(compose_key(t"ev:{Subject('x')}"), {"n": 1})
+    )
     app.spawn("emits", {})
     snap = app.run_until_result(waiter)
     assert snap is not None
@@ -295,7 +299,7 @@ def test_an_event_stored_before_the_park_wakes_it_at_the_apps_clock(sqlite_app):
         found, _ = ctx.peek_event(event)
         if found:
             return "awake"
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(compose_key(t"ev:{Subject('x')}"), {"n": 1})
         raise _Suspend(event=event)
 
     app.register_task("parks")(body)

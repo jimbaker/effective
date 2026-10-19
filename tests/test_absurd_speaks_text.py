@@ -53,7 +53,7 @@ PROBE = textwrap.dedent(
             from effective.api import await_event, call_tool
             from effective.checkpoints import Checkpoint
             from effective.fork import run_fork_as_task
-            from effective.keys import Key
+            from effective.keys import Key, Name, compose_key
 
             class Ledger:
                 hypothetical = True
@@ -63,7 +63,7 @@ PROBE = textwrap.dedent(
 
             def workflow(run_id):
                 yield from call_tool("prefix", {}, int)
-                return (yield from await_event("probe:base", dict))
+                return (yield from await_event(compose_key(t"probe:{Name('base')}"), dict))
 
             @app.register_task("fork", default_max_attempts=1)
             def fork(params, ctx):

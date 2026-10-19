@@ -223,9 +223,9 @@ def run_mixed(backend, fault: Fault):
     park = qualified_event_name(
         compose_key(t"mix:{Run(run_id)}"),
         compose_key(t"d:{Index(2)}"),
-        name=compose_key(t"ask:{Index(2)}").stored(),
+        name=compose_key(t"ask:{Index(2)}"),
     )
-    backend.emit_event(task_id, park.stored(), {"text": "ship it"})
+    backend.emit_event(task_id, park, {"text": "ship it"})
     return backend.run_until_result(task_id), domain
 
 

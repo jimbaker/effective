@@ -30,8 +30,9 @@ from uuid import UUID
 import pytest
 from _authority import ruled
 
+from effective.api import GatherBranch, qualified_event_name
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
-from effective.keys import Key
+from effective.keys import Index, Key, compose_key
 
 pytestmark = pytest.mark.adversarial
 
@@ -85,7 +86,7 @@ def test_a_concurrent_peek_never_answers_with_another_branchs_row(sqlite_app):
     forged approval or a spurious denial.
     """
     _app, ctx = _ctx(sqlite_app)
-    ctx.emit_event(APPROVED.stored(), APPROVAL)
+    ctx.emit_event(APPROVED, APPROVAL)
 
     errors: Counter[str] = Counter()
     wrong: Counter[str] = Counter()
@@ -149,7 +150,7 @@ def test_a_lockless_context_still_serves_the_single_threaded_case(sqlite_app):
     ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None, clock=app.clock)
 
     assert ctx.concurrent_safe is False
-    ctx.emit_event(APPROVED.stored(), APPROVAL)
+    ctx.emit_event(APPROVED, APPROVAL)
     assert ctx.peek_event(APPROVED) == (True, STORED_APPROVAL)
     assert ctx.peek_event(UNAPPROVED) == (False, None)
     assert ctx.step(Key.parse("step;tool:t"), lambda: {"i": 1}) == {"i": 1}
@@ -228,7 +229,12 @@ def test_a_task_emitting_from_inside_its_own_run_serializes_with_its_siblings(sq
     def emit_from_inside(branch: int) -> None:
         for i in range(per_thread):
             try:
-                ctx.emit_event(f"gather:0,{branch};reply:e{i}", {"n": i, "b": branch})
+                ctx.emit_event(
+                    qualified_event_name(
+                        GatherBranch(0, branch), name=compose_key(t"reply:{Index(i)}")
+                    ),
+                    {"n": i, "b": branch},
+                )
             except Exception as exc:  # the exception SHAPE is the finding, so catch broadly
                 errors[f"emit {type(exc).__name__}: {exc}"] += 1
 
@@ -264,7 +270,12 @@ def test_an_outside_in_emit_never_tears_against_a_running_branch(sqlite_app):
     def emit_all(branch: int) -> None:
         for i in range(per_thread):
             try:
-                app.emit_event(f"gather:0,{branch};ev:e{i}", {"n": i, "b": branch})
+                app.emit_event(
+                    qualified_event_name(
+                        GatherBranch(0, branch), name=compose_key(t"ev:{Index(i)}")
+                    ),
+                    {"n": i, "b": branch},
+                )
             except Exception as exc:  # the exception SHAPE is the finding, so catch broadly
                 errors[f"emit {type(exc).__name__}: {exc}"] += 1
 
@@ -274,7 +285,9 @@ def test_an_outside_in_emit_never_tears_against_a_running_branch(sqlite_app):
 
     def read_back(branch: int) -> None:
         for i in range(per_thread):
-            name = Key.parse(f"gather:0,{branch};ev:e{i}")
+            name = qualified_event_name(
+                GatherBranch(0, branch), name=compose_key(t"ev:{Index(i)}")
+            )
             try:
                 found, payload = ctx.peek_event(name)
             except Exception as exc:  # ditto

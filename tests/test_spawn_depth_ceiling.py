@@ -222,7 +222,7 @@ def fork_of_a_spawning_base(tmp_path, *, base_depth, sweep_params):
 
     base_id = app.spawn("base", {} if base_depth is None else {BUDGET_DEPTH_PARAM: base_depth})
     app.run_until_result(base_id)
-    app.emit_event(review(mid).stored(), {"decision": "approve"})
+    app.emit_event(review(mid), {"decision": "approve"})
     assert (snap := app.run_until_result(base_id)) is not None
     assert snap.state == "completed"
 

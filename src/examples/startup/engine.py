@@ -22,6 +22,7 @@ from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool, Judge
 from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
+from effective.keys import Key
 from effective.parked import pending_key
 
 ENDED = frozenset({"completed", "failed", "cancelled"})
@@ -106,7 +107,9 @@ def _run(
             for waiting in parked:
                 delivered.append(waiting.wake_event)
                 parks.append((recorded, pending_key(waiting).display()))
-                app.emit_event(waiting.wake_event, deliver(waiting.wake_event).model_dump())
+                app.emit_event(
+                    Key.parse(waiting.wake_event), deliver(waiting.wake_event).model_dump()
+                )
         if done is None or done.state != "completed":
             raise RuntimeError(f"the run ended {done}")
         recorded = keys(read_sqlite_task(db, spawned))

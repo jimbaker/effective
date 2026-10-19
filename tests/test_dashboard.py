@@ -35,7 +35,7 @@ from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphlayout import elkjs
 from effective.graphlayout import elkjs as elk_engine
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key
+from effective.keys import Index, Key, Run, compose_key
 from effective.layers import compose_domain
 from effective.ops import LedgerRow
 from effective.parked import read_sqlite_parked_conn
@@ -72,7 +72,7 @@ def _two_parked_branches_wf(run_id: str):
 
     def await_branch(i: int):
         def branch():
-            return (yield from await_event(f"ev{i}:{run_id}", dict))
+            return (yield from await_event(compose_key(t"ev:{Index(i)},{Run(run_id)}"), dict))
 
         return branch
 
@@ -129,7 +129,7 @@ def test_the_fleet_page_lists_a_parked_run_and_links_to_it(engine, client):
 def test_the_fleet_page_renders_the_ABSENCE_of_a_park_timestamp(engine, client):
     """`parked_since` is `None` on SQLite — the `tasks` table has no such column. The column stays
     and says so; substituting "now" would report a fact the engine never recorded."""
-    _run(engine, "gated", _await_wf("review:r1"), "r1")
+    _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     page = client.get("/")
     assert "not recorded by this engine" in page.text
@@ -163,7 +163,7 @@ def test_every_authorization_namespace_shows_not_just_approve(engine, client):
 
 def test_the_run_page_offers_the_form_on_the_RAW_registration(engine, client):
     """The name the page posts against is the one the engine stored, not a reconstruction."""
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     page = client.get(f"/tasks/{task_id}")
     assert page.status_code == 200
@@ -172,8 +172,8 @@ def test_the_run_page_offers_the_form_on_the_RAW_registration(engine, client):
 
 
 def test_the_run_page_of_a_finished_run_has_no_form(engine, client):
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
-    engine.emit_event("review:r1", {"decision": "approve"})
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
+    engine.emit_event(compose_key(t"review:{Run('r1')}"), {"decision": "approve"})
     engine.run_until_result(task_id)
 
     page = client.get(f"/tasks/{task_id}")
@@ -201,13 +201,13 @@ def test_a_parked_gather_says_on_screen_that_it_is_one_branch_of_N(engine, clien
     page says otherwise."""
     task_id = _run(engine, "multi", _two_parked_branches_wf, "r1")
     (park,) = read_sqlite_parked_conn(engine.conn, clock=engine.clock)
-    assert park.wake_event == "gather:0,0;ev0:r1"  # branch 2's park is invisible
+    assert park.wake_event == "gather:0,0;ev:0,r1"  # branch 2's park is invisible
 
     page = client.get(f"/tasks/{task_id}")
     assert "one branch of a gather" in page.text
 
     # ...and the caveat is not printed for an ordinary park
-    plain = _run(engine, "gated", _await_wf("review:r2"), "r2")
+    plain = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r2')}")), "r2")
     assert "one branch of a gather" not in client.get(f"/tasks/{plain}").text
 
 
@@ -283,7 +283,7 @@ def test_the_run_page_is_silent_when_the_two_bookkeepers_agree(engine, client):
 def test_answering_resumes_the_run_and_the_park_leaves_the_list(engine, client):
     """The whole round trip, in one process. `follow_redirects=False` keeps this infra-free: the
     redirect target is the run page, which would want the layout container."""
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
     assert len(read_sqlite_parked_conn(engine.conn, clock=engine.clock)) == 1
 
     posted = client.post(
@@ -309,11 +309,11 @@ def test_answering_a_gather_branch_reveals_the_next_park(engine, client):
     client.post(f"/tasks/{task_id}/answer", data={"payload": "{}"}, follow_redirects=False)
 
     (park,) = read_sqlite_parked_conn(engine.conn, clock=engine.clock)
-    assert park.wake_event == "gather:0,2;ev2:r1"  # a new park, not a completion
+    assert park.wake_event == "gather:0,2;ev:2,r1"  # a new park, not a completion
 
 
 def test_a_payload_that_is_not_json_is_refused_by_name(engine, client):
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     refused = client.post(
         f"/tasks/{task_id}/answer", data={"payload": "not json"}, follow_redirects=False
@@ -326,8 +326,8 @@ def test_a_payload_that_is_not_json_is_refused_by_name(engine, client):
 
 
 def test_answering_a_task_that_is_not_parked_is_a_404(engine, client):
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
-    engine.emit_event("review:r1", {})
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
+    engine.emit_event(compose_key(t"review:{Run('r1')}"), {})
     engine.run_until_result(task_id)
 
     posted = client.post(f"/tasks/{task_id}/answer", data={"payload": "{}"})
@@ -349,7 +349,7 @@ def test_the_run_page_renders_the_parked_node_as_a_hexagon_carrying_its_node_id(
 
     `data-node-id="event;{wake_event}"` is the pending node's spelling, and `<polygon>` is what
     makes it a hexagon, the one shape that means "the run can stop here"."""
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     page = client.get(f"/tasks/{task_id}")
     assert page.status_code == 200
@@ -363,8 +363,8 @@ def test_the_run_page_renders_the_parked_node_as_a_hexagon_carrying_its_node_id(
 
 @needs_elk
 def test_a_finished_run_draws_no_pending_node(engine, client):
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
-    engine.emit_event("review:r1", {})
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
+    engine.emit_event(compose_key(t"review:{Run('r1')}"), {})
     engine.run_until_result(task_id)
 
     page = client.get(f"/tasks/{task_id}")
@@ -377,7 +377,7 @@ def test_a_finished_run_draws_no_pending_node(engine, client):
 @pytest.mark.skipif(elk_engine.available(), reason="the layout engine IS available here")
 def test_without_a_layout_engine_the_page_names_the_command_that_builds_one(engine, client):
     """A missing graph with no culprit named is the dead end the DX doctrine treats as a defect."""
-    task_id = _run(engine, "gated", _await_wf("review:r1"), "r1")
+    task_id = _run(engine, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     page = client.get(f"/tasks/{task_id}")
     assert page.status_code == 200

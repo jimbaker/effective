@@ -19,6 +19,7 @@ from effective.budget import as_policy as budget_policy
 from effective.combinators import Answered, Branch, Level, tree_search
 from effective.cost import MeteredInterpreter, Usage
 from effective.govern import Policy, Resolution
+from effective.keys import Key
 from effective.permission import Allow, Deny
 
 COST = 0.001
@@ -80,9 +81,7 @@ def test_a_trip_answered_stop_at_a_park_keeps_the_rounds_before_it(backend):
     backend.register(name, search, domain(), Fault(), (), budget_limit=0.0015, on_exhaust="park")
     task = backend.spawn(name, run_id, max_attempts=1)
     assert backend.run_until_result(task).state != "completed"
-    backend.emit_event(
-        task, budget_grant_name(run_id, 0).stored(), ruled(Grant(stop=True).model_dump())
-    )
+    backend.emit_event(task, budget_grant_name(run_id, 0), ruled(Grant(stop=True).model_dump()))
     snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert snap.result == len(LEAVES)
@@ -135,7 +134,7 @@ def test_parks_inside_the_branches_answered_stop_keep_the_rounds_before_them(bac
     answered = 0
     while (snap := backend.run_until_result(task)).state not in ("completed", "failed"):
         (parked,) = backend.parked(task)
-        backend.emit_event(task, parked.wake_event, stop)
+        backend.emit_event(task, Key.parse(parked.wake_event), stop)
         answered += 1
         assert answered <= len(LEAVES), "more parks than leaves"
     assert snap.state == "completed", snap

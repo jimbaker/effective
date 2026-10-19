@@ -50,8 +50,8 @@ def _door() -> Any:
 smol_door = _door()
 
 SEND = AssistantTurn(
-    thought="let Sam in",
-    tool=ToolRequest(name="send_code", args={"visitor": "Sam", "minutes": 30}),
+    thought="let Alice in",
+    tool=ToolRequest(name="send_code", args={"visitor": "Alice", "minutes": 30}),
 )
 DONE = AssistantTurn(thought="done", answer="ok")
 LEVEL = Level(depth=0, model="", final=False)
@@ -80,7 +80,7 @@ def _ran(recorder: RecordingHandler) -> list[str]:
 
 def _observed(recorder: RecordingHandler, verdict: Verdict) -> str:
     """The first turn's observation, when the run is guarded by `verdict`."""
-    match recorder.run(lambda: run_agent("let Sam in", guard=_always(verdict))):
+    match recorder.run(lambda: run_agent("let Alice in", guard=_always(verdict))):
         case Trajectory(steps=[Step(observation=str(observation)), *_]):
             return observation
         case other:
@@ -111,7 +111,7 @@ def test_an_ask_rings_the_user_then_parks_and_their_answer_decides(allow: bool):
             }
         )
     )
-    observation = _observed(recorder, Ask("Sam?"))
+    observation = _observed(recorder, Ask("Alice?"))
     ran = _ran(recorder)
     asked = ran.index("d:0;step;guard:asked")
     assert ran[asked + 1] == "d:0;event;guard:ask"
@@ -127,9 +127,9 @@ def test_the_guard_reads_the_transcript_that_chose_the_action():
         yield from ()
         return Proceed()
 
-    RecordingHandler(_canned()).run(lambda: run_agent("let Sam in", guard=guard))
+    RecordingHandler(_canned()).run(lambda: run_agent("let Alice in", guard=guard))
     [messages] = seen
-    assert messages[0] == {"role": "user", "content": "let Sam in"}
+    assert messages[0] == {"role": "user", "content": "let Alice in"}
     assert messages[-1]["role"] == "assistant"
     assert "send_code" in messages[-1]["content"]
 
@@ -149,7 +149,7 @@ def _judged(named: float, window: float) -> dict[str, Any]:
     ],
 )
 def test_the_door_proceeds_refuses_or_asks_by_the_two_facts(named, window, verdict):
-    messages = [{"role": "user", "content": "let Sam in for half an hour"}]
+    messages = [{"role": "user", "content": "let Alice in for half an hour"}]
     recorder = RecordingHandler({"judge:door": _judged(named, window)})
     got = recorder.run(lambda: smol_door.door(SEND.tool, messages, LEVEL))
     assert type(got) is verdict
@@ -163,14 +163,14 @@ def test_the_door_judges_only_a_door_code():
 
 
 LINES = [
-    "let Sam in for 30 minutes",
-    "Alex is at the door",
-    "let Pat in for a bit",
-    "let Quinn in for a bit",
+    "let Alice in for 30 minutes",
+    "Mallory is at the door",
+    "let Carol in for a bit",
+    "let Dave in for a bit",
     "/quit",
 ]
-FACTS = {"Sam": (0.95, 0.95), "Alex": (0.05, 0.95), "Pat": (0.95, 0.5), "Quinn": (0.95, 0.5)}
-VISITORS = ["Sam", "Alex", "Pat", "Quinn"]
+FACTS = {"Alice": (0.95, 0.95), "Mallory": (0.05, 0.95), "Carol": (0.95, 0.5), "Dave": (0.95, 0.5)}
+VISITORS = ["Alice", "Mallory", "Carol", "Dave"]
 ALLOWED = {2: True, 3: False}
 """The resident's answer to each turn's ask, by turn: both ask at the same depth."""
 
@@ -222,13 +222,16 @@ def converse(backend, domain: House, fault: Fault) -> Any:
     domain.spawn = spawn_tool(backend.spawner)
     backend.register_body(name, body)
     for n, line in enumerate(LINES):
-        park = qualified_event_name(scope, name=compose_key(t"user:{Index(n)}").stored())
-        backend.emit_event(uuid4(), park.stored(), {"text": line})
+        park = qualified_event_name(scope, name=compose_key(t"user:{Index(n)}"))
+        backend.emit_event(uuid4(), park, {"text": line})
     for n, allow in ALLOWED.items():
         ask = qualified_event_name(
-            scope, compose_key(t"turn:{Index(n)}"), compose_key(t"d:{Index(0)}"), name="guard:ask"
+            scope,
+            compose_key(t"turn:{Index(n)}"),
+            compose_key(t"d:{Index(0)}"),
+            name=compose_key(t"guard:ask"),
         )
-        backend.emit_event(uuid4(), ask.stored(), {"allow": allow})
+        backend.emit_event(uuid4(), ask, {"allow": allow})
     backend.spawn(name, run_id)
     ran, snap = 0, None
     while ran < len(tasks := [task_id for task_id, _ in backend.enqueued(name)]):
@@ -246,16 +249,16 @@ def test_the_door_sends_refuses_and_asks_in_one_conversation(backend):
     domain = House()
     snap = converse(backend, domain, Fault())
     assert snap.state == "completed", snap
-    assert domain.sent == ["Sam", "Pat"]
+    assert domain.sent == ["Alice", "Carol"]
     assert domain.judged == VISITORS
     assert domain.asked == [
-        "Send Pat a door code for 30 minutes?",
-        "Send Quinn a door code for 30 minutes?",
+        "Send Carol a door code for 30 minutes?",
+        "Send Dave a door code for 30 minutes?",
     ]
-    sam, alex, pat, quinn = _tools(snap)
-    assert (sam, pat) == ("sent Sam a code", "sent Pat a code")
-    assert "never asked" in alex
-    assert "declined" in quinn
+    alice, mallory, carol, dave = _tools(snap)
+    assert (alice, carol) == ("sent Alice a code", "sent Carol a code")
+    assert "never asked" in mallory
+    assert "declined" in dave
 
 
 @pytest.mark.parametrize("position", [FaultPosition.BEFORE_OP, FaultPosition.AFTER_THUNK])
@@ -271,6 +274,6 @@ def test_a_judged_conversation_survives_a_crash_at_every_op(backend, position):
         assert snap.state == "completed", (k, snap)
         assert _tools(snap) == _tools(golden), k
         if position is FaultPosition.BEFORE_OP:
-            assert domain.sent == ["Sam", "Pat"], k
+            assert domain.sent == ["Alice", "Carol"], k
             assert domain.judged == VISITORS, k
             assert len(domain.asked) == 2, k

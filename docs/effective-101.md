@@ -82,7 +82,7 @@ cascade's `AwaitEvent`, [`src/effective/permission.py`](../src/effective/permiss
 | `call_tool(name, args, schema)` | the tool's result | accrues no spend today: the cost layer meters only `AskLLM`, so a budget test asserting a carry must use `ask_llm` |
 | `store_artifact(value, content_type)` | an artifact reference | for anything too big or too binary to sit in a checkpoint |
 | `sleep_until(when)` | resumes after `when` | durable; the worker may die meanwhile |
-| `await_event(name, schema, addressing)` | the event's payload | the suspension primitive (§5.3). `addressing` defaults to RELATIVE (§4.12) |
+| `await_event(name, schema, addressing)` | the event's payload | the suspension primitive (§5.3). `name` is a composed `Key` or one atom; text holding key structure is refused. `addressing` defaults to RELATIVE (§4.12) |
 | `append_ledger(row)` | nothing | idempotent by `event_id` |
 | `judge(name, template, output)`, `select(name, template, candidates)` | typed answers to the questions a t-string asks | a `Judge` op; `select` picks one candidate or none |
 | `await_until(name, schema, *, deadline)` | the payload, or that the deadline passed | a wait with a deadline, answered as a `WaitOutcome` |

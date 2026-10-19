@@ -17,7 +17,7 @@ from effective.api import append_ledger, ask_llm, await_event, call_tool, scoped
 from effective.checkpoints import is_step_checkpoint
 from effective.fork import OpIndex, to_step_index
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Key, compose_key
+from effective.keys import Key, Subject, compose_key
 from effective.ops import LedgerRow
 
 
@@ -30,7 +30,9 @@ def _shaped():
     yield from append_ledger(
         LedgerRow(event_id=Key.parse("extracted:m1"), kind="ex")
     )  # all-ops 3 · ledger
-    decision = yield from await_event("review:m1", dict)  # all-ops 4 · AwaitEvent  ← fork here
+    decision = yield from await_event(
+        compose_key(t"review:{Subject('m1')}"), dict
+    )  # all-ops 4 · AwaitEvent  ← fork here
     yield from append_ledger(
         LedgerRow(event_id=Key.parse("reviewed:m1"), kind="reviewed")
     )  # all-ops 5

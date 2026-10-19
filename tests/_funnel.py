@@ -65,7 +65,7 @@ from effective.combinators import hoisted, recurse, route
 from effective.domain import CallTool
 from effective.graphview import bare_name, fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Index, compose_key
+from effective.keys import Index, Run, compose_key
 from effective.keys.grammar import KeySyntaxError, ParsedKey, parse
 from effective.skills import Pin
 
@@ -192,7 +192,7 @@ def _fanout(batch: list[str], pins, run_id: str) -> Effect[list[Scored]]:
         )
         review = ""
         if audit.startswith("flag"):
-            review = yield from await_event(f"review:{run_id}", str)
+            review = yield from await_event(compose_key(t"review:{Run(run_id)}"), str)
         return Scored(talk, tier, audit, review)
 
     # the fork/join band: one branch per discovered talk, joined in batch order.
@@ -394,13 +394,15 @@ def scripted_run() -> Triage:
     parked = handler.run(lambda: triage("cfp-2026"))
     # The material flag parked the run INSIDE birch's lane — the whole run waits
     # on that lane's fully-qualified event while the sibling lanes' work holds.
-    # The name is COMPOSED, not spelled: the lane wrote `await_event("review:cfp-2026")`
+    # The name is COMPOSED, not spelled: the lane awaits `review:{Run(run_id)}`
     # and knows nothing of the two frames above it. An emitter — a reviewer's UI, a script —
     # walks the same path to reach the same name, and both sides are `Key`s, so this
     # compares IDENTITIES rather than wire text.
     assert isinstance(parked, Suspended)
     assert parked.awaiting == qualified_event_name(
-        GatherBranch(0, 1), compose_key(t"talk:{Index('birch')}"), name="review:cfp-2026"
+        GatherBranch(0, 1),
+        compose_key(t"talk:{Index('birch')}"),
+        name=compose_key(t"review:{Run('cfp-2026')}"),
     )
     result = parked.resume("uphold — the anecdote reads as an anecdote")
     assert isinstance(result, Triage)

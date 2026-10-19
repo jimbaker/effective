@@ -16,7 +16,7 @@ from _durable import DSN, absurd, pg_ready
 
 from effective.api import append_ledger, scoped, step
 from effective.bridge_absurd import export_measured_prefix, park_name
-from effective.budget import Grant, MeasuredBudget
+from effective.budget import Grant, MeasuredBudget, budget_grant_name
 from effective.cost import MeteredInterpreter, Usage, marked
 from effective.domain import AskLLM, CallTool
 from effective.engines.absurd import ConcurrentAbsurdCtx
@@ -173,7 +173,7 @@ def test_P3c_trip_n_ge_1_needs_the_grant_export(app, conn):
     rid = f"c{uuid.uuid4().hex[:8]}"
     tid = _spawn(app, _five_asks, rid, limit=0.0015)
     _run_until_park(app, conn, tid, f"budget-grant:{rid},0")
-    app.emit_event(f"budget-grant:{rid},0", ruled({"add_dollars": 0.001}))  # grant 0 (by name)
+    app.emit_event(budget_grant_name(rid, 0), ruled({"add_dollars": 0.001}))  # grant 0 (by name)
     _run_until_park(app, conn, tid, f"budget-grant:{rid},1")  # runs ask2, re-parks at :1
 
     entries, grants = export_measured_prefix(conn, tid, rid)
@@ -239,12 +239,12 @@ def test_multirefill_within_one_ask_survives_real_suspend_resume(app, conn):
     # two insufficient refills (0.0002 each): the park advances :0 -> :1 -> :2 across real
     # suspend/resume, and ask1 STAYS uncommitted through every refill (the whole trip is one park).
     for k in (0, 1):
-        app.emit_event(f"budget-grant:{rid},{k}", ruled({"add_dollars": 0.0002}))
+        app.emit_event(budget_grant_name(rid, k), ruled({"add_dollars": 0.0002}))
         _run_until_park(app, conn, tid, f"budget-grant:{rid},{k + 1}")
         assert [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == ["step:ask0"]
 
     # the 3rd grant lifts the ceiling above the meter; ask1 finally clears and commits.
-    app.emit_event(f"budget-grant:{rid},2", ruled({"add_dollars": 0.0002}))
+    app.emit_event(budget_grant_name(rid, 2), ruled({"add_dollars": 0.0002}))
     for _ in range(24):
         app.work_batch()
         if [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == [

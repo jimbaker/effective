@@ -29,10 +29,12 @@ from _sweep import InOrder
 from pydantic import BaseModel, Field, field_validator
 
 from effective.api import (
+    GatherBranch,
     await_event,
     call_tool,
     direct_tool_key,
     gather,
+    qualified_event_name,
     quorum,
     race,
     scoped,
@@ -642,7 +644,7 @@ def test_a_gather_whose_events_arrive_mid_round_keeps_its_retries(engine):
             wrap = lambda ctx: ReparkReturns(ConcurrentAbsurdCtx(ctx), missed)  # noqa: E731
         case _:
             wrap = lambda ctx: ReparkReturns(ctx, missed)  # noqa: E731
-    engine.emit_event("gather:0,0;ev", {"ok": True})
+    engine.emit_event(qualified_event_name(GatherBranch(0, 0), name="ev"), {"ok": True})
     snapshot, ran = wrapped_executions(engine, workflow, wrap)
     assert (snapshot.state, ran) == (TaskState.COMPLETED, 2)
 
@@ -1154,7 +1156,7 @@ def test_a_fork_childs_code_error_fails_on_the_attempt_that_repeats_it(engine):
 
     engine.register_task("child")(body)
     task_id = engine.spawn("child", {}, max_attempts=5)
-    engine.emit_event(fork_point.stored(), {"ok": True})
+    engine.emit_event(fork_point, {"ok": True})
     snapshot = engine.run_until_result(task_id)
     assert snapshot is not None
     assert (snapshot.state, len(ran)) == (TaskState.FAILED, 2)

@@ -13,6 +13,8 @@ import pytest
 from _authority import ruled
 from _durable import absurd, pg_ready
 
+from effective.budget import budget_grant_name
+
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 
 
@@ -44,7 +46,8 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
     app = absurd()
     suffix = uuid.uuid4().hex[:8]
     # A stable run id + a counter that restarts per generation: a respawn chain's shape.
-    name = f"budget-grant:r-{suffix},0"
+    grant = budget_grant_name(f"r-{suffix}", 0)
+    name = grant.stored()  # the raw SDK awaits by text
 
     @app.register_task(f"gen-{suffix}", default_max_attempts=1)
     def gen(params, ctx):
@@ -59,7 +62,7 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
     # The engine refuses a bare payload on an authority name, so the human answers with a
     # ruling, and the raw await below receives its stored shape.
     stored = {"__ruling__": {"by": "test", "answer": {"add_dollars": 25.0}}}
-    app.emit_event(name, ruled({"add_dollars": 25.0}))  # the human answers GENERATION 0
+    app.emit_event(grant, ruled({"add_dollars": 25.0}))  # the human answers GENERATION 0
     result_0 = app.run_until_result(generation_0)
     assert result_0 is not None
     assert result_0.state == "completed"

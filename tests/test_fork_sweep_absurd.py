@@ -38,7 +38,7 @@ from effective.govern import Refused
 from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
-from effective.keys import Key, Segment, compose_key
+from effective.keys import Key, Segment, Subject, compose_key
 from effective.ledger import PostgresLedger
 from effective.ops import AppendLedgerRow, LedgerRow
 from effective.parked import read_absurd_parked
@@ -98,7 +98,7 @@ def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
         assert [
             p.wake_event for p in read_absurd_parked(conn) if p.task_name == f"base-{base_rid}"
         ] == [f"review:{message_id}"]
-        app.emit_event(f"review:{message_id}", {"decision": "reject"})
+        app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "reject"})
         snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap
@@ -224,7 +224,7 @@ def test_an_answer_is_forever_so_a_fresh_run_needs_a_fresh_message_id(conn):
         first = new_message_id()
         task_1, parked_1 = spawn_and_drain(f"{tag}-1", first)
         assert parked_1 == [f"review:{first}"]
-        app.emit_event(f"review:{first}", {"decision": "reject"})
+        app.emit_event(compose_key(t"review:{Subject(first)}"), {"decision": "reject"})
         snap = app.run_until_result(task_1)
         assert snap is not None
         assert (snap.state, snap.result) == ("completed", "reject")
@@ -241,7 +241,7 @@ def test_an_answer_is_forever_so_a_fresh_run_needs_a_fresh_message_id(conn):
         second = new_message_id()
         task_3, parked_3 = spawn_and_drain(f"{tag}-3", second)
         assert parked_3 == [f"review:{second}"]
-        app.emit_event(f"review:{second}", {"decision": "approve"})
+        app.emit_event(compose_key(t"review:{Subject(second)}"), {"decision": "approve"})
         snap = app.run_until_result(task_3)  # drained to terminal: the shared queue is left clean
         assert snap is not None
         assert (snap.state, snap.result) == ("completed", "approve")
@@ -322,7 +322,7 @@ def test_a_refused_child_answers_its_parent_on_the_DEPLOYED_engine(conn):
             {"run_id": base_rid, "message_id": message_id},
         )
         app.run_until_result(base_id)
-        app.emit_event(f"review:{message_id}", {"decision": "reject"})
+        app.emit_event(compose_key(t"review:{Subject(message_id)}"), {"decision": "reject"})
         snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap
@@ -433,7 +433,7 @@ def test_a_fork_of_a_base_whose_spawn_was_refused_replays_the_refusal_on_the_dep
 
         base_id = app.spawn(f"base-{rid}", {BUDGET_DEPTH_PARAM: 0})
         app.run_until_result(base_id)
-        app.emit_event(review.stored(), {"decision": "approve"})
+        app.emit_event(review, {"decision": "approve"})
         snap = app.run_until_result(base_id)
         assert snap is not None
         assert snap.state == "completed", snap

@@ -38,7 +38,7 @@ from effective.combinators import (
 from effective.compose import code_act
 from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Index, Segment, compose_key
+from effective.keys import Index, Run, Segment, compose_key
 from effective.ops import AwaitEvent, Step
 from effective.react import (
     AssistantTurn,
@@ -558,17 +558,19 @@ def test_qualified_event_name_pins_the_qualification_grammar():
         qualified_event_name(
             GatherBranch(0, 1),
             compose_key(t"rec:{1}"),
-            name=f"{depth_grant_name('r1', depth=1, generation=0).stored()}",
+            name=depth_grant_name("r1", depth=1, generation=0),
         ).stored()
         == f"gather:0,1;rec:1;{depth_grant_name('r1', depth=1, generation=0).stored()}"
     )
     # nested gathers — the nested_gather_park_wf conformance literal
     assert (
-        qualified_event_name(GatherBranch(0, 0), GatherBranch(0, 0), name="ev:r1").stored()
+        qualified_event_name(
+            GatherBranch(0, 0), GatherBranch(0, 0), name=compose_key(t"ev:{Run('r1')}")
+        ).stored()
         == "gather:0,0;gather:0,0;ev:r1"
     )
     # a bare name is its own qualified form
-    assert qualified_event_name(name="ev:r1").stored() == "ev:r1"
+    assert qualified_event_name(name=compose_key(t"ev:{Run('r1')}")).stored() == "ev:r1"
 
 
 def test_descend_leaf_in_recurse_parks_on_the_gather_qualified_grant():
@@ -835,7 +837,7 @@ def test_each_child_of_a_branch_parks_for_its_own_levels():
     parked = handler.run(lambda: unfold("root", node, budget=1, run_id="r"))
     result, awaited = _drive(parked, [Grant(add_depth=0), Grant(add_depth=0)])
 
-    grant = depth_grant_name("r", depth=1, generation=0).stored()
+    grant = depth_grant_name("r", depth=1, generation=0)
     assert result == "joined"
     assert awaited == [
         qualified_event_name(

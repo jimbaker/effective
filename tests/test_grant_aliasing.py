@@ -113,7 +113,7 @@ def _two_descents(descent_kwargs: dict[str, Any]) -> tuple[Any, list[str]]:
     task_id = app.spawn("two-descents", {"run_id": "r1"})
     app.work_batch()  # descent A runs to exhaustion and parks
     app.emit_event(
-        depth_grant_name("r1", depth=1, generation=0).stored(),
+        depth_grant_name("r1", depth=1, generation=0),
         ruled(Grant(add_depth=2).model_dump()),
     )
     snapshot = app.run_until_result(task_id)
@@ -197,7 +197,7 @@ def test_two_generations_share_one_grant_across_tasks():
     generation_0 = spawn(0)
     app.work_batch()  # generation 0 exhausts and parks
     app.emit_event(
-        depth_grant_name(run, depth=1, generation=0).stored(),
+        depth_grant_name(run, depth=1, generation=0),
         ruled(Grant(add_depth=2).model_dump()),
     )
     result_0 = app.run_until_result(generation_0)

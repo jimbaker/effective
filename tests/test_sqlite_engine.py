@@ -30,7 +30,7 @@ from effective.engines.sqlite import (
     enable_wal,
 )
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key, compose_key
+from effective.keys import Key, Subject, compose_key
 from effective.ops import Arrived, Expired
 from effective.parked import read_sqlite_parked
 
@@ -658,7 +658,7 @@ def test_an_interrupted_emit_leaves_no_event_without_its_wake(
 
         monkeypatch.setattr(emitter.conn, "execute", fail_the_wake)
         with pytest.raises(sqlite3.OperationalError):
-            emitter.emit_event("ev:x", {"v": 1})
+            emitter.emit_event(compose_key(t"ev:{Subject('x')}"), {"v": 1})
         monkeypatch.undo()
 
         rows = emitter.conn.execute("SELECT count(*) FROM events WHERE name='ev:x'")
@@ -768,7 +768,7 @@ def test_an_event_before_the_deadline_arrives_with_its_payload(tmp_path: Path) -
         parked = app.fetch_task_result(task)
         assert parked is not None
         assert parked.state == "waiting"
-        emitter.emit_event("ev:x", {"v": 7})
+        emitter.emit_event(compose_key(t"ev:{Subject('x')}"), {"v": 7})
         app.work_batch()
         snap = app.fetch_task_result(task)
         assert snap is not None
@@ -826,8 +826,8 @@ def test_a_wait_that_expired_stays_expired_when_its_event_arrives_late(tmp_path:
         app.work_batch()
         assert seen == [Expired()]
 
-        outside.emit_event("ev:a", {"late": True})
-        outside.emit_event("ev:b", {"go": True})
+        outside.emit_event(compose_key(t"ev:{Subject('a')}"), {"late": True})
+        outside.emit_event(compose_key(t"ev:{Subject('b')}"), {"go": True})
         app.work_batch()
 
         snap = app.fetch_task_result(task)
@@ -862,7 +862,7 @@ def test_an_event_landing_while_the_park_is_recorded_leaves_the_task_claimable(
         def emit_inside_the_window(sql: Any, *args: Any) -> Any:
             if "UPDATE tasks SET state=CASE WHEN EXISTS" in str(sql):
                 monkeypatch.undo()
-                emitter.emit_event("ev:x", {"v": 1})
+                emitter.emit_event(compose_key(t"ev:{Subject('x')}"), {"v": 1})
                 monkeypatch.setattr(app.conn, "execute", emit_inside_the_window)
             return real(sql, *args)
 
@@ -908,11 +908,11 @@ def test_a_failed_commit_leaves_no_open_transaction(
 
         monkeypatch.setattr(app.conn, "execute", fail_the_commit)
         with pytest.raises(sqlite3.OperationalError):
-            app.emit_event("ev:x", {"v": 1})
+            app.emit_event(compose_key(t"ev:{Subject('x')}"), {"v": 1})
         monkeypatch.undo()
 
         assert app.conn.in_transaction is False, "the connection is stuck inside its transaction"
-        app.emit_event("ev:y", {"v": 2})  # a later emit still works
+        app.emit_event(compose_key(t"ev:{Subject('y')}"), {"v": 2})  # a later emit still works
     finally:
         app.close()
 
@@ -1022,7 +1022,7 @@ def test_a_woken_task_carries_the_instant_it_was_woken(tmp_path: Path) -> None:
         app.work_batch()
         assert _state_of(app, task) == "waiting"
 
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(compose_key(t"ev:{Subject('x')}"), {"n": 1})
         state, available_at = app.conn.execute(
             "SELECT state, available_at FROM tasks WHERE task_id=?", (str(task),)
         ).fetchone()
@@ -1053,7 +1053,7 @@ def test_an_emit_past_a_deadline_leaves_the_waiter_where_it_was(tmp_path: Path) 
         assert _state_of(app, task) == "waiting"
 
         clock.advance(timedelta(hours=1, seconds=1))
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(compose_key(t"ev:{Subject('x')}"), {"n": 1})
 
         state, waiting_event = app.conn.execute(
             "SELECT state, waiting_event FROM tasks WHERE task_id=?", (str(task),)
@@ -1088,7 +1088,7 @@ def test_a_wake_survives_a_claim_that_did_not_settle_it(
         app.conn.execute(
             "UPDATE tasks SET available_at=? WHERE task_id=?", (app.clock() - 1.0, str(task))
         )
-        app.emit_event("ev:x", {"n": 1})
+        app.emit_event(compose_key(t"ev:{Subject('x')}"), {"n": 1})
         assert _state_of(app, task) == "waiting"
 
         behind = app.clock() - 1.0

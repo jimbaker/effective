@@ -98,14 +98,14 @@ def _skip_the_fence(backend, monkeypatch, name: str, payload: Any) -> None:
             backend.app.emit_event(name, payload)  # the raw SDK app
         case _:
             monkeypatch.setattr("effective.engines.sqlite.wire_payload", lambda _n, p: p)
-            backend.engine.emit_event(name, payload)
+            backend.engine.emit_event(Key.parse(name), payload)
 
 
 def test_an_unruled_answer_through_the_engine_is_refused_and_the_ruling_still_settles(backend):
     task_id, park, charges = _parked(backend)
 
     with pytest.raises(UnruledAnswer):
-        backend.engine.emit_event(park.wake_event, {"add_depth": 1})
+        backend.engine.emit_event(Key.parse(park.wake_event), {"add_depth": 1})
     backend.run_until_result(task_id)
     (still,) = backend.parked(task_id)
     assert still.wake_event == park.wake_event, "the forged answer landed"
@@ -149,7 +149,7 @@ def test_a_ruling_settles_the_grant_at_every_await_site(backend, site):
 def test_a_task_cannot_emit_an_unruled_answer_on_an_authority_name(sqlite_app):
     app = sqlite_app(":memory:")
     ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None, clock=app.clock)
-    name = depth_grant_name("r1", generation=0, depth=1).stored()
+    name = depth_grant_name("r1", generation=0, depth=1)
 
     with pytest.raises(UnruledAnswer):
         ctx.emit_event(name, {"add_depth": 1})

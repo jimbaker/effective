@@ -17,7 +17,7 @@ from effective.domain import CallTool, DomainOp
 from effective.govern import Refused
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
-from effective.keys import Run, compose_key
+from effective.keys import Key, Run, compose_key
 from effective.ops import Step, leaves
 from effective.permission import Allow, Deny, cascade, rules
 
@@ -196,7 +196,7 @@ def test_a_park_comes_before_the_refusal_on_both_engines(backend, program):
     task = backend.spawn(name, run_id, max_attempts=1)
     assert backend.run_until_result(task).state != "completed"
     (parked,) = backend.parked(task)
-    backend.emit_event(task, parked.wake_event, "now")
+    backend.emit_event(task, Key.parse(parked.wake_event), "now")
     snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert snap.result == "caught"
@@ -228,7 +228,7 @@ def test_a_crash_in_a_resumed_round_fails_the_task_on_that_wake_on_both_engines(
     assert backend.run_until_result(task).state != "completed"
     parked = backend.parked(task)
     first = next(p for p in parked if "wake:" in str(p.wake_event))
-    backend.emit_event(task, first.wake_event, "now")
+    backend.emit_event(task, Key.parse(first.wake_event), "now")
     snap = backend.run_until_result(task)
     assert snap.state == "failed", snap
     assert backend.failure_kind(snap) == "ValueError"

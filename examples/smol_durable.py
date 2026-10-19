@@ -60,6 +60,7 @@ from effective.handlers.durable import DurableHandler
 from effective.interpreters.shell import Shelled, run_shell
 from effective.interpreters.tools import spawn_tool
 from effective.interrupts import EVERY_PHASE, Interrupted, tool_interrupt
+from effective.keys import Key
 from effective.keys.frame import split_frames
 from effective.ops import CARRY_PARAM
 from effective.react import (
@@ -315,7 +316,9 @@ def main() -> None:
             print()
             return
         token.reset()
-        app.emit_event(wake, {"allow": line.strip() == "y"} if asking else {"text": line})
+        app.emit_event(
+            Key.parse(wake), {"allow": line.strip() == "y"} if asking else {"text": line}
+        )
 
 
 if __name__ == "__main__":

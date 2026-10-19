@@ -202,7 +202,7 @@ class SqliteWalk:
 
         task_id = app.spawn(task_name, {"run_id": "r"})
         for name, value in answers.items():
-            app.emit_event(name.stored(), value)
+            app.emit_event(name, value)
         app.work_batch()
         snapshot = app.run_until_result(task_id)
         # The relation, not the column: `tasks.waiting_event` outlives the park it names, so a
@@ -233,7 +233,7 @@ class AbsurdWalk:
         spawned = app.spawn(task_name, {"run_id": "r"})
         task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
         for name, value in answers.items():
-            app.emit_event(name.stored(), value)
+            app.emit_event(name, value)
         app.work_batch()
         snapshot = app.run_until_result(task_id, max_batches=6)
         if snapshot is not None and snapshot.state == "completed":

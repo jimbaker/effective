@@ -17,7 +17,7 @@ from effective.api import GatherBranch, qualified_event_name
 from effective.graphview import fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
-from effective.keys import Segment, compose_key
+from effective.keys import Segment, Subject, compose_key
 
 pytestmark = pytest.mark.journey
 
@@ -51,7 +51,7 @@ def test_a_proposed_swap_parks_in_the_line_that_proposed_it():
     assert parked.awaiting == qualified_event_name(
         GatherBranch(0, index),
         compose_key(t"item:{Segment(item.sku)}"),
-        name=f"swap:{cart.ORDER_ID}",
+        name=compose_key(t"swap:{Subject(cart.ORDER_ID)}"),
     )
     # nothing reached the canonical record on the line that is still waiting
     assert not any(row.event_id.stored().endswith(item.sku) for row in handler.ledger)

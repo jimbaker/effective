@@ -20,6 +20,7 @@ from effective.engines.absurd import AbsurdEngine, sdk_failure
 from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
+from effective.keys import Name, Run, compose_key
 from effective.ops import DONE_EVENT_PARAM, Unretryable
 from effective.spawning import join_answer, spawn_child
 
@@ -112,7 +113,7 @@ class Answer(BaseModel):
 
 def test_a_model_is_sent_as_its_plain_json_in_an_event_and_in_spawn_params(engine):
     def waiting():
-        return (yield from await_event("go:model", dict))
+        return (yield from await_event(compose_key(t"go:{Name('model')}"), dict))
 
     @engine.register_task("waits")
     def waits(params, ctx):
@@ -120,7 +121,7 @@ def test_a_model_is_sent_as_its_plain_json_in_an_event_and_in_spawn_params(engin
 
     task_id = engine.spawn("waits", {"answer": Answer(ok=False)})
     engine.run_until_result(task_id)
-    engine.emit_event("go:model", Answer(ok=True))
+    engine.emit_event(compose_key(t"go:{Name('model')}"), Answer(ok=True))
     done = engine.run_until_result(task_id)
     assert done is not None
     assert done.result == [{"ok": False}, {"ok": True}]
@@ -166,7 +167,7 @@ def test_a_failed_tasks_text_carries_the_notes_beside_its_error(engine):
 
 def test_a_task_awaiting_an_event_is_parked_until_the_event_arrives(engine):
     def waiting(run_id: str):
-        return (yield from await_event("go:" + run_id, dict))
+        return (yield from await_event(compose_key(t"go:{Run(run_id)}"), dict))
 
     @engine.register_task("waits")
     def waits(params, ctx):
@@ -178,7 +179,7 @@ def test_a_task_awaiting_an_event_is_parked_until_the_event_arrives(engine):
     assert parked.state is TaskState.WAITING
     assert [p.task_id for p in engine.parked()] == [task_id]
 
-    engine.emit_event("go:r1", {"ok": True})
+    engine.emit_event(compose_key(t"go:{Run('r1')}"), {"ok": True})
     done = engine.run_until_result(task_id)
     assert done is not None
     assert done.state is TaskState.COMPLETED
@@ -197,7 +198,7 @@ def test_cancelling_a_parked_child_ends_it_and_raises_the_cancel_in_its_parent(e
         return str(children[-1])
 
     def waiting(run_id: str):
-        return (yield from await_event("never:" + run_id, dict))
+        return (yield from await_event(compose_key(t"never:{Run(run_id)}"), dict))
 
     def supervises():
         spawned = yield from spawn_child("waits", "c", {})

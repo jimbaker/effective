@@ -35,7 +35,7 @@ from effective.govern import (
     Verdict,
     refuse,
 )
-from effective.keys import Index, Name, Run, compose_key
+from effective.keys import Index, Key, Name, Run, compose_key
 from effective.keys.grammar import parse
 from effective.ops import Step, WorkflowOp
 from effective.search import SearchTree, Stats, beam, mcts, uct
@@ -481,7 +481,7 @@ def test_a_round_grant_park_extends_the_search_until_a_stop(backend):
         (parked,) = backend.parked(task)
         wake = round_grant_name(run_id, generation=0, rounds=rounds).stored()
         assert str(parked.wake_event) == wake
-        backend.emit_event(task, parked.wake_event, ruled(grant.model_dump()))
+        backend.emit_event(task, Key.parse(parked.wake_event), ruled(grant.model_dump()))
     snap = backend.run_until_result(task)
 
     assert snap.state == "completed", snap

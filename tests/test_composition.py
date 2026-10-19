@@ -42,6 +42,7 @@ import pytest
 from _composition import (
     BUILDERS,
     DONE_EVENT,
+    DONE_KEY,
     FORK_ANSWER,
     LEAF,
     PARK_EVENT,
@@ -72,7 +73,7 @@ from effective.domain import Spawned
 from effective.fork import join_fork
 from effective.handlers.base import step_key
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended, _qualified
-from effective.keys import Key
+from effective.keys import Key, Name, compose_key
 from effective.ops import CompositionRefused
 from effective.skills import Pin
 
@@ -193,7 +194,7 @@ def test_a_relative_park_name_carries_exactly_the_frames_that_enclose_it(outer, 
     assert _qualified(parked) == expected_park(outer, inner)
     # Anti-vacuity: an unframed park would pass a comparison of two bare names. At least one
     # frame-bearing pair must actually carry frames, and this asserts it per pair.
-    assert bool(enclosing_frames(outer, inner)) == (_qualified(parked).stored() != PARK_EVENT)
+    assert bool(enclosing_frames(outer, inner)) == (_qualified(parked) != PARK_EVENT)
 
 
 def test_both_laws_hold_at_depth_three_which_reaches_frame_shapes_a_pair_cannot():
@@ -277,7 +278,7 @@ def test_an_absolute_await_reroutes_under_a_scope_and_is_refused_in_a_branch(out
     responses: dict[str, object] = {
         **expected_responses(outer, outer),  # outer's own overhead names
         # the spawn runs at the ROOT, so unframed
-        SPAWN_KEY: Spawned(task_id=uuid4(), done_event=Key.parse(DONE_EVENT)),
+        SPAWN_KEY: Spawned(task_id=uuid4(), done_event=DONE_KEY),
     }
     handler = RecordingHandler(responses=responses)
 
@@ -333,7 +334,7 @@ def test_a_CANNED_absolute_await_resolves_instead_of_parking():
     is the hazard: returning `False` reads as 'not canned'."""
     handler = RecordingHandler(
         responses={
-            SPAWN_KEY: Spawned(task_id=uuid4(), done_event=Key.parse(DONE_EVENT)),
+            SPAWN_KEY: Spawned(task_id=uuid4(), done_event=DONE_KEY),
             DONE_EVENT: FORK_ANSWER,  # the half that was unreachable
         }
     )
@@ -375,7 +376,7 @@ def test_the_frames_that_make_a_spawn_unwakeable_are_exactly_the_ones_declared()
     from what a frame actually does."""
     for mk in BUILDERS.values():
         built = mk(0)
-        awaited = qualified_event_name(*built.frames, name=DONE_EVENT).stored()
+        awaited = qualified_event_name(*built.frames, name=DONE_KEY).stored()
         if built.frames:
             # Every frame-bearing combinator WOULD rescope the join away from its emitter.
             # That is the hazard; the policy decides what to do about it, and the two answers
@@ -647,7 +648,9 @@ def test_hoisting_over_a_gather_costs_one_disclosure_and_under_it_costs_N():
     for i in range(FANOUT):
         branch = GatherBranch(0, i)
         responses[qualified_event_name(branch, name=LEAF).stored()] = "L"
-        responses[qualified_event_name(branch, name="skill:sk,activate").stored()] = pin
+        responses[
+            qualified_event_name(branch, name=compose_key(t"skill:{Name('sk')},activate")).stored()
+        ] = pin
 
     def branches():
         return [(lambda: observable(LEAF)) for _ in range(FANOUT)]
@@ -715,8 +718,10 @@ def test_the_oracle_is_not_degenerate():
         # `.stored()` once: this test is ABOUT the oracle's text form — that the composed name
         # ends in the awaited name — so it reads the wire spelling rather than the identity.
         expected = expected_park(outer, inner).stored()
-        assert (expected != PARK_EVENT) == bool(enclosing_frames(outer, inner))
-        assert expected.endswith(PARK_EVENT), "the oracle must always end in the awaited name"
+        assert (expected != PARK_EVENT.stored()) == bool(enclosing_frames(outer, inner))
+        assert expected.endswith(PARK_EVENT.stored()), (
+            "the oracle must always end in the awaited name"
+        )
 
 
 def test_a_bare_leaf_needs_no_frames():

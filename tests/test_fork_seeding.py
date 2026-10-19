@@ -18,7 +18,7 @@ import pytest
 from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.counterfactual import ForkedPrefixAwait
 from effective.handlers.durable import SeedBoundaryError, SeedingCtx
-from effective.keys import Key, Segment
+from effective.keys import Key, Segment, compose_key
 
 
 class _SpyCtx:
@@ -201,7 +201,6 @@ def test_an_event_name_is_a_fact_not_a_queue_so_awaits_are_name_keyed(sqlite_app
     from effective.api import await_event, step
     from effective.domain import CallTool
     from effective.handlers.durable import DurableHandler
-    from effective.keys import compose_key
 
     def twice():
         a = yield from await_event(compose_key(t"rev:{Segment('r2')},{Segment('m1')}"), dict)
@@ -225,7 +224,7 @@ def test_an_event_name_is_a_fact_not_a_queue_so_awaits_are_name_keyed(sqlite_app
         tid = _uuid.UUID(str(app.spawn("w", {"run_id": "r1"})))
         for _ in range(6):
             app.work_batch()
-        app.emit_event("rev:r2,m1", {"n": 1})  # ONE emit
+        app.emit_event(compose_key(t"rev:{Segment('r2')},{Segment('m1')}"), {"n": 1})  # ONE emit
         for _ in range(6):
             app.work_batch()
 

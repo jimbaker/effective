@@ -28,7 +28,14 @@ import pytest
 from _authority import AUTHORITY_PARKS, approve_park, ruled
 from _durable import DSN, absurd, pg_ready
 
-from effective.api import await_event, call_tool, gather, sleep_until
+from effective.api import (
+    GatherBranch,
+    await_event,
+    call_tool,
+    gather,
+    qualified_event_name,
+    sleep_until,
+)
 from effective.bridge_absurd import read_absurd_task
 from effective.budget import budget_grant_name
 from effective.checkpoints import keys
@@ -38,7 +45,7 @@ from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphview import PARKED, fold_cycles, from_keys, to_mermaid
 from effective.handlers.durable import DurableHandler
-from effective.keys import Index, Key, Scope
+from effective.keys import Index, Key, Run, Scope, compose_key
 from effective.parked import (
     ParkedTask,
     pending_key,
@@ -94,7 +101,7 @@ def _two_parked_branches_wf(run_id: str):
 
     def await_branch(i: int):
         def branch():
-            return (yield from await_event(f"ev{i}:{run_id}", dict))
+            return (yield from await_event(compose_key(t"ev:{Index(i)},{Run(run_id)}"), dict))
 
         return branch
 
@@ -165,10 +172,10 @@ def test_sqlite_reader_lists_every_namespace_not_just_approve():
 
 def test_sqlite_reader_leaves_the_park_when_the_run_resumes():
     app = SqliteApp(":memory:")
-    task_id = _sqlite_run(app, "gated", _await_wf("review:r1"), "r1")
+    task_id = _sqlite_run(app, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
     assert len(read_sqlite_parked_conn(app.conn, clock=app.clock)) == 1
 
-    app.emit_event("review:r1", {"decision": "approve"})
+    app.emit_event(compose_key(t"review:{Run('r1')}"), {"decision": "approve"})
     snap = app.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -200,12 +207,15 @@ def test_sqlite_reader_reports_one_branch_of_a_parked_gather():
     task_id = _sqlite_run(app, "multi", _two_parked_branches_wf, "r1")
 
     (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
-    assert park.wake_event == "gather:0,0;ev0:r1"  # branch 2's park is not listed
+    assert park.wake_event == "gather:0,0;ev:0,r1"  # branch 2's park is not listed
 
-    app.emit_event("gather:0,0;ev0:r1", {"n": 0})
+    app.emit_event(
+        qualified_event_name(GatherBranch(0, 0), name=compose_key(t"ev:{Index(0)},{Run('r1')}")),
+        {"n": 0},
+    )
     app.run_until_result(task_id)
     (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
-    assert park.wake_event == "gather:0,2;ev2:r1"  # a NEW park, not a completion
+    assert park.wake_event == "gather:0,2;ev:2,r1"  # a NEW park, not a completion
     app.close()
 
 
@@ -215,7 +225,7 @@ def test_sqlite_path_reader_is_the_web_shape_and_opens_read_only(tmp_path):
     else's store to answer a GET. The read-only open proves the reader issues none."""
     path = tmp_path / "engine.db"
     app = SqliteApp(str(path))
-    _sqlite_run(app, "gated", _await_wf("review:r1"), "r1")
+    _sqlite_run(app, "gated", _await_wf(compose_key(t"review:{Run('r1')}")), "r1")
 
     (park,) = read_sqlite_parked(path)  # a fresh connection, mode=ro
     assert (park.task_name, park.wake_event) == ("gated", "review:r1")
@@ -372,7 +382,7 @@ def test_the_pending_node_on_a_real_absurd_park_and_what_resume_does(conn):
     assert fold_cycles(graph, drop=(Index,)).nodes[-1].state == PARKED
 
     # --- the resume transition ---------------------------------------------------------------
-    app.emit_event(event.stored(), ruled({"ok": True}))  # Absurd events are by name
+    app.emit_event(event, ruled({"ok": True}))  # Absurd events are by name
     snap = app.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap

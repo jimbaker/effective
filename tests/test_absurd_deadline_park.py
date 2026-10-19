@@ -27,6 +27,7 @@ from effective.api import await_until
 from effective.engines import absurd as absurd_engine
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.handlers.durable import DurableHandler
+from effective.keys import Segment, compose_key
 
 # The park is held by patching `sdk_pin_the_park` in the module that DEFINES it, since its caller
 # looks it up there; a patch on any module that merely imports it would hold nothing.
@@ -98,7 +99,7 @@ def test_a_parked_bounded_wait_registers_the_deadline_it_was_given(conn, deadlin
     """The wait row and the run row both name the workflow's deadline, not a rounded one."""
     app = absurd()
     name = f"deadline-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     deadline = deadline_of()
 
     def wf():
@@ -138,7 +139,7 @@ def test_the_fake_clock_reaches_a_bounded_wait_and_expires_it(conn):
     """
     app = absurd()
     name = f"faked-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     base = datetime.now().astimezone()
     deadline = base + timedelta(hours=2)
 
@@ -189,7 +190,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
     """
     app = absurd()
     name = f"racing-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     clock = HeldClock(datetime.now().astimezone() + timedelta(minutes=1))
     deadline = clock.at + HALF_A_SECOND
 
@@ -207,7 +208,9 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
     emitting = _backend(emitter)
 
     def emit() -> None:
-        emitter.execute(t"SELECT absurd.emit_event('default', {event}, {Jsonb({'ok': True})})")
+        emitter.execute(
+            t"SELECT absurd.emit_event('default', {event.stored()}, {Jsonb({'ok': True})})"
+        )
 
     racer = threading.Thread(target=emit)
     rounded: list[datetime] = []  # the instant the SDK registered, read before it is written over
@@ -216,7 +219,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
     def held(sdk, key, at):
         rounded.append(
             sdk._conn.execute(
-                t"SELECT timeout_at FROM absurd.w_default WHERE event_name = {event}"
+                t"SELECT timeout_at FROM absurd.w_default WHERE event_name = {event.stored()}"
             ).fetchone()[0]
         )
         racer.start()
@@ -238,7 +241,7 @@ def test_an_emit_racing_the_park_cannot_take_a_wait_past_its_deadline(conn, monk
             # transaction.
             landed = conn.execute(
                 t"SELECT emitted_at FROM absurd.e_default "
-                t"WHERE event_name = {event} AND payload IS NOT NULL"
+                t"WHERE event_name = {event.stored()} AND payload IS NOT NULL"
             ).fetchone()
             emitted_at = landed[0] if landed else None
             assert emitted_at is not None, "the emit never landed, so nothing raced the park"
@@ -270,7 +273,7 @@ def test_two_waits_on_one_event_each_keep_their_own_deadline(conn):
     """
     app = absurd()
     name = f"twice-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     base = datetime.now().astimezone()
     first, later = base + timedelta(minutes=30), base + timedelta(hours=4)
 
@@ -312,7 +315,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
     other.app._conn.execute("SET statement_timeout = '20s'")
     claiming = _backend(other.app._conn)
     name = f"stale-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     clock = HeldClock(datetime.now().astimezone() + timedelta(minutes=1))
     first = clock.at + HALF_A_SECOND
     later = first + timedelta(hours=1)
@@ -338,7 +341,7 @@ def test_a_claim_between_the_park_and_its_deadline_cannot_take_the_next_park(con
             return settled(sdk, key, at)
         seen.append(1)
         rounded = sdk._conn.execute(
-            t"SELECT timeout_at FROM absurd.w_default WHERE event_name = {event}"
+            t"SELECT timeout_at FROM absurd.w_default WHERE event_name = {event.stored()}"
         ).fetchone()[0]
         # The second worker's clock has passed the rounding, so the first wait is claimable to it.
         HeldClock(rounded + HALF_A_SECOND / 2).hold(other.app._conn)
@@ -381,7 +384,7 @@ def test_an_event_at_the_deadline_is_late_to_the_microsecond(offset: int, answer
     """
     app, emitter = absurd(), absurd()
     name = f"tie-{uuid.uuid4().hex[:8]}"
-    event = f"shared:{name}"
+    event = compose_key(t"shared:{Segment(name)}")
     deadline = datetime.now().astimezone() + timedelta(hours=1)
 
     def wf():

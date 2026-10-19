@@ -24,6 +24,7 @@ from uuid import UUID
 if TYPE_CHECKING:
     from effective.engines.absurd import AbsurdEngine
     from effective.engines.sqlite import SqliteApp
+    from effective.keys import Key
     from effective.parked import ParkedTask
 
 type TaskFn = Callable[[dict[str, Any], Any], Any]
@@ -93,7 +94,7 @@ class Engine(Protocol):
         idempotency_key: str | None = None,
     ) -> UUID: ...
 
-    def emit_event(self, name: str, payload: Any) -> None: ...
+    def emit_event(self, name: str | Key, payload: Any) -> None: ...
 
     def cancel(self, task_id: UUID) -> None:
         """Cancel a task that has not finished, and deliver `Cancelled` to the parent that

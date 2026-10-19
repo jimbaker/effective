@@ -51,7 +51,7 @@ from effective.api import (
     scoped,
 )
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Index, Segment, compose_key
+from effective.keys import Index, Segment, Subject, compose_key
 from effective.keys.grammar import KeySyntaxError, ParsedKey, parse
 from effective.ops import LedgerRow
 
@@ -137,7 +137,7 @@ def _lane(sku: str, order_id: str) -> Effect[Line]:
             # so an authored await by that name would consume an answer meant for a gate. The name
             # is scoped on the ORDER, which is this question's subject; run-scoping it would make
             # the workflow unforkable.
-            answer = yield from await_event(f"swap:{order_id}", str)
+            answer = yield from await_event(compose_key(t"swap:{Subject(order_id)}"), str)
             substituted = offer if answer.startswith("ok") else ""
 
     reserved = min(wanted, on_hand)
