@@ -222,6 +222,9 @@ dev = [
     { name = "types-pyyaml" },
 ]
 race = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
     { name = "pytest-xdist" },
 ]
 
@@ -268,7 +271,12 @@ dev = [
     { name = "ruff", specifier = ">=0.16.10" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
-race = [{ name = "pytest-xdist", specifier = ">=3.8.0" }]
+race = [
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.25" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+]
 
 [[package]]
 name = "execnet"
