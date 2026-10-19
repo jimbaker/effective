@@ -350,11 +350,13 @@ class Scoped[T]:
     Pure structure, like `Gather`: it has no standalone `op_key` (see `op_key`'s arm) and it
     checkpoints nothing of its own. Its *effect* is entirely on the names of the ops inside it.
 
-    An atom may not open with a term the substrate mints. An op arm (`ARM_TAGS`) names frames and
-    ops, `gather:{g},{i}` among them, so an author's `gather:1,0` scope would compose the path of a
-    different nesting; a scope that places its body where the checkpoint readers see engine
-    bookkeeping (`checkpoints.is_engine_internal`: `$awaitEvent:…`, `wake-race:…`) would hide the
-    steps under it from them.
+    An atom may not carry a term the substrate mints:
+
+    | term                                   | what an author's scope would do               |
+    |----------------------------------------|-----------------------------------------------|
+    | an op arm (`ARM_TAGS`), leading        | compose the path of a different nesting       |
+    | a reserved authority tag, in any term  | make every name inside read as a park         |
+    | engine bookkeeping (`$awaitEvent:…`)   | hide the steps under it from the readers      |
     """
 
     scope: Key
@@ -368,6 +370,14 @@ class Scoped[T]:
                 f"scope atom {self.scope.display()!r} opens with the op arm {tag!r}: a scope "
                 f"names a namespace, and the arms ({', '.join(ARM_TAGS)}) name frames and ops "
                 f"the substrate mints. Choose a tag of your own."
+            )
+        if reserved := [
+            term.tag for term in self.scope.terms() if term.tag in RESERVED_AUTHORITY_TAGS
+        ]:
+            raise CompositionRefused(
+                f"scope atom {self.scope.display()!r} carries the reserved authority tag "
+                f"{reserved[0]!r}: every name in the scope would then read as a substrate park or "
+                f"lineage, and an answer to it as a principal's. Choose a tag of your own."
             )
         # Under an enclosing frame, which is where an infix marker such as `;wake-race:` sits.
         if is_engine_internal(frame_path("scope;", self.scope)):
@@ -567,7 +577,7 @@ def refuse_placed_writer_collision(
     `SqliteLedger` and a `PostgresLedger` reaching the same verdict by two hand-written `if`
     chains is the fork-scope-token shape, where two spellings of one rule drifted and nothing
     raised. The stores own the read-back (it has to happen inside their own critical section);
-    they do not own the ruling.
+    they do not own the verdict.
 
     The table is total over (writer known?) x (holder known?) x (same task?) x (same placement?),
     and every row that ALLOWS is a case the substrate documents as correct:

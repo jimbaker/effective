@@ -36,15 +36,25 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal, Never, NoReturn, Protocol, assert_never, final, runtime_checkable
+from typing import (
+    Any,
+    Literal,
+    Never,
+    NoReturn,
+    Protocol,
+    assert_never,
+    final,
+    get_args,
+    runtime_checkable,
+)
 
 from pydantic import BaseModel
-from pydantic_core import to_jsonable_python
+from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from effective.api import Effect
 from effective.choice import Choice, Ending, Raised, Refusal, Stopped, Unchosen, Won, decide
 from effective.cost import Usage
-from effective.domain import SPAWN_TOOL, CallTool, DomainOp
+from effective.domain import SPAWN_TOOL, AskLLM, CallTool, DomainOp, Judge
 from effective.govern import Refused, all_refusals
 from effective.keys import (
     FramePosition,
@@ -156,6 +166,120 @@ def content_digest(value: Any) -> str:
         canonical_form(value), sort_keys=True, separators=(",", ":"), default=str
     )
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+class UnshowableEffect(ValueError, Unretryable):
+    """An op whose effect has no canonical form, so a reviewer cannot be shown what they would
+    approve."""
+
+    def __init__(self, op: WorkflowOp) -> None:
+        super().__init__("an op's effect has no canonical form", type(op).__name__)
+
+
+def effect_of(op: WorkflowOp) -> Any:
+    """What ``op`` would do to the world, in canonical form: the value an approval of it is about.
+
+    | op                    | its effect                                                     |
+    |-----------------------|----------------------------------------------------------------|
+    | a `Step` over a tool  | the tool's name and its arguments                              |
+    | a `Step` over a model | a digest of the request, and the response schema               |
+    | `AppendLedgerRow`     | the row                                                        |
+    | `StoreArtifact`       | the content type, and a digest of the value                    |
+    | `SleepUntil`          | the wake time                                                  |
+    | `Respawn`             | the task, run, generation, grant and params, and a state digest |
+    | a structural op       | `None`: each op its body yields is gated on its own            |
+
+    A key reads as its stored text. A prompt is too large to show a reviewer, and its digest still
+    tells two requests apart."""
+    try:
+        return _effect(op)
+    except PydanticSerializationError as unencodable:
+        raise UnshowableEffect(op) from unencodable
+
+
+def _effect(op: WorkflowOp) -> Any:
+    match op:
+        case Step(op=domain):
+            return _domain_effect(domain)
+        case AppendLedgerRow(row=row):
+            return _shown(row)
+        case StoreArtifact(value=value, content_type=content_type):
+            return {"content_type": content_type, "digest": content_digest(_shown(value))}
+        case SleepUntil(when=when):
+            return {"when": to_jsonable_python(when)}
+        case Respawn(task=task, generation=generation, state=state, params=params, run_id=run_id):
+            return {
+                "task": task,
+                "run_id": run_id,
+                "generation": generation,
+                "granted": op.granted,
+                "params": _shown(params),
+                "state": content_digest(_shown(state)),
+            }
+        case AwaitEvent() | Gather() | Race() | Scoped():
+            return None
+        case unreachable:
+            assert_never(unreachable)
+
+
+def _domain_effect(op: DomainOp[Any]) -> Any:
+    match op:
+        case CallTool(name=name, args=args):
+            return {"tool": name, "args": _shown(args)}
+        case AskLLM(messages=messages, response_schema=schema):
+            return {"request": content_digest(_shown(messages)), "schema": _spelled(schema)}
+        case Judge(state=state, questions=questions, response_schema=schema):
+            request = content_digest(_shown({"state": state, "questions": questions}))
+            return {"request": request, "schema": _spelled(schema)}
+        case unreachable:
+            assert_never(unreachable)
+
+
+def _shown(value: Any) -> Any:
+    """`value` in the canonical form `canonical_form` gives it, with every key read as its stored
+    text: a set is a sorted list, and a model is its own dump with its keys restored as text."""
+    match value:
+        case Key():
+            return value.stored()
+        case BaseModel():
+            dumped = value.model_dump(mode="python")
+            # A dump flattens a key held where no schema types it (an extra, a field typed `Any`)
+            # into the key's internals, so those are read from the model itself.
+            raw = {**(value.__pydantic_extra__ or {}), **dict(value)}
+            return {
+                name: _shown(raw[name] if _holds_a_key(raw.get(name)) else field)
+                for name, field in dumped.items()
+            }
+        case dict():
+            return {k: _shown(v) for k, v in value.items()}
+        case set() | frozenset():
+            shown = [_shown(v) for v in value]
+            return sorted(shown, key=lambda e: json.dumps(e, sort_keys=True, default=str))
+        case list() | tuple():
+            return [_shown(v) for v in value]
+        case _:
+            return to_jsonable_python(value)
+
+
+def _holds_a_key(value: Any) -> bool:
+    match value:
+        case Key():
+            return True
+        case dict():
+            return any(map(_holds_a_key, value.values()))
+        case list() | tuple() | set() | frozenset():
+            return any(map(_holds_a_key, value))
+        case _:
+            return False
+
+
+def _spelled(schema: Any) -> str:
+    """A schema as its source spells it, so `list[int]` and `list[str]` read apart."""
+    match schema:
+        case type() if not get_args(schema):
+            return schema.__qualname__
+        case _:
+            return repr(schema)
 
 
 def artifact_key(op: StoreArtifact[Any]) -> Key:

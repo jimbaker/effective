@@ -28,6 +28,7 @@ from effective.handlers.base import Attempt
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, WaitOutcome, settled_wait
 from effective.parked import ParkedTask, read_absurd_parked
+from effective.ruling import wire_payload
 from effective.spawning import cancelled_payload
 
 if TYPE_CHECKING:
@@ -340,7 +341,7 @@ class SdkCtx:
         return sdk_attempt(self._ctx)
 
     def emit_event(self, name: Key, payload: Any, /) -> None:
-        return self._ctx.emit_event(name.stored(), payload)
+        return self._ctx.emit_event(name.stored(), wire_payload(name.stored(), payload))
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
@@ -596,7 +597,7 @@ class ConcurrentAbsurdCtx:
         SQLite test cannot assert an isolation the deployed engine lacks, and
         `effective.spawning.deliver` is a single call rather than a branch."""
         with self.write_lock:
-            self._ctx.emit_event(name.stored(), payload)
+            self._ctx.emit_event(name.stored(), wire_payload(name.stored(), payload))
 
     def repark(self, name: str, /) -> None:
         """Park so the task re-queues ~immediately, burning no attempt (the
@@ -697,7 +698,7 @@ class AbsurdEngine:
         return UUID(str(spawned["task_id"]))
 
     def emit_event(self, name: str, payload: Any) -> None:
-        self.app.emit_event(name, to_jsonable_python(payload))
+        self.app.emit_event(name, to_jsonable_python(wire_payload(name, payload)))
 
     def cancel(self, task_id: UUID) -> None:
         """Cancel a task that has not finished, and deliver `Cancelled` to the parent that spawned
@@ -716,7 +717,8 @@ class AbsurdEngine:
             t"WHERE task_id = {task_id} AND state = 'cancelled'"
         ).fetchone()
         if row is not None and DONE_EVENT_PARAM in row[0]:
-            self.app.emit_event(row[0][DONE_EVENT_PARAM], cancelled_payload())
+            done = row[0][DONE_EVENT_PARAM]
+            self.app.emit_event(done, wire_payload(done, cancelled_payload()))
 
     def fetch_task_result(self, task_id: UUID) -> TaskSnapshot | None:
         """The task's snapshot. Absurd calls a task parked on an event `sleeping`, as it does one

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _authority import ruled
 
 from effective.budget import Grant, MeasuredBudget
 from effective.cost import Contract, Usage
@@ -36,6 +37,7 @@ from effective.govern import BudgetRefused
 from effective.handlers.durable import DurableHandler
 from effective.keys import Key, Segment, compose_key
 from effective.ops import Step
+from effective.ruling import dump_ruling
 
 UNIT = 0.001  # one Lean Nat unit in dollars (the STEP scale of the measured-fork tests)
 RUN = "run-c"
@@ -98,9 +100,10 @@ class _GrantCtx:
 
     def await_event(self, name: Key) -> Any:
         # `.stored()`: `_delivered` doubles for the ENGINE's event store, which is keyed by the
-        # wire name — the same text `SdkCtx.await_event` hands the SDK.
+        # wire name, the same text `SdkCtx.await_event` hands the SDK. A grant is stored as the
+        # ruling that delivered it.
         if (wire := name.stored()) in self._delivered:
-            return self._delivered[wire]
+            return dump_ruling(ruled(self._delivered[wire]))
         raise _Park(wire)
 
     def step(self, name: Key, thunk: Any) -> Any:  # unused by _enforce_measured

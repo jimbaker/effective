@@ -70,6 +70,7 @@ models cite none, and state their invariants in their own words. Numbers with no
 | [concepts/enforcer-domain](concepts/enforcer-domain.md) | a gate is bounded by what it scans, with worked cases and what a zero really means |
 | [concepts/testing](concepts/testing.md) | testing a workflow: an instrument per question, replay as the strict judge, why production resume is lenient, the test roles |
 | [concepts/evidence](concepts/evidence.md) | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
+| [concepts/key-order](concepts/key-order.md) | `Key.covers` as a partial order that injectivity makes antisymmetric, the allow-set's canonical form, and the lift to attenuation |
 
 ## References
 

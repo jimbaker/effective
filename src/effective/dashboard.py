@@ -49,6 +49,7 @@ from effective.checkpoints import keys, read_sqlite_conn
 from effective.engines.sqlite import SqliteApp, TaskSnapshot
 from effective.graphlayout import GRAPH_CSS, elkjs, prepare, to_svg
 from effective.graphview import Collision, branch_path, from_keys, ledger_collisions
+from effective.keys import Segment
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked_conn
 from effective.parked import answer as answer_park
 from effective.telemetry import MixedSessions, NotASpanFile, sidecar_measurements
@@ -85,6 +86,9 @@ re-implemented."""
 DEFAULT_PAYLOAD = "{}"
 """What the answer form is pre-filled with. Answer payloads are free-form JSON: the await's own
 `schema` type is not surfaced, so the form is not derived from it."""
+
+DASHBOARD = Segment("dashboard")
+"""Who an answer from this page is recorded as ruling: the page names no principal."""
 
 
 # ── the two pages, as pure functions of what the readers returned ────────────
@@ -374,7 +378,7 @@ def dashboard(engine: SqliteApp, spans: Path | None = None) -> FastAPI:
             # …)`: this route already HOLDS the `ParkedTask` the reader returned, so the verb that
             # takes one is the one to call. It also stops this line from spelling the addressed
             # engine's 3-argument signature, which the delivery-parity change removes.
-            answer_park(engine, park, payload)
+            answer_park(engine, park, payload, by=DASHBOARD)
             engine.run_until_result(task_id)
 
         await run_in_threadpool(resume)

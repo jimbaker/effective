@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import Fault, FaultPosition, at_every_op
 
 from effective.api import Effect, qualified_event_name, scoped
@@ -128,7 +129,7 @@ def run_granted(backend, fault: Fault):
         snap = backend.run_until_result(task_id)
         assert snap.state not in ("completed", "failed"), (depth, snap)
         park = depth_grant_name(run_id, generation=0, depth=depth)
-        backend.emit_event(task_id, park.stored(), grant)
+        backend.emit_event(task_id, park.stored(), ruled(grant))
         depth += grant.get("add_depth", 0)
     return backend.run_until_result(task_id), domain
 

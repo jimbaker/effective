@@ -54,7 +54,7 @@ from effective.budget import (
     round_grant_name,
 )
 from effective.govern import BudgetRefused
-from effective.keys import Index, Key, Name, compose_key
+from effective.keys import RECORDED, Index, Key, Name, compose_key
 from effective.ops import (
     CARRY_PARAM,
     CHAIN_DEPTH,
@@ -466,7 +466,7 @@ def unfold_task[C, T](
     levels = Budget.from_spawn_params(params).depth
     if levels is None:
         raise ValueError(f"unfold_task: the task's params carry no {BUDGET_DEPTH_PARAM}")
-    context = crossing.context.validate_python(params[CONTEXT_PARAM])
+    context = crossing.context.validate_python(params[CONTEXT_PARAM], context={RECORDED: True})
     grow = _grower(node, promote=promote, run_id=None, grantor=None, crossing=crossing)
     return (yield from grow(context, int(params[DEPTH_PARAM]), levels))
 
@@ -551,7 +551,8 @@ def _across_tasks[C, T](
         spawned.append((yield from scoped(compose_key(t"rec:{Index(i)}"), spawn)))
     values: list[T] = []
     for handle in spawned:
-        values.append(across.result.validate_python((yield from join_answer(handle))))
+        joined = yield from join_answer(handle)
+        values.append(across.result.validate_python(joined, context={RECORDED: True}))
     return values
 
 
@@ -887,7 +888,9 @@ class Chain[S]:
         carried = params.get(CARRY_PARAM)
         return Chain(
             task=task,
-            state=initial if carried is None else TypeAdapter(schema).validate_python(carried),
+            state=initial
+            if carried is None
+            else TypeAdapter(schema).validate_python(carried, context={RECORDED: True}),
             run_id=run_id if run_id is not None else str(params.get("run_id", "")),
             generation=int(params.get(GENERATION_PARAM, 0)),
             params={k: v for k, v in params.items() if k not in (GENERATION_PARAM, CARRY_PARAM)},

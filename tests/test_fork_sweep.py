@@ -23,6 +23,7 @@ from _spawning import sqlite_spawner
 from pydantic import BaseModel
 
 from effective.api import append_ledger, ask_llm, await_event
+from effective.budget import Grant, depth_grant_name
 from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, respawn
 from effective.cost import MeteredInterpreter, Usage
@@ -33,7 +34,7 @@ from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, Segment, compose_key
 from effective.ops import LedgerRow
-from effective.parked import read_sqlite_parked_conn
+from effective.parked import answer, read_sqlite_parked_conn
 from effective.spawning import Failed, Returned
 
 
@@ -246,6 +247,82 @@ def test_a_sweep_returns_one_marginal_per_delta_from_one_base(tmp_path, sqlite_a
         assert all(e.startswith(f"hyp:{child_run_id};") for e, _, _ in _rows(app, child_run_id))
 
     assert _rows(app, "r-base") == base_rows  # the canonical lineage never moved
+
+
+def _granting(token: str):
+    """Asks for a depth grant after recording its extraction, and returns what was granted."""
+
+    def wf(_run_id: str):
+        yield from ask_llm("extract", [], dict)
+        yield from append_ledger(
+            LedgerRow(event_id=compose_key(t"extracted:{Segment(token)}"), kind="extracted")
+        )
+        grant = yield from await_event(depth_grant_name(token, generation=0, depth=1), Grant)
+        return grant.add_depth
+
+    return wf
+
+
+def _granting_domain() -> MeteredInterpreter:
+    return MeteredInterpreter(llm=lambda _op: ({"a": 1}, Usage()), tools=lambda _op: "x")
+
+
+def test_a_sweep_at_an_authority_park_answers_each_delta_as_a_hypothetical(tmp_path, sqlite_app):
+    """A counterfactual at a grant park: each child receives its delta as a hypothetical's ruling,
+    so "what if we had granted N more?" answers N for every delta."""
+    app = sqlite_app(str(tmp_path / "authority-fork.db"))
+    token = "t" + uuid4().hex[:6]
+    wf = _granting(token)
+    extracted = compose_key(t"extracted:{Segment(token)}")
+
+    @app.register_task("base")
+    def base(params, ctx):
+        ledger = SqliteLedger(app.conn, params["run_id"], app.write_lock)
+        return DurableHandler(ctx, _granting_domain(), ledger=ledger).run(lambda: wf("r-base"))
+
+    base_id = app.spawn("base", {"run_id": "r-base"})
+    app.run_until_result(base_id)
+    (park,) = read_sqlite_parked_conn(app.conn)
+    answer(app, park, {"add_depth": 0}, by=Segment("principal"))
+    assert app.run_until_result(base_id).state == "completed"
+
+    app.register_task("child")(
+        partial(
+            run_fork_as_task,
+            workflow=wf,
+            domain=_granting_domain(),
+            hypothetical_ledger=lambda rid: SqliteLedger(
+                app.conn, rid, app.write_lock, hypothetical=True
+            ),
+            read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+        )
+    )
+
+    @app.register_task("sweep")
+    def sweep(params, ctx):
+        def body():
+            return (
+                yield from marginal_sweep(
+                    "child",
+                    base_task_id=base_id,
+                    # lint: terminal-hole: `extracted` is a `Key`.
+                    through=compose_key(t"ledger;{extracted:domain=address}").stored(),
+                    fork_point=depth_grant_name(token, generation=0, depth=1),
+                    forked_from="r-base",
+                    forked_at_event=extracted.stored(),
+                    deltas={"c1": {"add_depth": 1}, "c2": {"add_depth": 2}},
+                )
+            )
+
+        tools = make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))})
+        return DurableHandler(
+            ctx, MeteredInterpreter(llm=lambda _op: ("", Usage()), tools=tools)
+        ).run(body)
+
+    snap = app.run_until_result(app.spawn("sweep", {"run_id": "r-sweep"}), max_batches=256)
+    assert snap.state == "completed", snap
+    outcomes = [ForkOutcome.model_validate(o).answer for o in snap.result]
+    assert outcomes == [Returned(value=1), Returned(value=2)]
 
 
 def test_a_refused_child_answers_instead_of_hanging_its_parent(tmp_path, sqlite_app):

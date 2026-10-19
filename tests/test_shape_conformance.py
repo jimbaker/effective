@@ -19,6 +19,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import Approval, Fault, FaultPosition, private
 from _shapes import Program, Shape, agree, ledger_ids, placed, run, sweep, sweep_pairs
 from pydantic import TypeAdapter
@@ -508,13 +509,13 @@ def test_each_round_asks_for_its_own_approval(backend, scoping):
     backend.run_until_result(task_id)
 
     (first,) = backend.parked(task_id)
-    backend.emit_event(task_id, first.wake_event, {"decision": "approve"})
+    backend.emit_event(task_id, first.wake_event, ruled({"decision": "approve"}))
     assert backend.run_until_result(task_id).state != "completed"
     (second,) = backend.parked(task_id)
     assert second.wake_event != first.wake_event
     assert tree.calls == ["act"]
 
-    backend.emit_event(task_id, second.wake_event, {"decision": "approve"})
+    backend.emit_event(task_id, second.wake_event, ruled({"decision": "approve"}))
     assert backend.run_until_result(task_id).state == "completed"
     assert tree.calls == ["act", "act"]
 

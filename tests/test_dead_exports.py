@@ -23,7 +23,7 @@ def test_a_computed_all_is_not_readable_from_source() -> None:
     """`_declared_all` reads the tree, so a module that COMPUTES its `__all__` declares nothing it
     can see — and that is the honest answer rather than a zero.
 
-    It is also why the export census reconciles the way it does. 421 of the 444 entries under
+    It is also why the export census reconciles the way it does. 426 of the 449 entries under
     `src/` are spelled; the other 23 come from two modules whose `__all__` is
     `[n for n in dir() if not n.startswith("_")]`, evaluated at import, and both of them leak
     `StrEnum` into the public surface (the dynamic `__all__` is not yet spelled out).
@@ -38,13 +38,16 @@ def test_a_computed_all_is_not_readable_from_source() -> None:
     NOT among them, and that is the shape to expect from a name that belongs to the grammar:
     `grammar.py` computes no `__all__` and spells none, so a constant living there is invisible
     to this census however public it is. `coding.specs` exports `coding_bind` beside `coding_read`,
-    the two halves of what a worker over the coding table is handed and hands back."""
+    the two halves of what a worker over the coding table is handed and hands back. `keys` exports
+    `QUALIFYING_TAGS` beside `RESERVED_AUTHORITY_TAGS`, the reserved tags that frame a name, and
+    `RECORDED`, the context under which a key field parses recorded text. `govern` exports
+    `ruler_of`, `rulers_for` and `run_rulers_for` beside the answers they rule."""
     spelled = {
         module: de._declared_all(module)
         for module in sorted(Path("src").rglob("*.py"))
         if de._declared_all(module)
     }
-    assert sum(len(v) for v in spelled.values()) == 421, "the AST-readable half of the surface"
+    assert sum(len(v) for v in spelled.values()) == 426, "the AST-readable half of the surface"
     for computed in ("src/effective/coding/states.py", "src/effective/prose/states.py"):
         assert de._declared_all(Path(computed)) == [], "computed at import, invisible to the tree"
 

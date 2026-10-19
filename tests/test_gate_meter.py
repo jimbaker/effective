@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _schedules import Turnstile, step_name
 
 from effective.api import Effect, ask_llm, call_tool, gather
@@ -113,7 +114,7 @@ def test_a_grant_resumes_on_the_spend_the_replay_derives(backend, grants):
         assert backend.checkpoint_keys(task) == ["step:a", "step:b"]
         (parked,) = backend.parked(task)
         names.append(parked.wake_event)
-        backend.emit_event(task, parked.wake_event, granted(dollars))
+        backend.emit_event(task, parked.wake_event, ruled(granted(dollars)))
         snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert backend.checkpoint_keys(task) == ["step:a", "step:b", "step:c"]

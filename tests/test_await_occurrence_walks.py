@@ -49,6 +49,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from _authority import ruled
 from _durable import DSN, absurd, pg_ready
 
 from effective.api import await_event, qualified_event_name
@@ -75,6 +76,7 @@ GRANT = depth_grant_name("r1", depth=1, generation=0)
 """A name whose namespace DECLARED `Scope.SETTLEMENT` — so the walk qualifies it."""
 
 GRANT_ANSWER = {"add_depth": 0}
+GRANT_RULING = ruled(GRANT_ANSWER)
 
 
 class _Tool:
@@ -297,12 +299,12 @@ def test_ONE_answer_no_longer_settles_both_asks_on_sqlite():
 
     task_id = app.spawn("two-grants", {"run_id": "r1"})
     app.work_batch()
-    app.emit_event(GRANT.stored(), GRANT_ANSWER)  # ONE answer, to the first ask
+    app.emit_event(GRANT.stored(), GRANT_RULING)  # ONE answer, to the first ask
     parked = app.run_until_result(task_id)
 
     # ... and the second occurrence is answerable, so this is a distinct live question rather
     # than a name nothing can ever satisfy.
-    app.emit_event(GRANT.occurrence(2).stored(), GRANT_ANSWER)
+    app.emit_event(GRANT.occurrence(2).stored(), GRANT_RULING)
     finished = app.run_until_result(task_id)
     app.close()
 
@@ -326,10 +328,10 @@ def test_an_emitter_composes_the_second_asks_registration_rather_than_writing_it
 
     task_id = app.spawn("two-grants", {"run_id": "r1"})
     app.work_batch()
-    app.emit_event(GRANT.stored(), GRANT_ANSWER)
+    app.emit_event(GRANT.stored(), GRANT_RULING)
     app.run_until_result(task_id)
     waiting = [park.wake_event for park in read_sqlite_parked_conn(app.conn)]
-    app.emit_event(composed.stored(), GRANT_ANSWER)
+    app.emit_event(composed.stored(), GRANT_RULING)
     finished = app.run_until_result(task_id)
     app.close()
 
@@ -392,8 +394,8 @@ def test_absurds_own_duplicate_name_rule_does_not_fire():
     spawned = app.spawn(task_name, {"run_id": "r1"})
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
-    app.emit_event(grant.stored(), GRANT_ANSWER)
-    app.emit_event(grant.occurrence(2).stored(), GRANT_ANSWER)
+    app.emit_event(grant.stored(), GRANT_RULING)
+    app.emit_event(grant.occurrence(2).stored(), GRANT_RULING)
     app.run_until_result(task_id)
 
     with psycopg.connect(DSN) as conn:
@@ -444,7 +446,7 @@ def _one_answer_leaves_it_parked(app: Any) -> bool:
     spawned = app.spawn(task_name, {"run_id": "r-probe"})
     task_id = spawned["task_id"] if isinstance(spawned, dict) else spawned
     app.work_batch()
-    app.emit_event(grant.stored(), GRANT_ANSWER)  # ONE answer
+    app.emit_event(grant.stored(), GRANT_RULING)  # ONE answer
     snapshot = app.run_until_result(task_id, max_batches=4)
     return snapshot is None or snapshot.state != "completed"
 

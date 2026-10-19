@@ -18,6 +18,7 @@ delivered event. Separating the two answer scopes on `GateState` (`answers_for` 
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from _authority import ruled
 from _gate import at_spend
 
 from effective import permission
@@ -100,7 +101,7 @@ def test_one_approval_settles_exactly_one_gated_op(tmp_path, sqlite_app):
     app.run_until_result(tid)
     assert dom.calls == [], "nothing should run before an approval"
 
-    approve = {"answers": {"permission": {"decision": "approve"}}}
+    approve = ruled({"answers": {"permission": {"decision": "approve"}}})
     app.emit_event(_park_name("charge_card"), approve)
     app.run_until_result(tid)
     assert dom.calls == ["charge_card"], (
@@ -244,7 +245,7 @@ def test_each_occurrence_of_one_tool_needs_its_own_approval(tmp_path, sqlite_app
 
     tid = app.spawn("t", {}, max_attempts=16)
     app.run_until_result(tid)
-    approve = {"answers": {"permission": {"decision": "approve"}}}
+    approve = ruled({"answers": {"permission": {"decision": "approve"}}})
 
     app.emit_event(_occ_name(0), approve)
     app.run_until_result(tid)

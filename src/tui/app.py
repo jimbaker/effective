@@ -43,6 +43,7 @@ from effective.graphview import (
     project,
     to_text,
 )
+from effective.keys import Segment
 from effective.parked import ParkedTask, answer
 from effective.runs import RunStatus
 from effective.runview import RunView, files_line, to_markdown
@@ -54,6 +55,9 @@ PROJECTIONS = ("unrolled", "project", "fold")
 survive on purpose: the discovered one is sharper and moves with its data, which is what a
 dashboard wants; the declared one is stable across runs, which is what comparing two runs needs.
 A UI that offered only one would be picking for the reader."""
+
+TUI = Segment("tui")
+"""Who an answer from this surface is recorded as ruling: the surface names no principal."""
 
 
 def _project(graph: RunGraph, mode: str) -> RunGraph:
@@ -200,7 +204,7 @@ class RunViewApp(App[None]):
         # brackets are a style tag: `[failed]` rendered as a *span* named "failed" wrapping the
         # rest of the line, and the word itself disappeared from the visible text. The fix that
         # made a failed run legible was therefore invisible, in a way `assert "[failed]" in
-        # str(render())` reports as a plain missing string. Measured in the pilot.
+        # str(render())` reports as a plain missing string.
         state = "?" if status is None else status.state.value
         self.query_one("#status", Static).update(
             f"{state}  ·  {view.run_id}  ·  {len(view.nodes)} ops  ·  {cost}  ·  "
@@ -361,7 +365,7 @@ class RunViewApp(App[None]):
         """
         app = SqliteApp(str(self.db_path))
         try:
-            answer(app, park, json.loads(payload))
+            answer(app, park, json.loads(payload), by=TUI)
         except json.JSONDecodeError as exc:
             self._to_ui(self.notify, f"payload is not JSON: {exc}", severity="error")
             return

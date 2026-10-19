@@ -2,11 +2,11 @@
 
 A *permission cascade* is an ``@op_layer`` that runs each op past an ordered list
 of **tiers**; the first decisive verdict wins, and the cascade **fails closed**.
-The three-valued ``Verdict`` is a *guard ruling*. It rhymes with a channel's
+The three-valued ``Verdict`` is a *guard decision*. It rhymes with a channel's
 ``Resolution`` (Done / Repair) and is a **separate type**, because an
 ``Escalate`` can suspend and a ``Repair`` cannot:
 
-| verdict      | ruling | effect                                       |
+| verdict      | action | effect                                       |
 |--------------|--------|----------------------------------------------|
 | ``Allow``    | settle | forward the op                               |
 | ``Deny``     | block  | raise ``Refused``; the op never runs         |
@@ -26,10 +26,10 @@ from collections.abc import Callable, Generator, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, assert_never
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from effective.govern import Ask, GateState, Policy, Proceed, Refused, answers_for, park, refuse
-from effective.handlers.base import placed_key
+from effective.handlers.base import effect_of, placed_key
 from effective.keys import AuthorityTag, Index, Key, Name, Scope, compose_key
 from effective.keys.grammar import KeySyntaxError, parse
 from effective.layers import OpLayer, layer_run_state, op_layer
@@ -130,18 +130,30 @@ def rules(policy: Callable[[WorkflowOp], Verdict]) -> Tier:
 
 
 class PermitPolicy(BaseModel):
-    """The **data twin** of a permission rule (the auto-mode allow-table): op-key prefixes
-    that auto-settle. It is *data*, not a closure, so it checkpoints, diffs, and is
-    `improve`-optimizable: a tunable seam takes data (cf. `rules`, which takes a bare
-    `Callable` and is therefore optimizer-invisible)."""
+    """The **data twin** of a permission rule (the auto-mode allow-table): op keys whose ops
+    auto-settle. As data it checkpoints, diffs, and is `improve`-optimizable, where `rules` takes
+    a bare `Callable` an optimizer cannot read.
 
-    allow: tuple[str, ...] = ()  # op-key prefixes that auto-settle
+    An entry permits every key it covers (`Key.covers`): `tool:read_file` permits
+    `tool:read_file,0`, `tool:read_file_secret` is another atom it leaves alone, and the bare tag
+    `tool` permits every tool. The entries are held in canonical form, those no other entry
+    covers, sorted by their stored text, so two allow-sets that permit the same keys are equal
+    whatever order or redundancy they were written with. Frozen against assignment;
+    `model_copy(update=...)` skips validation, so build a changed policy with the constructor."""
+
+    model_config = ConfigDict(frozen=True)
+
+    allow: tuple[Key, ...] = ()
+
+    @field_validator("allow")
+    @classmethod
+    def _canonical(cls, allow: tuple[Key, ...]) -> tuple[Key, ...]:
+        distinct = set(allow)
+        uncovered = (e for e in distinct if not any(o != e and o.covers(e) for o in distinct))
+        return tuple(sorted(uncovered, key=Key.stored))
 
     def permits(self, key: Key) -> bool:
-        # `.stored()`: prefix matching is over the DURABLE form, because that is what the
-        # allow-set is written against and what replay re-derives. A projection form that ever
-        # diverged would silently change which ops auto-settle.
-        return any(key.stored().startswith(prefix) for prefix in self.allow)
+        return any(entry.covers(key) for entry in self.allow)
 
 
 def allow_table(policy: PermitPolicy) -> Tier:
@@ -280,7 +292,7 @@ def human(
 # The cascade's *decision* lifted out of the driver that realizes it, as budget's
 # `enforce_measured` is: ONE definition, pure and total, that every driver is
 # conformance-tested against. What stays in the driver is the part that
-# cannot be pure — running a tier (it may yield ops) and realizing the ruling (forward vs raise).
+# cannot be pure: running a tier (it may yield ops) and realizing the verdict (forward or raise).
 # Formalized in `formal/lean/Effective/Decide.lean`; conformance-pinned by
 # `tests/test_decide_conformance.py`.
 
@@ -399,7 +411,8 @@ def as_policy(
             return refuse(_rationale(answer) or "denied by reviewer")
         verdicts = [_verdict_of(tier, op) for tier in tiers]
         if on_escalate == "park" and not any(map(decisive, verdicts)):
-            return park(Ask(name, prompt(op), {"op_key": placed_key(op).stored()}))
+            detail = {"op_key": placed_key(op).stored(), "effect": effect_of(op)}
+            return park(Ask(name, prompt(op), detail))
         match decide(verdicts, default):
             case Allow():
                 return Proceed()
@@ -437,7 +450,7 @@ def cascade(tiers: list[Tier], default: Verdict = FAIL_CLOSED) -> OpLayer[Any]:
     ``Refused``.
 
     The **driver**: it runs tiers (they may yield ops — the impure half), stops at
-    the first decisive verdict, and realizes `decide`'s ruling. The *decision* is
+    the first decisive verdict, and realizes `decide`'s verdict. The *decision* is
     `decide` — one pure transition, shared and conformance-tested.
     """
 

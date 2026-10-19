@@ -44,7 +44,7 @@ from ast_grep_py import SgRoot
 from pydantic import TypeAdapter, ValidationError
 
 from effective.domain import DomainOp
-from effective.keys import DOMAIN_DIRECTIVE, RESERVED_AUTHORITY_TAGS
+from effective.keys import DOMAIN_DIRECTIVE, QUALIFYING_TAGS, RESERVED_AUTHORITY_TAGS
 from effective.keys.frame import unmintable
 from effective.keys.grammar import (
     ARITY_SEPARATOR,
@@ -1376,6 +1376,39 @@ def check_ledger_reads_file(path: str | Path) -> list[Violation]:
     return check_ledger_reads_source(path.read_text(), filename=str(path))
 
 
+# --- the ruling minters (`--ruling-mint`) -----------------------------------------------
+#
+# An authority park settles only on an `AuthorityRuling`, and the engines take one as a Python
+# instance, so who may construct one is who may rule. Each name that mints one is read only where
+# it is allowed: the ruling module constructs and decodes, the park answer rules for the principal
+# its caller names, and the fork driver rules for a counterfactual. Any other reference, an
+# aliasing import included, is the finding.
+_RULING_MINTERS: dict[str, frozenset[str]] = {
+    "AuthorityRuling": frozenset({"src/effective/ruling.py"}),
+    "ruled_answer": frozenset(
+        {"src/effective/ruling.py", "src/effective/parked.py", "src/effective/fork.py"}
+    ),
+    "_load_ruling": frozenset({"src/effective/ruling.py"}),
+}
+
+
+def check_ruling_mint_file(path: str | Path) -> list[Violation]:
+    path = Path(path)
+    return [
+        Violation(
+            "ruling-minted-outside-the-answer",
+            "a name that mints an `AuthorityRuling` is read outside the modules allowed it; rule "
+            "on a park through `effective.parked.answer(..., by=...)`",
+            node.range().start.line + 1,
+            node.text(),
+            str(path),
+        )
+        for node in SgRoot(path.read_text(), "python").root().find_all(kind="identifier")
+        if (allowed := _RULING_MINTERS.get(node.text())) is not None
+        and path.as_posix() not in allowed
+    ]
+
+
 # --- the SQL-boundary rule (`--sql-templates`) -------------------------------------------
 #
 # An f-string that builds an IDENTITY, SQL, or a PROMPT is a defect, because at those three seams
@@ -2082,9 +2115,15 @@ def check_authority_tags(paths: Iterable[str | Path]) -> list[Violation]:
     """
     out: list[Violation] = []
     seen: set[str] = set()
+    qualified: set[str] = set()
     for path in paths:
         path = Path(path)
         text = path.read_text()
+        qualified |= {
+            tag
+            for _line, tag, scope in _authority_declarations(text)
+            if tag and scope == "QUALIFIED"
+        }
         declared = _module_consts(text)
         consts = {name: literal for name, (_ctor, literal) in declared.items()}
         authority = {literal for _n, (ctor, literal) in declared.items() if ctor == "AuthorityTag"}
@@ -2138,6 +2177,17 @@ def check_authority_tags(paths: Iterable[str | Path]) -> list[Violation]:
                     "handlers/base.py",
                 )
             )
+    for tag in sorted(qualified ^ set(QUALIFYING_TAGS)):
+        out.append(
+            Violation(
+                "qualifying-tags-drift",
+                "a tag is declared `Scope.QUALIFIED` or listed in `QUALIFYING_TAGS`, but not "
+                "both. A qualifying tag frames a name and names no park, so the two must agree",
+                0,
+                tag,
+                "keys/marker.py",
+            )
+        )
     return out
 
 
@@ -3789,7 +3839,7 @@ def _tested_type_is_knowable(
     """Could a type checker say what `tested` is — i.e. would `assert_never` over it be a PROOF?
 
     The one discrimination that separates the sweep's population from the marker checks around
-    it, and the reason the pre-pilot `keys.py` reads as 11 dispatch sites when 8 is the answer.
+    it, and the reason a census can over-count dispatch sites.
     Two ways to fail it, and both are `Any` in practice:
 
     - an attribute access whose attribute is undeclared — `interpolation.value` is `Any` by the
@@ -4210,7 +4260,7 @@ def _promote_duplicated_enumerations(
     """A filter written the same way two or more times in one file is one enumeration, N times.
 
     The fix there is to build it once, not to `match` harder — the population no `isinstance`
-    count reveals, and the one the pilot actually found. Promotion is on `ast.unparse` identity of
+    count reveals. Promotion is on `ast.unparse` identity of
     the predicate, which is the limit stated at the head of this section."""
     # Only a filter over a UNION can be a duplicated enumeration. Promoting on text alone put 11
     # `isinstance(node, ast.Call)` filters — a foreign hierarchy, in this file's own body — into
@@ -4437,6 +4487,7 @@ _PER_FILE = {
     "--channels": check_channel_file,
     "--deps": check_deps_file,
     "--ledger-reads": check_ledger_reads_file,
+    "--ruling-mint": check_ruling_mint_file,
     "--sql-templates": check_sql_templates_file,
     "--lazy-imports": check_lazy_imports_file,
     "--sdk-private": check_sdk_private_file,
@@ -4679,6 +4730,7 @@ def main(argv: list[str] | None = None) -> int:
             "--channels": "channel (volatile-last-cache / independence)",
             "--deps": "seam dependency-direction",
             "--ledger-reads": "canonical ledger-read",
+            "--ruling-mint": "ruling-mint (a ruling constructed outside the park answer)",
             "--sql-templates": "SQL-boundary (t-string)",
             "--key-composition": "key-composition (an identity built by formatting)",
             "--terminal-holes": "terminal-hole (an unwrapped value in the exempt last position)",

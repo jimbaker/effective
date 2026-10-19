@@ -436,14 +436,16 @@ def _trip(
     while meter_cost >= ceiling + granted:
         if on_exhaust == "fail":
             return Exceeded(meter_cost, ceiling + granted)
-        match grants.get(name_of(trips)):
-            case None:  # nobody has answered this trip's park yet
-                return Parked(name_of(trips))
+        if (name := name_of(trips)) not in grants:  # nobody has answered this trip's park yet
+            return Parked(name)
+        match grants[name]:
             case Grant() as g if g.stop or g.add_dollars <= 0.0:  # answered: stop here
                 return Exceeded(meter_cost, ceiling + granted)
             case Grant() as g:  # answered with more room: refill and re-check
                 granted += g.add_dollars
                 trips += 1
+            case _:  # answered with something that is not a grant, which grants nothing
+                return Exceeded(meter_cost, ceiling + granted)
     return Cleared(granted, trips)
 
 

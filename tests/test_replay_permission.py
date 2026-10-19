@@ -21,6 +21,7 @@ from uuid import uuid4
 
 import pytest
 from _approval_domain import ApprovalEvent, CannedDomain, committed_id, process_refund
+from _authority import ruled
 from _durable import (
     DSN,
     absurd,
@@ -91,7 +92,7 @@ def test_injected_await_suspends_then_resumes_on_approve():
         assert ledger_kinds(mid) == []  # nothing past the gate committed
 
         app.emit_event(
-            ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"}
+            ev.stored(), ruled({"decision": "approve", "actor": "approver", "rationale": "ok"})
         )
         snap = app.run_until_result(spawned)
 
@@ -118,7 +119,7 @@ def test_injected_await_refuses_on_deny():
         spawned = app.spawn(name, {"request_id": mid}, max_attempts=1)
         app.work_batch()  # suspends at the injected await
         app.emit_event(
-            ev.stored(), {"decision": "reject", "actor": "approver", "rationale": "nope"}
+            ev.stored(), ruled({"decision": "reject", "actor": "approver", "rationale": "nope"})
         )
         snap = app.run_until_result(spawned)
 
@@ -153,7 +154,9 @@ def test_parked_permission_survives_worker_death_resumes_on_fresh_worker():
     app2 = absurd()
     domain2 = CannedDomain(amount="42.00")
     _register(app2, name, mid, domain2, [_gate(ev)])
-    app2.emit_event(ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"})
+    app2.emit_event(
+        ev.stored(), ruled({"decision": "approve", "actor": "approver", "rationale": "ok"})
+    )
     snap = app2.run_until_result(task_id)
 
     try:
@@ -205,7 +208,7 @@ def test_cascade_escalates_commit_to_human_then_commits():
         assert ledger_kinds(mid) == ["assessment"]  # assessment allowed; commitment gated
 
         app.emit_event(
-            ev.stored(), {"decision": "approve", "actor": "approver", "rationale": "ok"}
+            ev.stored(), ruled({"decision": "approve", "actor": "approver", "rationale": "ok"})
         )
         snap = app.run_until_result(spawned)
         assert snap is not None

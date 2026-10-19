@@ -40,10 +40,12 @@ from effective.keys.frame import (
     unframed,
 )
 from effective.keys.grammar import (
+    RECORDED,
     Key,
     Scope,
 )
 from effective.keys.marker import (
+    QUALIFYING_TAGS,
     RESERVED_AUTHORITY_TAGS,
     AuthorityTag,
     Index,
@@ -70,6 +72,8 @@ from effective.keys.processor import (
 __all__ = [
     "DEFAULT_DIRECTIVE",
     "DOMAIN_DIRECTIVE",
+    "QUALIFYING_TAGS",
+    "RECORDED",
     "RESERVED_AUTHORITY_TAGS",
     "AuthorityTag",
     "FramePosition",

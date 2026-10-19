@@ -19,9 +19,16 @@ from agent.permit_tuning import (
 from effective.cost import CostBudget, MeteredInterpreter
 from effective.handlers.durable import DurableHandler
 from effective.improve import Scored
+from effective.keys import Key
 from effective.permission import PermitPolicy
 
 # reads and tests are always approved; apply_edit is sometimes denied (the risky op)
+
+
+def _allowing(*entries: str) -> PermitPolicy:
+    return PermitPolicy(allow=tuple(Key.parse(entry) for entry in entries))
+
+
 CORPUS = [
     Labeled(op_key="tool:read_file,0", verdict="allow"),
     Labeled(op_key="tool:read_file,1", verdict="allow"),
@@ -35,12 +42,12 @@ CORPUS = [
 
 
 def test_score_policy_counts_false_allows_and_auto_rate():
-    safe = PermitPolicy(allow=("tool:read_file", "tool:run_tests"))  # never touches the deny
+    safe = _allowing("tool:read_file", "tool:run_tests")  # never touches the deny
     m = score_policy(CORPUS, safe)
     assert m.measures[FALSE_ALLOW] == 0.0
     assert m.measures[AUTO_RATE] == 3 / 5
 
-    greedy = PermitPolicy(allow=("tool:",))  # auto-allows everything, incl. the denied edit
+    greedy = _allowing("tool")  # auto-allows everything, incl. the denied edit
     g = score_policy(CORPUS, greedy)
     assert g.measures[FALSE_ALLOW] == 1.0
     assert g.measures[AUTO_RATE] == 1.0
@@ -52,32 +59,31 @@ def test_score_policy_counts_false_allows_and_auto_rate():
 
 def test_safest_takes_zero_false_allow_then_max_auto():
     front = [
-        Scored(PermitPolicy(allow=("tool:read_file",)), {FALSE_ALLOW: 0.0, AUTO_RATE: 0.4}),
+        Scored(_allowing("tool:read_file"), {FALSE_ALLOW: 0.0, AUTO_RATE: 0.4}),
         Scored(
-            PermitPolicy(allow=("tool:read_file", "tool:run_tests")),
+            _allowing("tool:read_file", "tool:run_tests"),
             {FALSE_ALLOW: 0.0, AUTO_RATE: 0.6},
         ),
-        Scored(
-            PermitPolicy(allow=("tool:",)), {FALSE_ALLOW: 1.0, AUTO_RATE: 1.0}
-        ),  # higher auto, unsafe
+        Scored(_allowing("tool"), {FALSE_ALLOW: 1.0, AUTO_RATE: 1.0}),  # higher auto, unsafe
     ]
     pick = safest(front)
     assert pick is not None
-    assert pick.candidate.allow == ("tool:read_file", "tool:run_tests")  # safe + highest auto
+    # safe, and the highest auto-rate
+    assert pick.candidate == _allowing("tool:read_file", "tool:run_tests")
 
 
 def test_safest_is_none_when_every_candidate_is_unsafe():
-    front = [Scored(PermitPolicy(allow=("tool:",)), {FALSE_ALLOW: 1.0, AUTO_RATE: 1.0})]
+    front = [Scored(_allowing("tool"), {FALSE_ALLOW: 1.0, AUTO_RATE: 1.0})]
     assert safest(front) is None
 
 
 # --- tune_permits: the live sweep over LocalCtx ----------------------------
 
 CANDIDATES = [
-    PermitPolicy(allow=()),  # allow nothing: safe but useless (auto 0)
-    PermitPolicy(allow=("tool:read_file",)),  # safe, auto 0.4 -> dominated by the next
-    PermitPolicy(allow=("tool:read_file", "tool:run_tests")),  # safe, auto 0.6
-    PermitPolicy(allow=("tool:",)),  # greedy: auto 1.0 but false_allow 1 (the tradeoff point)
+    _allowing(),  # allow nothing: safe but useless (auto 0)
+    _allowing("tool:read_file"),  # safe, auto 0.4 -> dominated by the next
+    _allowing("tool:read_file", "tool:run_tests"),  # safe, auto 0.6
+    _allowing("tool"),  # greedy: auto 1.0 but false_allow 1 (the tradeoff point)
 ]
 
 
@@ -97,7 +103,7 @@ def test_tune_permits_finds_the_safe_high_auto_policy():
     front = {tuple(s["candidate"]["allow"]): s["measures"] for s in raw}
     # the two dominated safe policies drop out; the safe-best and the greedy tradeoff remain
     assert ("tool:read_file", "tool:run_tests") in front  # safe, auto 0.6
-    assert ("tool:",) in front  # unsafe but higher auto -> a real Pareto point
+    assert ("tool",) in front  # unsafe but higher auto -> a real Pareto point
     assert () not in front  # dominated
     assert ("tool:read_file",) not in front  # dominated by read_file+run_tests
 

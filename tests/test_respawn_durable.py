@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from _authority import ruled
 from _spawning import sqlite_spawner
 from pydantic import BaseModel
 
@@ -511,7 +512,7 @@ def test_the_respawned_row_records_the_grant_that_authorized_it(tmp_path, sqlite
     _drain(app)
 
     # Generation 0 holds `remaining == 1`, so it asks before its step runs. Answer with 2 more.
-    app.emit_event(chain_grant_name("r1", 0).stored(), {"add_generations": 2})
+    app.emit_event(chain_grant_name("r1", 0).stored(), ruled({"add_generations": 2}))
     _drain(app)
 
     granted = [

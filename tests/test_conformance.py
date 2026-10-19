@@ -13,6 +13,7 @@ from typing import Any, ClassVar, assert_never
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import (
     RULING_GOAL,
     Approval,
@@ -699,7 +700,7 @@ def test_durable_descend_leaf_parks_on_the_gather_qualified_grant(backend):
     backend.emit_event(
         task_id,
         f"rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
-        {"add_depth": 0},
+        ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -708,7 +709,7 @@ def test_durable_descend_leaf_parks_on_the_gather_qualified_grant(backend):
     backend.emit_event(
         task_id,
         f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
-        {"add_depth": 0},
+        ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -736,7 +737,7 @@ def test_durable_descend_multi_grant_round_trip(backend):
     backend.emit_event(
         task_id,
         f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=1, generation=0).stored()}",
-        {"add_depth": 2},
+        ruled({"add_depth": 2}),
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -746,7 +747,7 @@ def test_durable_descend_multi_grant_round_trip(backend):
     backend.emit_event(
         task_id,
         f"gather:0,1;rec:1;{depth_grant_name(run_id, depth=3, generation=0).stored()}",
-        {"add_depth": 0},
+        ruled({"add_depth": 0}),
     )
     snap = backend.run_until_result(task_id)
     assert snap is not None
@@ -871,7 +872,7 @@ def _run_raced_gather(backend, *, max_attempts=None, fault=None):
 
 def _drain_terminal(backend, task_id, deadline: float = 8.0):
     """Drain a task to a terminal state on a wall-clock deadline, not a fixed
-    retry count: a reparked task sleeps until now + epsilon (and a raced sleep
+    retry count: a reparked task sleeps until the present plus epsilon (and a raced sleep
     branch until its own wake time), so under suite load a single fixed retry
     is a flake — the deadline absorbs the jitter without changing what the
     test asserts."""
@@ -1259,7 +1260,7 @@ def test_durable_run_code_action_parks_for_human_approval(backend):
     assert domain.fn_calls == [run_id]  # seg:0 ran (the function fired) ...
     assert domain.action_calls == []  # ... but the world is untouched
 
-    backend.emit_event(task_id, approve_event, {"decision": "approve"})
+    backend.emit_event(task_id, approve_event, ruled({"decision": "approve"}))
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1386,13 +1387,13 @@ def test_durable_run_code_gather_with_human_tier_parks_per_branch(backend):
     assert domain.action_calls == []  # the world untouched while parked
 
     approve = f"approve:{run_id};step;code:action,0,c;tool:send_email"
-    backend.emit_event(task_id, f"gather:0,0;{approve}", {"decision": "approve"})
+    backend.emit_event(task_id, f"gather:0,0;{approve}", ruled({"decision": "approve"}))
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state not in ("completed", "failed"), snap  # branch 1 still needs ITS approval
     assert len(domain.action_calls) == 1  # branch 0's action fired, exactly once
 
-    backend.emit_event(task_id, f"gather:0,1;{approve}", {"decision": "approve"})
+    backend.emit_event(task_id, f"gather:0,1;{approve}", ruled({"decision": "approve"}))
     snap = backend.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1417,7 +1418,7 @@ def _drain_with_grants(backend, task_id, run_id, grant, *, max_parks=6):
         assert snap is not None
         if snap.state in ("completed", "failed", "cancelled"):
             return snap, parks
-        backend.emit_event(task_id, f"budget-grant:{run_id},{parks}", grant)
+        backend.emit_event(task_id, f"budget-grant:{run_id},{parks}", ruled(grant))
         parks += 1
     return backend.run_until_result(task_id), parks
 
@@ -2342,10 +2343,10 @@ def test_two_bounded_waits_on_one_name_answer_independently_on_both_engines(back
 
 # ── the bounded-wait table, as one assertion ─────────────────────────────────
 #
-# `wiki/concepts/bounded-wait.md` enumerates what decides a wait that names a deadline. Four
-# review rounds each found a defect of one shape: an arm the two engines answered differently,
-# in a cell nobody had written down. So the cells are the subject here rather than any one of
-# them. A row is a HISTORY, because that is what the two engines disagree about: the same
+# `wiki/concepts/bounded-wait.md` enumerates what decides a wait that names a deadline. The
+# defect this table guards against has one shape: an arm the two engines answer differently, in
+# a cell nobody has written down. So the cells are the subject here rather than any one of them.
+# A row is a HISTORY, because that is what the two engines disagree about: the same
 # (event, deadline) pair answers differently depending on how the task got here.
 
 
@@ -2630,8 +2631,8 @@ def test_every_history_in_the_bounded_wait_table_answers_alike_on_both_engines(b
 
     Each history is run and its answer collected; the offenders are what is asserted empty. A
     per-history test reports the first divergence and hides the rest, and a defect in a history
-    nobody listed reports nothing at all. The second is why this exists: four review rounds each
-    found one of these, one cell at a time.
+    nobody listed reports nothing at all. The second is why this exists: such defects surface one
+    cell at a time.
     """
     offenders = [
         (history, expected, answered)
@@ -2722,7 +2723,7 @@ def test_two_runs_under_distinct_gates_are_isolated_on_both_engines(backend):
     for run in (first, second):
         assert backend.run_until_result(tasks[run]).state in ("waiting", "sleeping")
 
-    approve = {"answers": {"permission": {"decision": "approve"}}}
+    approve = ruled({"answers": {"permission": {"decision": "approve"}}})
     backend.emit_event(tasks[first], parks[first], approve)
     assert backend.run_until_result(tasks[first]).state == "completed"
     assert domains[first].amounts == [5]
@@ -2774,7 +2775,7 @@ def test_answer_settles_a_park_read_off_the_engine(backend):
 
     (park,) = backend.parked(task_id)
     assert park.wake_event == depth_grant_name(token, generation=0, depth=1).stored()
-    assert answer(backend.app, park, {"add_depth": 1}) == park.wake_event
+    assert answer(backend.engine, park, {"add_depth": 1}, by=Segment("test")) == park.wake_event
 
     # Answering marks the task claimable; it does not resume it. Nothing polls, so the drain is
     # the caller's — which is the sentence the verb's docstring ends on, asserted here.
@@ -2801,14 +2802,14 @@ def test_answer_settles_the_SECOND_ask_without_the_caller_knowing_about_occurren
 
     (first,) = backend.parked(task_id)
     assert first.wake_event == bare.stored()
-    answer(backend.app, first, {"add_depth": 1})
+    answer(backend.engine, first, {"add_depth": 1}, by=Segment("test"))
     backend.run_until_result(task_id)
 
     # The SECOND park is a different name, and the caller never had to work that out.
     (second,) = backend.parked(task_id)
     assert second.wake_event == bare.occurrence(2).stored()
     assert second.wake_event != first.wake_event, "one answer settled both asks"
-    answer(backend.app, second, {"add_depth": 2})
+    answer(backend.engine, second, {"add_depth": 2}, by=Segment("test"))
 
     snap = backend.run_until_result(task_id)
     assert snap is not None

@@ -1,7 +1,7 @@
 # ADR-0017: Tunable seams take data; closures are for fixed policy
 
 - **Date:** 2026-07-07
-- **Status:** Accepted, as a convention held at review; no lint enforces it. Built: the first data
+- **Status:** Accepted, as a convention; no lint enforces it. Built: the first data
   twin, `allow_table(PermitPolicy)` in [`src/effective/permission.py`](../../src/effective/permission.py), tuned by `improve` in
   [`src/agent/permit_tuning.py`](../../src/agent/permit_tuning.py) ([`tests/test_permit_tuning.py`](../../tests/test_permit_tuning.py)). The closure-shaped seams listed
   under "Conversion backlog" remain closures.
@@ -56,8 +56,9 @@ than a `done` or `compact` callback, wherever the policy is meant to be tuned.
 
 ## The first data twin
 
-`PermitPolicy` is a Pydantic model, an allow-set of op-key prefixes, and `allow_table(policy)` is
-its fixed interpreter. It checkpoints, diffs, and is mutated by `improve`. `agent.permit_tuning`
+`PermitPolicy` is a Pydantic model, an allow-set of keys in canonical form, each permitting the
+keys it covers, and `allow_table(policy)` is its fixed interpreter. It checkpoints, diffs, and is
+mutated by `improve`; two candidates that permit the same keys are one policy. `agent.permit_tuning`
 tunes it by offline replay of a recorded `(op key, human verdict)` corpus, with `false_allow`
 minimized as the hard safety objective and `auto_rate` maximized, at zero live risk and zero model
 calls. `allow_table` answers Allow or Escalate and never Deny, so a tuned allow-set can only widen
@@ -83,7 +84,7 @@ config digest to the ledger rather than an opaque function.
 
 | limit | mitigation |
 |---|---|
-| not type-enforceable: a `Callable` parameter cannot know its caller wanted it optimizable | a convention the seam author opts into, held at review |
+| not type-enforceable: a `Callable` parameter cannot know its caller wanted it optimizable | a convention the seam author opts into; no lint enforces it |
 | verbosity: a data model and a fixed interpreter is more code than a lambda | apply it only to seams intended to be tuned |
 | premature twins: converting a seam nobody tunes is speculative | convert on a demonstrated tuning need, as `allow_table` was |
 

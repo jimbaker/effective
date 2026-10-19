@@ -57,6 +57,7 @@ from effective.ops import (
     refuse_placed_writer_collision,
     settled_wait,
 )
+from effective.ruling import wire_payload
 from effective.spawning import cancelled_payload, failure_answer
 from effective.sql import bind
 
@@ -401,7 +402,7 @@ def _deliver(conn: sqlite3.Connection, name: str, payload: Any) -> None:
     entry. `BEGIN IMMEDIATE` takes the write lock up front, so a second emitter waits its turn on
     the 5s busy timeout. Postgres commits both inside `emit_event`, which is what this conforms
     to."""
-    payload_json = json.dumps(to_jsonable_python(payload))
+    payload_json = json.dumps(to_jsonable_python(wire_payload(name, payload)))
     conn.execute("BEGIN IMMEDIATE")
     now = time.time()
     try:

@@ -70,6 +70,12 @@ one. As a term, `occ` would be an ordinary tag: `step_key("tool:a;occ:2")` would
 key as `step_key("tool:a").occurrence(2)`, two producers for one identity, which is the
 injectivity violation this grammar exists to prevent."""
 
+RECORDED = "recorded"
+"""The validation-context flag a reader of a durable record sets, so a `Key` field parses the text
+the record holds. The durable handler reads a step's result through that same path on the attempt
+that ran it, so a run and its replay see one value. A writer constructing a model never sets it,
+so a `str` handed to a `Key` field there is still refused."""
+
 PROJECTION_SIGIL = "*"
 """What a coordinate a PROJECTION dropped renders as, and the one byte no producer may write.
 
@@ -166,8 +172,7 @@ def is_tag(text: str) -> bool:
     thing and a digest names one artifact; only a name names a namespace of things.
 
     Asking `kind_of` rather than excluding the kinds by hand is the difference between a rule and
-    a list. The first version of this function said ``not UUID.match(text)`` and was one kind
-    short the day it shipped — the shape CLAUDE.md warns about, at the scale of two.
+    a list.
 
     Used by all three gates that admit a tag: `Term.__post_init__` and `marker.Tag` on the
     composing side, `_parse_foreign` on the reading side."""
@@ -248,8 +253,8 @@ class Term:
     `$awaitEvent:ask:foo` (what the SDK writes — `f"$awaitEvent:{event_name}"`) and
     `$awaitEvent;ask:foo` (what our own composer would write) carry the same tags in the same
     order, so without this flag they parse to one structure and `render` can only return one of
-    them. Two distinct durable names collapsing to one is exactly the collision the arc exists to
-    forbid — and for a checkpoint name, rendering the other spelling is a lookup that misses."""
+    them. Two distinct durable names collapsing to one is exactly the collision the grammar exists
+    to forbid, and for a checkpoint name, rendering the other spelling is a lookup that misses."""
 
     def __post_init__(self) -> None:
         """The tag is checked HERE, so nothing can build a term outside the language.
@@ -1022,24 +1027,40 @@ class Key:
         **The asymmetry is the rule in one place.** Python mode refuses a `str` where a `Key`
         belongs, which is the writer guarantee enforced at runtime as well as by `ty`. JSON mode
         parses the text, because a row read back off the wire has no `Key` to offer and this is
-        the read boundary (see `parse`). Type the side where the guarantee is enforced; parse the
-        side where it is not.
+        the read boundary (see `parse`). A recorded value read back in Python mode is that same
+        boundary, so a reader passing `context={RECORDED: True}` gets the text parsed too::
+
+            TypeAdapter(Row).validate_python(raw, context={RECORDED: True})  ->  a Key
+
+        Type the side where the guarantee is enforced; parse the side where it is not.
 
         **Scope, because it is easy to over-read:** this governs a `Key` in a MODEL FIELD.
         `to_jsonable_python` on an ad-hoc dict does not consult it, so a bare `Key` in an untyped
-        mapping still serializes structurally. That is fine today (no step result or checkpoint
-        value is key-valued), and it is why a ledger row is a typed model rather than a `dict`:
-        the type is what makes the serialization correct.
+        mapping still serializes structurally. That is why a ledger row and a spawn's answer are
+        typed models rather than a `dict`: the type is what makes the serialization correct.
         """
         return core_schema.json_or_python_schema(
             json_schema=core_schema.no_info_after_validator_function(
                 cls.parse, core_schema.str_schema()
             ),
-            python_schema=core_schema.is_instance_schema(cls),
+            python_schema=core_schema.with_info_plain_validator_function(cls._from_python),
             serialization=core_schema.plain_serializer_function_ser_schema(
                 lambda key: key.stored()
             ),
         )
+
+    @classmethod
+    def _from_python(cls, value: Any, info: core_schema.ValidationInfo) -> Key:
+        match value:
+            case Key():
+                return value
+            case str() if (info.context or {}).get(RECORDED):
+                return cls.parse(value)
+            case _:
+                raise ValueError(
+                    f"a Key field takes a Key, not {type(value).__name__}: compose one, or read "
+                    f"recorded text back with context={{RECORDED: True}}"
+                )
 
     def prefixed(self, prefix: str) -> Key:
         """Apply a handler-side scope prefix, keeping the reach::
@@ -1105,6 +1126,31 @@ class Key:
         if count == 1:
             return self  # a first occurrence is the bare key — unrepresented, as the SDK writes it
         return Key(replace(parsed, occurrence=count), self._scope)
+
+    def covers(self, other: Key) -> bool:
+        """Is `other` this key or a narrowing of it? A partial order over keys::
+
+            this        other               covers
+            tool        tool:read_file,0    yes     a bare tag, every key under it
+            tool:a      tool:a,1            yes     a leading run of the last term's coordinates
+            tool:a      tool:a#2            yes     every occurrence of an unnumbered key
+            tool:a#2    tool:a#2            yes     a numbered key, itself alone
+            tool:a#2    tool:a              no
+            tool:a      tool:ab             no      a different atom
+
+        The leading terms are equal, and the last names the same term with a leading run of the
+        coordinates at that position."""
+        mine, theirs = self._parsed, other._parsed
+        if mine.occurrence is not None:
+            return mine == theirs
+        *leading, last = mine.terms
+        if len(theirs.terms) <= len(leading):
+            return False
+        head = theirs.terms[len(leading)]
+        return (
+            theirs.terms[: len(leading)] == tuple(leading)
+            and replace(head, coordinates=head.coordinates[: last.arity]) == last
+        )
 
     def display(self) -> str:
         """The human/projection form — a Mermaid label, an SVG ``data-node-id``, a log line.

@@ -10,6 +10,7 @@ namespace separates two generations of one run, is
 import uuid
 
 import pytest
+from _authority import ruled
 from _durable import absurd, pg_ready
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
@@ -55,11 +56,14 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
 
     generation_0 = spawn(0)
     app.work_batch()  # runs, then parks on `name`
-    app.emit_event(name, {"add_dollars": 25.0})  # the human answers GENERATION 0
+    # The engine refuses a bare payload on an authority name, so the human answers with a
+    # ruling, and the raw await below receives its stored shape.
+    stored = {"__ruling__": {"by": "test", "answer": {"add_dollars": 25.0}}}
+    app.emit_event(name, ruled({"add_dollars": 25.0}))  # the human answers GENERATION 0
     result_0 = app.run_until_result(generation_0)
     assert result_0 is not None
     assert result_0.state == "completed"
-    assert result_0.result["granted"] == {"add_dollars": 25.0}
+    assert result_0.result["granted"] == stored
 
     # Generation 1: a DIFFERENT task, composing the same name — nobody grants it anything.
     result_1 = app.run_until_result(spawn(1), max_batches=3)
@@ -70,7 +74,7 @@ def test_absurd_events_alias_across_tasks_sharing_a_composed_name():
         "Absurd's own event semantics: if it now parks, the ENGINE changed, not the "
         "substrate. Do not invert; see the docstring."
     )
-    assert result_1.result["granted"] == {"add_dollars": 25.0}, (
+    assert result_1.result["granted"] == stored, (
         "generation 1 received generation 0's payload — one authorization, two generations, "
         "no record that they shared it"
     )

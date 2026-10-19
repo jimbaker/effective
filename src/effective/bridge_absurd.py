@@ -33,6 +33,7 @@ from effective.checkpoints import (
 )
 from effective.fork import MeteredEntry
 from effective.keys import Key
+from effective.ruling import answer_of
 
 # Queries use PEP 750 t-strings (psycopg ≥ 3.3): `{table:i}` is a safely-quoted identifier,
 # `{value}` a bound parameter — the whole query structure stays inline (no split format()+params).
@@ -79,7 +80,7 @@ def export_measured_prefix(
         # the grammar narrows to the run.
         if not names_a_budget_grant(key := Key.parse(name), run_id):
             continue
-        grants[key] = Grant.model_validate(payload or {})
+        grants[key] = Grant.model_validate(answer_of(name, payload) or {})
     return entries, grants
 
 

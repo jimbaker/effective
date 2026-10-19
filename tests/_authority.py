@@ -31,6 +31,7 @@ and these minters are how a test says "I am the substrate" honestly.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from effective.budget import (
     GENERATION_GRANT,
@@ -44,6 +45,7 @@ from effective.govern import GateState
 from effective.keys import Key, Segment, compose_key
 from effective.ops import CHAIN_GENERATION, Step
 from effective.permission import APPROVE, approval_name
+from effective.ruling import AuthorityRuling
 
 type Minter = Callable[..., Key]
 """`(run_id, *, generation) -> Key`, spelled loosely because the rows are lambdas.
@@ -53,6 +55,11 @@ census doing its job rather than a courtesy. A `respawn` chain keeps `run_id` st
 generations while each generation is a fresh task, so a namespace whose minter cannot ACCEPT a
 generation is a namespace whose name cannot separate one. Making the parameter mandatory means
 the signature surfaces that hole for every minter."""
+
+
+def ruled(answer: Any, by: str = "test") -> AuthorityRuling:
+    """`answer` as a principal's ruling, the only payload an authority park accepts."""
+    return AuthorityRuling(Segment(by), answer)
 
 
 def production_approve_park(run_id: str, *, generation: int) -> Key:

@@ -12,6 +12,7 @@ from typing import Any, assert_never
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import Fault, FaultPosition, at_every_op
 
 from effective.api import Effect, call_tool, qualified_event_name
@@ -203,7 +204,7 @@ def answer_depth_grants(backend, task_id, run_id: str, grants: list[dict[str, An
         snap = backend.run_until_result(task_id)
         assert snap.state not in ("completed", "failed"), (depth, snap)
         name = depth_grant_name(run_id, generation=0, depth=depth)
-        backend.emit_event(task_id, name.stored(), grant)
+        backend.emit_event(task_id, name.stored(), ruled(grant))
         depth += grant.get("add_depth", 0)
     return backend.run_until_result(task_id)
 
@@ -285,7 +286,7 @@ def test_a_nested_machine_granting_under_its_own_id_is_woken_by_its_frames(backe
     for park in parks:
         snap = backend.run_until_result(task_id)
         assert snap.state not in ("completed", "failed"), (park, snap)
-        backend.emit_event(task_id, park.stored(), {"stop": True})
+        backend.emit_event(task_id, park.stored(), ruled({"stop": True}))
     snap = backend.run_until_result(task_id)
     assert snap.state == "completed", snap
     assert snap.result == 2

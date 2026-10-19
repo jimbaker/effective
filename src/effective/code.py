@@ -57,6 +57,7 @@ from effective.domain import CallTool
 from effective.govern import routable
 from effective.handlers.base import canonical_form
 from effective.keys import (
+    RECORDED,
     Index,
     Key,
     Name,
@@ -205,7 +206,7 @@ def _validate[T](schema: type[T], raw: Any) -> T:
     # None must say so in its schema.
     if schema is object:
         return cast(T, raw)
-    return _adapter(schema).validate_python(raw)
+    return _adapter(schema).validate_python(raw, context={RECORDED: True})
 
 
 def _frame_and_source(code: str | PinnedScript) -> tuple[Key | None, str]:
@@ -213,7 +214,7 @@ def _frame_and_source(code: str | PinnedScript) -> tuple[Key | None, str]:
 
     These were two conditional expressions asking the same question of the same value, on
     consecutive lines. That is how a pair drifts: nothing makes them answer together, and the
-    shape is the one the `compose_key` pilot found four times over in a single function.
+    shape can recur four times over in a single function.
     Returning the pair makes the coupling structural."""
     # lint: totality(total) — `str` returns directly. `PinnedScript` is a non-runtime-checkable
     # protocol and cannot be named as a class pattern, so the wildcard is the declared second arm.

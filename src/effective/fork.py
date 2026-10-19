@@ -87,6 +87,7 @@ from effective.ops import (
     Step,
     WorkflowOp,
 )
+from effective.ruling import HYPOTHETICAL, ruled_answer
 from effective.sandbox import (
     DryRun,
     ForkedSleep,
@@ -1203,7 +1204,10 @@ def run_fork_as_task(
         answer_at = fork_event_name(child_run_id, fork_point)
         ctx.step(
             compose_key(t"emit;{answer_at:domain=address}"),
-            lambda: deliver(ctx, answer_at, delta) or {"emitted": True},
+            lambda: (
+                deliver(ctx, answer_at, ruled_answer(answer_at, delta, by=HYPOTHETICAL))
+                or {"emitted": True}
+            ),
         )
     try:
         result = run_fork(

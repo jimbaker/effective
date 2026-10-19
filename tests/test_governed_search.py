@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import Fault, private
 from _shapes import Outcome, governing, run
 
@@ -80,7 +81,9 @@ def test_a_trip_answered_stop_at_a_park_keeps_the_rounds_before_it(backend):
     backend.register(name, search, domain(), Fault(), (), budget_limit=0.0015, on_exhaust="park")
     task = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
     assert backend.run_until_result(task).state != "completed"
-    backend.emit_event(task, budget_grant_name(run_id, 0).stored(), Grant(stop=True).model_dump())
+    backend.emit_event(
+        task, budget_grant_name(run_id, 0).stored(), ruled(Grant(stop=True).model_dump())
+    )
     snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert snap.result == len(LEAVES)
@@ -129,7 +132,7 @@ def test_parks_inside_the_branches_answered_stop_keep_the_rounds_before_them(bac
         ),
     )
     task = outcome.task
-    stop = Resolution(answers={"budget": Grant(stop=True).model_dump()}).model_dump()
+    stop = ruled(Resolution(answers={"budget": Grant(stop=True).model_dump()}).model_dump())
     answered = 0
     while (snap := backend.run_until_result(task)).state not in ("completed", "failed"):
         (parked,) = backend.parked(task)

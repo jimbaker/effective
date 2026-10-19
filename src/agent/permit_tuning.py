@@ -20,6 +20,7 @@ Imports `effective` and `agent` only.
 from collections.abc import Sequence
 
 from pydantic import BaseModel
+from pydantic_core import to_json
 
 from agent.bench_sweep import bench_sweep
 from effective.api import Effect, step
@@ -67,7 +68,7 @@ def make_policy_scorer(corpus: Sequence[Labeled]):
     the candidate policy carried in the op args. Deterministic, so replay reuses the result."""
 
     def run(op: CallTool) -> Measurement:
-        return score_policy(corpus, PermitPolicy.model_validate(op.args["policy"]))
+        return score_policy(corpus, PermitPolicy.model_validate_json(to_json(op.args["policy"])))
 
     return run
 
@@ -85,7 +86,7 @@ def tune_permits(
             CallTool(
                 name="score_policy",
                 result_schema=Measurement,
-                args={"policy": policy.model_dump()},
+                args={"policy": policy.model_dump(mode="json")},
             ),
         )
         return m

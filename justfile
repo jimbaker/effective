@@ -50,6 +50,7 @@ lint:
     uv run python -m effective.lint --deps src/effective src/agent src/tui src/examples
     uv run python -m effective.lint --ledger-reads src/effective src/agent scripts
     uv run python -m effective.lint --sql-templates src/effective src/agent src/examples
+    uv run python -m effective.lint --ruling-mint src scripts examples
     uv run python -m effective.lint --totality src
     uv run python -m effective.lint --ordered-arms src
     uv run python -m effective.lint --totality-escapes src

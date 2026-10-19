@@ -1,7 +1,7 @@
 """`govern`: the control gate, a council of policies with a single merged park.
 
 A governed boundary is an op-seam layer that asks every **policy** the same question about one
-op (*may this proceed?*) and combines their answers into **one** ruling:
+op (*may this proceed?*) and combines their answers into **one** verdict:
 
     Proceed | Park | Refuse
 
@@ -12,7 +12,7 @@ that shared control shape, built once, so a new gate (a quota, a rate limit) is 
 **Policies are peers.** Any `Refuse` refuses; else any `Park` parks; else
 `Proceed`. There is no `rules → escalate → human` fall-through here: tiered escalation inside a
 single policy is that policy's own business (`permission.as_policy`), and `govern` adds no
-escalation axis of its own. The ruling is therefore **order-free** (a permutation of the policies
+escalation axis of its own. The verdict is therefore **order-free** (a permutation of the policies
 gives the same constructor), while the fused payload keeps argument order so it stays
 deterministic and legible.
 
@@ -50,6 +50,7 @@ from effective.cost import Usage
 from effective.keys import AuthorityTag, Index, Key, Name, Run, Scope, Segment, compose_key
 from effective.layers import OpLayer, current_meter, layer_run_state, op_layer
 from effective.ops import AwaitEvent, WorkflowOp, current_generation, leaves
+from effective.ruling import ruling_schema, split_ruling
 
 GOVERN = AuthorityTag("govern", scope=Scope.SETTLEMENT)
 """A gate's merged-park namespace — its names ARE the authorization.
@@ -86,12 +87,12 @@ class Ask:
 
 @dataclass(frozen=True)
 class Proceed:
-    """Ruling: no policy objects — forward the op."""
+    """Verdict: no policy objects, so the op is forwarded."""
 
 
 @dataclass(frozen=True)
 class Park:
-    """Ruling: at least one policy wants to suspend. `asks` is the FUSED question — one entry per
+    """Verdict: at least one policy wants to suspend. `asks` is the FUSED question: one entry per
     parking policy, in policy order. The gate parks once, whatever the length."""
 
     asks: tuple[Ask, ...]
@@ -112,8 +113,8 @@ class Exceeded:
 
 @dataclass(frozen=True)
 class Refuse:
-    """Ruling: at least one policy blocks. Every refusing policy's reason is kept — a gate that
-    refuses for three reasons should say three, not the first one it happened to ask.
+    """Verdict: at least one policy blocks. Every refusing policy's reason is kept, so a gate that
+    refuses for three reasons says all three.
     `exceeded` is set when a budget policy refused."""
 
     reasons: tuple[str, ...]
@@ -128,13 +129,13 @@ type Verdict = Proceed | Park | Refuse
 
 
 def park(*asks: Ask) -> Park:
-    """A policy's park ruling (`park(Ask(...))`) — the lowercase verb builds the value, the
+    """A policy's park verdict (`park(Ask(...))`): the lowercase verb builds the value, and the
     capitalized noun is the type, as with `rules`/`human` in `permission`."""
     return Park(asks)
 
 
 def refuse(*reasons: str) -> Refuse:
-    """A policy's refusal ruling."""
+    """A policy's refusal verdict."""
     return Refuse(reasons)
 
 
@@ -193,7 +194,7 @@ def routable(refusal: Refused) -> Refused:
 
 
 def refused(op: WorkflowOp, refusal: Refuse) -> Refused:
-    """The exception a `Refuse` ruling raises at `op`."""
+    """The exception a `Refuse` verdict raises at `op`."""
     match refusal.exceeded:
         case None:
             return Refused(op, refusal.reason)
@@ -268,6 +269,11 @@ class GateState:
     """The task's replay-derived spend when the gate decides, or `None` when the run does not
     meter. It is the root handler's, read from a gather branch too, and it counts a branch's spend
     once the gather's barrier folds it."""
+    rulers: Mapping[str, tuple[Segment | None, ...]] = field(default_factory=dict)
+    """Who ruled each of `answers`, position for position; `None` where an answer came with no
+    ruling, which only an in-process recorder delivers."""
+    run_rulers: Mapping[str, tuple[Segment | None, ...]] = field(default_factory=dict)
+    """Who ruled each of `run_answers`, position for position."""
 
     @property
     def park_name(self) -> Key:
@@ -307,15 +313,36 @@ class GateState:
             t"occurrence={occurrence:default=0};{op_key:domain=identity}"
         )
 
-    def absorb(self, resolution: Resolution) -> GateState:
-        """Fold one delivered resolution in: each policy's answer is APPENDED to its history and
-        the pass advances (so the next park gets a fresh, deterministic name)."""
-        merged = dict(self.answers)
-        merged_run = dict(self.run_answers)
+    def absorb(self, resolution: Resolution, *, by: Segment | None = None) -> GateState:
+        """Fold one resolution, ruled `by`, in: each policy's answer is APPENDED to its history
+        with `by` beside it, and the pass advances (so the next park gets a fresh, deterministic
+        name). An answer held with no ruler beside it reads as unruled, so the two stay
+        position for position."""
+        merged, merged_run = dict(self.answers), dict(self.run_answers)
+        rulers, run_rulers = dict(self.rulers), dict(self.run_rulers)
         for policy_name, answer in resolution.answers.items():
             merged[policy_name] = (*merged.get(policy_name, ()), answer)
             merged_run[policy_name] = (*merged_run.get(policy_name, ()), answer)
-        return replace(self, pass_n=self.pass_n + 1, answers=merged, run_answers=merged_run)
+            rulers[policy_name] = _aligned(rulers.get(policy_name, ()), merged[policy_name], by)
+            run_rulers[policy_name] = _aligned(
+                run_rulers.get(policy_name, ()), merged_run[policy_name], by
+            )
+        return replace(
+            self,
+            pass_n=self.pass_n + 1,
+            answers=merged,
+            run_answers=merged_run,
+            rulers=rulers,
+            run_rulers=run_rulers,
+        )
+
+
+def _aligned(
+    rulers: tuple[Segment | None, ...], answers: tuple[Any, ...], by: Segment | None
+) -> tuple[Segment | None, ...]:
+    """`rulers` with `by` for the newest of `answers`, each earlier answer without a ruler
+    read as unruled."""
+    return (*(None,) * (len(answers) - 1 - len(rulers)), *rulers, by)
 
 
 @runtime_checkable
@@ -341,9 +368,9 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     """The council's conjunctive fold — `govern`'s decision, as ONE explicit transition.
 
     Any `Refuse` refuses (carrying every refusing reason); else any `Park` parks (fusing every
-    ask into one park); else `Proceed`. Total and deterministic. The RULING is order-free — a
-    permutation of the input gives the same constructor — while the fused payload preserves
-    argument order, so a merged prompt reads in the order the gate was assembled.
+    ask into one park); else `Proceed`. Total and deterministic. The VERDICT is order-free: a
+    permutation of the input gives the same constructor. The fused payload preserves argument
+    order, so a merged prompt reads in the order the gate was assembled.
 
     Refuse dominating Park is the fail-closed direction: a gate never asks a human to grant past
     a policy that has already said no.
@@ -351,11 +378,11 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     Classification is by CONSTRUCTOR, not by payload: a `Refuse(())` that forgot to say why still
     refuses. Deciding on "did any reason string arrive?" would let an under-populated verdict fall
     through to a park — a guard must not be silenceable by an empty tuple."""
-    rulings = list(verdicts)
-    if refusals := [v for v in rulings if isinstance(v, Refuse)]:
+    collected = list(verdicts)
+    if refusals := [v for v in collected if isinstance(v, Refuse)]:
         exceeded = next((v.exceeded for v in refusals if v.exceeded is not None), None)
         return Refuse(tuple(chain.from_iterable(v.reasons for v in refusals)), exceeded)
-    if parks := [v for v in rulings if isinstance(v, Park)]:
+    if parks := [v for v in collected if isinstance(v, Park)]:
         return Park(tuple(chain.from_iterable(v.asks for v in parks)))
     return Proceed()
 
@@ -379,7 +406,7 @@ def govern(
 ) -> OpLayer[Any]:
     """Compose `policies` into one op-seam gate.
 
-    Per op: ask every policy, combine, then realize the ruling: forward, raise `Refused`, or park
+    Per op: ask every policy, combine, then realize the verdict: forward, raise `Refused`, or park
     ONCE on `state.park_name` and re-ask with the answer folded in. `gate` names the boundary (it
     is part of the park name, so it must be stable across replay); `run_id` scopes the event.
 
@@ -423,6 +450,7 @@ def govern(
         scope = layer_run_state(compose_key(t"{GATE_STATE}:{Segment(gate)},{Segment(run_id)}"))
         occurrences: dict[str, int] = scope.setdefault("occurrences", {})
         run_answers: dict[str, tuple[Any, ...]] = scope.setdefault("answers", {})
+        run_rulers: dict[str, tuple[Segment | None, ...]] = scope.setdefault("rulers", {})
         occurrences[key] = occurrences.get(key, -1) + 1
         state = GateState(
             run_id=run_id,
@@ -433,6 +461,7 @@ def govern(
             generation=current_generation(),
             occurrence=occurrences[key],
             run_answers=dict(run_answers),
+            run_rulers=dict(run_rulers),
             meter=current_meter(),
         )
         for _ in range(max_passes + 1):
@@ -444,9 +473,11 @@ def govern(
                 case Park() as parked:
                     if announce is not None:
                         yield announce(parked, state)
-                    answer = yield AwaitEvent(name=state.park_name, schema=schema)
-                    state = state.absorb(as_resolution(answer))
+                    asked = AwaitEvent(name=state.park_name, schema=ruling_schema(schema))
+                    by, answer = split_ruling((yield asked))
+                    state = state.absorb(as_resolution(answer), by=by)
                     run_answers.update(state.run_answers)  # accrual outlives this op
+                    run_rulers.update(state.run_rulers)
                 case unreachable:
                     assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
         raise Refused(op, f"gate {gate!r} did not settle after {max_passes} resolutions")
@@ -500,6 +531,22 @@ def answers_for(state: GateState, policy_name: str) -> Sequence[Any]:
     return state.answers.get(policy_name, ())
 
 
+def rulers_for(state: GateState, policy_name: str) -> Sequence[Segment | None]:
+    """Who ruled each of `answers_for(state, policy_name)`, position for position."""
+    return state.rulers.get(policy_name, ())
+
+
+def ruler_of(state: GateState, policy_name: str) -> Segment | None:
+    """Who ruled this policy's latest answer **for the op being gated**. `None` before this op's
+    first answer, and for an answer delivered without a ruling. An answer from an earlier op
+    has its ruler in `run_rulers_for`."""
+    match rulers_for(state, policy_name):
+        case [*_, latest]:
+            return latest
+        case _:
+            return None
+
+
 def run_answers_for(state: GateState, policy_name: str) -> Sequence[Any]:
     """This policy's answers **across the whole run**, oldest first — an ACCUMULATOR view.
 
@@ -514,6 +561,11 @@ def run_answers_for(state: GateState, policy_name: str) -> Sequence[Any]:
     accumulation).
     """
     return state.run_answers.get(policy_name, ())
+
+
+def run_rulers_for(state: GateState, policy_name: str) -> Sequence[Segment | None]:
+    """Who ruled each of `run_answers_for(state, policy_name)`, position for position."""
+    return state.run_rulers.get(policy_name, ())
 
 
 __all__ = [
@@ -534,4 +586,7 @@ __all__ = [
     "park",
     "policies_of",
     "refuse",
+    "ruler_of",
+    "rulers_for",
+    "run_rulers_for",
 ]

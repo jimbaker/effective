@@ -24,6 +24,7 @@ from uuid import uuid4
 
 import pytest
 from _approval_domain import CannedDomain, process_refund
+from _authority import ruled
 from _durable import (
     DSN,
     absurd,
@@ -114,12 +115,14 @@ def test_two_policies_park_ONCE_and_one_resolution_settles_both():
         # ONE event name, carrying BOTH answers — the whole point of merged-park.
         app.emit_event(
             _park_name(mid).stored(),
-            Resolution(
-                answers={
-                    "budget": Grant(add_dollars=0.010).model_dump(),
-                    "permission": {"decision": "approve"},
-                }
-            ).model_dump(),
+            ruled(
+                Resolution(
+                    answers={
+                        "budget": Grant(add_dollars=0.010).model_dump(),
+                        "permission": {"decision": "approve"},
+                    }
+                ).model_dump()
+            ),
         )
         snap = app.run_until_result(spawned)
 
@@ -152,12 +155,14 @@ def test_a_merged_park_survives_worker_death_and_resumes_on_a_fresh_worker():
     _register(app2, name, mid, domain2, _policies(mid))
     app2.emit_event(
         _park_name(mid).stored(),
-        Resolution(
-            answers={
-                "budget": Grant(add_dollars=0.010).model_dump(),
-                "permission": {"decision": "approve"},
-            }
-        ).model_dump(),
+        ruled(
+            Resolution(
+                answers={
+                    "budget": Grant(add_dollars=0.010).model_dump(),
+                    "permission": {"decision": "approve"},
+                }
+            ).model_dump()
+        ),
     )
     snap = app2.run_until_result(task_id)
     try:

@@ -10,9 +10,13 @@ fails closed via the default, and first-decisive-wins short-circuits.
 from dataclasses import dataclass
 
 import pytest
+from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import to_jsonable_python
 
 from effective import RecordingHandler, call_tool
-from effective.keys import Key
+from effective.api import await_event
+from effective.handlers.durable import DurableHandler
+from effective.keys import RECORDED, Key
 from effective.layers import drive_through
 from effective.ops import AppendLedgerRow, LedgerRow, Step
 from effective.permission import Allow, Deny, Escalate, Refused, cascade, human, rules
@@ -119,31 +123,63 @@ from effective.permission import PermitPolicy, allow_table  # noqa: E402
 
 
 def test_allow_table_settles_a_matching_op():
-    permit = allow_table(
-        PermitPolicy(allow=(op_key(OP).stored(),))
-    )  # exact key is a prefix of itself
+    permit = allow_table(PermitPolicy(allow=(op_key(OP),)))  # a key covers itself
     assert drive_through([cascade([permit])], OP, _base) == "forwarded"
 
 
 def test_allow_table_escalates_a_miss_and_fails_closed_alone():
     # a miss -> Escalate; with no next tier the cascade default (FAIL_CLOSED) denies
-    miss = allow_table(PermitPolicy(allow=("no-such-prefix",)))
+    miss = allow_table(PermitPolicy(allow=(Key.parse("no-such-prefix"),)))
     with pytest.raises(Refused):
         drive_through([cascade([miss])], OP, _base)
 
 
 def test_allow_table_escalates_to_the_next_tier():
     # allow_table never denies: a miss defers to the following tier (here, an Allow rule)
-    miss = allow_table(PermitPolicy(allow=("no-such-prefix",)))
+    miss = allow_table(PermitPolicy(allow=(Key.parse("no-such-prefix"),)))
     gate = cascade([miss, rules(lambda op: Allow())])
     assert drive_through([gate], OP, _base) == "forwarded"
 
 
 def test_permit_policy_is_data_that_round_trips():
-    p = PermitPolicy(allow=("tool:read_file", "tool:run_tests"))
-    assert PermitPolicy.model_validate(p.model_dump()) == p  # checkpointable -> improve-able
+    p = PermitPolicy(allow=(Key.parse("tool:read_file"), Key.parse("tool:run_tests")))
+    recorded = to_jsonable_python(p)  # the checkpoint's shape
+    assert TypeAdapter(PermitPolicy).validate_python(recorded, context={RECORDED: True}) == p
+    assert PermitPolicy.model_validate_json(p.model_dump_json()) == p
     assert p.permits(Key.parse("tool:read_file,0"))
     assert not p.permits(Key.parse("tool:apply_edit,0"))
+
+
+def test_a_writer_handing_a_policy_text_is_refused():
+    with pytest.raises(ValidationError, match="takes a Key, not str"):
+        PermitPolicy.model_validate({"allow": ["tool:read_file"]})
+
+
+class _Go(BaseModel):
+    ok: bool
+
+
+def test_a_policy_a_step_returned_survives_its_checkpoint_and_a_resume(sqlite_app):
+    app = sqlite_app(":memory:")
+
+    def wf():
+        policy = yield from call_tool("pick_policy", {}, PermitPolicy)
+        yield from await_event("go:x", _Go)
+        return [entry.stored() for entry in policy.allow]
+
+    class _Picks:
+        def run(self, op):
+            return PermitPolicy(allow=(Key.parse("tool:read_file"),))
+
+    @app.register_task("pick")
+    def task(params, ctx):
+        return DurableHandler(ctx, _Picks()).run(wf)
+
+    task_id = app.spawn("pick", {"run_id": "r1"})
+    assert app.run_until_result(task_id).state == "waiting"
+    app.emit_event("go:x", {"ok": True})
+    snap = app.run_until_result(task_id)
+    assert (snap.state, snap.result) == ("completed", ["tool:read_file"])
 
 
 # --- the ADVERSARY: can one approval authorize a second, larger charge? --------------------
@@ -264,3 +300,26 @@ def test_a_gated_sleep_parks_on_its_position_not_on_its_type_name():
     # Off the walk there is no coordinate to read, so this refuses rather than inventing one.
     with pytest.raises(ValueError, match="no standalone op key"):
         placed_key(SleepUntil(when=wake))
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize(
+    ("entry", "key", "covered"),
+    [
+        ("tool:a", "tool:a", True),
+        ("tool:a", "tool:a,1", True),
+        ("tool:a", "tool:ab", False),
+        ("step;tool:charge", "step;tool:charge-card", False),
+        ("tool", "tool:anything", True),
+        ("tool", "toolbox:x", False),
+        ("tool:a", "tool:a#2", True),
+        ("tool:a#2", "tool:a", False),
+    ],
+)
+def test_an_allow_entry_permits_only_the_keys_it_covers(entry, key, covered):
+    assert PermitPolicy(allow=(Key.parse(entry),)).permits(Key.parse(key)) is covered
+
+
+def test_an_allow_entry_outside_the_key_grammar_is_refused():
+    with pytest.raises(ValidationError, match="no coordinates"):
+        PermitPolicy.model_validate_json('{"allow": ["tool:"]}')

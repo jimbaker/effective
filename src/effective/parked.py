@@ -33,15 +33,18 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from effective.engines.sqlite import SqliteApp, connect
 from effective.graphview import PARKED
-from effective.keys import Key, compose_key
+from effective.keys import Key, Segment, compose_key
+from effective.ruling import ruled_answer
 
 if TYPE_CHECKING:
     import psycopg
+
+    from effective.engines.absurd import AbsurdEngine
 
 # ── the shared record ────────────────────────────────────────────────────────
 
@@ -264,7 +267,7 @@ def read_absurd_parked(
 # `ParkedTask.state` calls the thing parity exists to prevent.
 
 
-def answer(app: SqliteApp | BroadcastEmitter, park: ParkedTask, payload: Any) -> str:
+def answer(app: SqliteApp | AbsurdEngine, park: ParkedTask, payload: Any, *, by: Segment) -> str:
     """Settle the park you READ, and return the name answered.
 
     Takes a `ParkedTask` rather than a name: the registration is already in hand, so nothing has
@@ -284,26 +287,13 @@ def answer(app: SqliteApp | BroadcastEmitter, park: ParkedTask, payload: Any) ->
     `govern:` and `approve:` is for, and why two hand-spawned tasks sharing a `run_id` alias by
     design (`tests/test_grant_aliasing.py`).
 
+    **An authority park takes a ruling.** A park in a reserved namespace receives the payload as
+    an `AuthorityRuling` by `by`; any other park receives the payload as it stands.
+
     Marks the task claimable; it does NOT resume it. A drain must still run, because nothing polls.
     """
-    app.emit_event(park.wake_event, payload)
+    app.emit_event(park.wake_event, ruled_answer(park.wake_event, payload, by=by))
     return park.wake_event
-
-
-class BroadcastEmitter(Protocol):
-    """The one method `answer` needs on a broadcast engine: `Absurd.emit_event`, structurally.
-
-    Declared BELOW its use in `answer`'s annotation, which is ordinary in 3.14: PEP 649 defers
-    annotation evaluation, so the two read in the order they matter rather than in dependency
-    order.
-
-    A Protocol rather than the concrete class, for the reason `TaskContext` is one. No SQLite-side
-    module imports `absurd_sdk`; the Absurd worker imports it, and `engines/absurd.py` imports it
-    lazily at each SDK touch, with a recorded reason in the lazy-import allowlist. Stating the
-    shape we depend on is a smaller claim than importing a vendor and is checkable at the call site
-    either way."""
-
-    def emit_event(self, event_name: str, payload: Any = ..., /) -> None: ...
 
 
 __all__ = [

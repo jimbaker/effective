@@ -25,7 +25,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
-from _authority import AUTHORITY_PARKS, approve_park
+from _authority import AUTHORITY_PARKS, approve_park, ruled
 from _durable import DSN, absurd, pg_ready
 
 from effective.api import await_event, call_tool, gather, sleep_until
@@ -371,7 +371,7 @@ def test_the_pending_node_on_a_real_absurd_park_and_what_resume_does(conn):
     assert fold_cycles(graph, drop=(Index,)).nodes[-1].state == PARKED
 
     # --- the resume transition ---------------------------------------------------------------
-    app.emit_event(event.stored(), {"ok": True})  # Absurd events are by name
+    app.emit_event(event.stored(), ruled({"ok": True}))  # Absurd events are by name
     snap = app.run_until_result(task_id)
     assert snap is not None
     assert snap.state == "completed", snap

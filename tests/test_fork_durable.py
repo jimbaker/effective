@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from _authority import ruled
 from pydantic import BaseModel
 
 from effective.api import append_ledger, ask_llm, await_event, call_tool, gather, sleep_until
@@ -813,7 +814,7 @@ def _budgeted_base(app, db: str) -> UUID:
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
     assert _waiting_on(app, base_id) == GRANT_NAME.stored()  # the mid-prefix park, for real
-    app.emit_event(GRANT_NAME.stored(), {"add_dollars": 0.01})
+    app.emit_event(GRANT_NAME.stored(), ruled({"add_dollars": 0.01}))
     app.run_until_result(base_id)
     assert _waiting_on(app, base_id) == REVIEW.stored()  # now at the fork point
     app.emit_event(REVIEW.stored(), {"decision": "reject"})
@@ -907,7 +908,7 @@ def test_a_transplanted_prefix_grant_lets_the_fork_through(tmp_path, sqlite_app)
 
     fork_id = _budgeted_fork(app, seed, transplanted=frozenset({GRANT_NAME}))
     # the transplant: the base's answer, re-emitted under the child's renamed event
-    app.emit_event(_forked("r-fork", GRANT_NAME), {"add_dollars": 0.01})
+    app.emit_event(_forked("r-fork", GRANT_NAME), ruled({"add_dollars": 0.01}))
 
     app.run_until_result(fork_id)
     assert _waiting_on(app, fork_id) == _forked("r-fork", REVIEW)  # reached the fork point

@@ -16,6 +16,7 @@ from effective.bridge_absurd import end_attempts_at_this_run
 from effective.engines.absurd import sdk_claim
 from effective.handlers.base import failing_leaf
 from effective.ops import DONE_EVENT_PARAM, noted
+from effective.ruling import wire_payload
 from effective.spawning import failure_answer
 
 
@@ -37,7 +38,8 @@ def fail_terminally(ctx: Any, execute: Callable[[], Any]) -> Any:
             claim.conn, claim.task_id, claim.run_id, queue=claim.queue
         )
         if latest and DONE_EVENT_PARAM in claim.params:
-            ctx.emit_event(claim.params[DONE_EVENT_PARAM], failure_answer(leaf, raised))
+            done = claim.params[DONE_EVENT_PARAM]
+            ctx.emit_event(done, wire_payload(done, failure_answer(leaf, raised)))
         raise noted(leaf, raised) from None
 
 

@@ -442,6 +442,10 @@ Matched as a parsed leading TAG, not as a `"approve:"`-style prefix, so there is
 stale. The arm tags are not here at all: an author's `ledger;x` composes `step;ledger;x` and is
 disjoint by construction rather than by enumeration."""
 
+QUALIFYING_TAGS = ("fork", "hyp")
+"""The reserved tags declared `Scope.QUALIFIED`: each frames the name after it and names no park.
+Every other reserved tag names a park that a principal answers."""
+
 
 def carries_structure(name: str) -> bool:
     """Does an author-supplied name denote a TERM SEQUENCE (`True`), or one atom (`False`)?

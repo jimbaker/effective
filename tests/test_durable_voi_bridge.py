@@ -8,6 +8,7 @@ trip parity, where `test_measured_fork.py` drives `measured_drive` against itsel
 """
 
 import pytest
+from _authority import ruled
 
 from effective.api import step
 from effective.bridge_sqlite import export_measured_prefix, park_name
@@ -144,7 +145,7 @@ def test_P3b_calltool_interleave_parity_the_F2_regression(app):
 def test_P3c_trip_n_ge_1_needs_the_grant_export(app):
     tid = _spawn(app, "r", _five_asks, limit=0.0015)
     assert _run_state(app, tid) == "waiting"  # parks at :0
-    app.emit_event("budget-grant:r,0", {"add_dollars": 0.001})  # grant 0
+    app.emit_event("budget-grant:r,0", ruled({"add_dollars": 0.001}))  # grant 0
     assert _run_state(app, tid) == "waiting"  # runs ask2, re-parks at :1
 
     entries, grants = export_measured_prefix(app.conn, tid, "r")

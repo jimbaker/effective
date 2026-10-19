@@ -26,6 +26,7 @@ from effective.checkpoints import is_step_checkpoint, positional_key
 from effective.fork import MeteredEntry
 from effective.keys import Key
 from effective.parked import read_sqlite_parked_conn
+from effective.ruling import answer_of
 from effective.sql import bind
 
 
@@ -77,7 +78,9 @@ def export_measured_prefix(
         # `Key.parse` — the read side, the same cast the Absurd twin makes for the same reason.
         if not names_a_budget_grant(key := Key.parse(name), run_id):
             continue
-        grants[key] = Grant.model_validate(json.loads(payload) if payload is not None else {})
+        grants[key] = Grant.model_validate(
+            answer_of(name, json.loads(payload)) if payload is not None else {}
+        )
     return entries, grants
 
 

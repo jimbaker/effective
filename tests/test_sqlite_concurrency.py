@@ -11,12 +11,10 @@ check, and they have one: drop the `with self._guard:` from `SqliteTaskContext.p
 is the property to preserve when editing them — a test here that survives the unguarded read
 is measuring nothing.
 
-**Cover the DRIVER, not just the ctx, and that omission cost a blocker.** The first version of
-this module drove `peek_event` and `step` only, because the fix had been scoped by reading
-`SqliteTaskContext`. `SqliteApp.spawn` was equally unguarded and equally reachable from a branch
-thread (`effective.interpreters.tools.spawn_tool` is wired to the app's own connection), so the
-instrument could not see the second half of its own bug; a fresh-eyes review found it. Ask of
-anything added here **"what else can a branch thread reach?"**
+**Cover the DRIVER as well as the ctx.** `SqliteApp.spawn` is as reachable from a branch
+thread as `peek_event` and `step` (`effective.interpreters.tools.spawn_tool` is wired to the
+app's own connection), so a module that drove the ctx alone would miss half the shared
+connection. Ask of anything added here **"what else can a branch thread reach?"**
 
 Why the seam and not the workflow: the conformance-lane version of this flake reproduced at a
 few percent, drifting with machine state (see `scripts/sqlite_flake_sweep.py`). Driving the
@@ -30,6 +28,7 @@ from collections import Counter
 from uuid import UUID, uuid4
 
 import pytest
+from _authority import ruled
 
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.keys import Key
@@ -44,6 +43,9 @@ ITERATIONS = 2000
 
 APPROVED = Key.parse("gather:0,0;approve:r-1")
 UNAPPROVED = Key.parse("gather:0,1;approve:r-1")
+APPROVAL = ruled({"decision": "approve"})
+STORED_APPROVAL = {"__ruling__": {"by": "test", "answer": {"decision": "approve"}}}
+"""What a ctx's peek reads back for `APPROVAL`: the ruling in its stored shape."""
 
 
 def _ctx(sqlite_app) -> tuple[SqliteApp, SqliteTaskContext]:
@@ -83,7 +85,7 @@ def test_a_concurrent_peek_never_answers_with_another_branchs_row(sqlite_app):
     forged approval or a spurious denial.
     """
     _app, ctx = _ctx(sqlite_app)
-    ctx.emit_event(APPROVED.stored(), {"decision": "approve"})
+    ctx.emit_event(APPROVED.stored(), APPROVAL)
 
     errors: Counter[str] = Counter()
     wrong: Counter[str] = Counter()
@@ -104,7 +106,7 @@ def test_a_concurrent_peek_never_answers_with_another_branchs_row(sqlite_app):
             ctx.step(Key.parse(f"gather:0,2;step;tool:t{i}"), lambda i=i: {"i": i})
 
     _run_concurrently(
-        lambda: peek(APPROVED, True, {"decision": "approve"}),
+        lambda: peek(APPROVED, True, STORED_APPROVAL),
         lambda: peek(UNAPPROVED, False, None),
         commit_checkpoints,
     )
@@ -147,8 +149,8 @@ def test_a_lockless_context_still_serves_the_single_threaded_case(sqlite_app):
     ctx = SqliteTaskContext(app.conn, uuid4(), None)
 
     assert ctx.concurrent_safe is False
-    ctx.emit_event(APPROVED.stored(), {"decision": "approve"})
-    assert ctx.peek_event(APPROVED) == (True, {"decision": "approve"})
+    ctx.emit_event(APPROVED.stored(), APPROVAL)
+    assert ctx.peek_event(APPROVED) == (True, STORED_APPROVAL)
     assert ctx.peek_event(UNAPPROVED) == (False, None)
     assert ctx.step(Key.parse("step;tool:t"), lambda: {"i": 1}) == {"i": 1}
 

@@ -210,7 +210,13 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # stores, captures and shares, `_use` and `_accumulates` a write's target and a call's callee
     # and arguments, `_path_of` an attribute or item path's parts, `_reads_the_world` and
     # `_world_names` a call and an import, and `_schema_violations` a factory named by name.
-    assert reached == 292, f"the corpus this fix was measured on held 292; found {reached}"
+    # `ruling.answer_of` reads the answer a stored ruling carries, and `split_ruling` and
+    # `load_answer` who ruled and what.
+    # `handlers.base.effect_of` reads what each op would do: a step's domain op, a row, an
+    # artifact's value and type, a wake time, and a respawn's task, run, generation, state and
+    # params;
+    # `_domain_effect` a tool's name and args and a model request's parts.
+    assert reached == 314, f"the corpus this fix was measured on held 314; found {reached}"
 
     seen = {
         (str(p), line + 1)

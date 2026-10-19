@@ -132,6 +132,7 @@ from effective.handlers.base import (
     transient_errors,
 )
 from effective.keys import (
+    RECORDED,
     AuthorityTag,
     FramePosition,
     Index,
@@ -194,6 +195,7 @@ from effective.ops import (
     refuse_respawn_under_a_rename,
 )
 from effective.permission import Refused
+from effective.ruling import load_answer
 from effective.steering import SteeringCtx
 from effective.telemetry import Sink, event
 from effective.viewing import ViewingCtx
@@ -1199,11 +1201,18 @@ def _load(schema: type, raw: Any) -> Any:
     if schema is object or raw is None:
         return raw
     try:
-        return _adapter(schema).validate_python(raw)
+        return _adapter(schema).validate_python(raw, context={RECORDED: True})
     except ValidationError as rejected:
         raise RecordedValueRejected(f"a recorded value does not fit its schema: {rejected}") from (
             rejected
         )
+
+
+def _load_answer(name: Key, schema: type, raw: Any) -> Any:
+    """An event's payload as its await receives it, checked against `schema`: a ruling delivers
+    its answer, or the whole ruling to a schema that asks for one, and an authority park answered
+    by anything else ends the run."""
+    return load_answer(name, schema, raw, _load)
 
 
 def _load_step(schema: type, raw: Any) -> Any:
@@ -1959,10 +1968,10 @@ class DurableHandler:
                     enqueued = _dump(self.domain.run(request))
                     return {**enqueued, "done_event": done_event.stored()}
 
-                # The checkpoint holds the done event as text, and this is where it is read back.
+                # The checkpoint holds the done event as text, which `_load` parses back to a key.
                 match self._checkpoint(op, slot, spawn):
-                    case {"done_event": str(stored), **enqueued}:
-                        return _load(schema, {**enqueued, "done_event": Key.parse(stored)})
+                    case {"done_event": str()} as recorded:
+                        return _load(schema, recorded)
                     case {"refused": True, "reason": str(reason)}:
                         raise Refused(op, reason)
                     case recorded:
@@ -2075,7 +2084,7 @@ class DurableHandler:
                     # `_root_ctx`, not `self.ctx`: a measured grant is a RUN-level question, so
                     # its park takes no scope frames — see `_root_ctx` for the discriminator and
                     # why an `approve:` park is the opposite case.
-                    grants[name] = _load(Grant, self._await_absolute(name))
+                    grants[name] = _load_answer(name, Grant, self._await_absolute(name))
                 case unreachable:
                     assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
@@ -2094,7 +2103,7 @@ class DurableHandler:
         inner: Any = self.ctx
         found, payload = inner.peek_event(name)
         if found:
-            return _load(schema, payload)
+            return _load_answer(name, schema, payload)
         # Carry the scope frames: `_join` re-adds only the branch coordinate.
         raise _GatherPark(event=name.prefixed(self._scope_path))
 
@@ -2162,14 +2171,14 @@ class DurableHandler:
                 # The reroute is a NAMING decision — who completes the name — and the clock is a
                 # different axis, so an absolute wait keeps its deadline and waits at the root.
                 return self._await_bounded(op, name, op.deadline, self._root_ctx)
-            return _load(schema, self._await_absolute(name))
+            return _load_answer(name, schema, self._await_absolute(name))
         if op.deadline is not None:
             if self._in_gather:
                 refuse_a_bounded_wait_in_a_branch(op, getattr(self.ctx, "prefix", ""))
             return self._await_bounded(op, name, op.deadline, self.ctx)
         if self._in_gather:
             return self._branch_await(name, schema)
-        return _load(schema, self.ctx.await_event(name))
+        return _load_answer(name, schema, self.ctx.await_event(name))
 
     def _await_bounded(
         self, op: AwaitEvent[Any], name: Key, deadline: datetime, at: Any
@@ -2196,7 +2205,7 @@ class DurableHandler:
         outcome: WaitOutcome[Any] = inner.await_until(name, deadline.timestamp(), self._slot(op))
         match outcome:
             case Arrived(payload=payload):
-                return Arrived(_load(op.schema, payload))
+                return Arrived(_load_answer(name, op.schema, payload))
             case Expired():
                 return Expired()
             case unreachable:

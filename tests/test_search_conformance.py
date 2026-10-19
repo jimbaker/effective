@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from _authority import ruled
 from _conformance import Fault, FaultPosition
 from _shapes import Shape, agree, governing, run, run_shape, sweep
 
@@ -477,7 +478,7 @@ def test_a_round_grant_park_extends_the_search_until_a_stop(backend):
         (parked,) = backend.parked(task)
         wake = round_grant_name(run_id, generation=0, rounds=rounds).stored()
         assert str(parked.wake_event) == wake
-        backend.emit_event(task, parked.wake_event, grant.model_dump())
+        backend.emit_event(task, parked.wake_event, ruled(grant.model_dump()))
     snap = backend.run_until_result(task)
 
     assert snap.state == "completed", snap
