@@ -270,7 +270,7 @@ protocol.
 
 | control | what holds | pin |
 |---|---|---|
-| crash-safe settlement | a settlement posts one memo and applies it and the payment once, at every crash point, on both engines and both ERPs, so the invoice owes the gap less the credit | `tests/test_agent_firm_saga.py`, `tests/test_agent_firm_resolve.py` |
+| crash-safe settlement | a settlement posts one memo and applies it and the payment once, so the invoice owes the gap less the credit: at every durable crash point on both engines against the scripted ERP; through adapter faults around each write and in an unbroken durable run against live Odoo | `tests/test_agent_firm_saga.py`, `tests/test_agent_firm_resolve.py`, `tests/test_agent_firm_erp_port.py` |
 | evidence doesn't move money | the firm's committed effects do not read the notes and tickets, over generated variants of them | `tests/test_agent_firm_resolve.py` |
 | a review acts through its answer | a critique changes the run at its own result and nowhere else; an uncited one posts nothing | `tests/test_agent_firm_resolve.py` |
 | deduction review | a critic finds the contract's cap on the customer's deduction, and its run replays without asking a model | `tests/test_agent_firm_engage.py` pins the program, and replays the three haiku runs `src/examples/agent_firm/deduction_review.py` banked from a live model, each finding the cap |

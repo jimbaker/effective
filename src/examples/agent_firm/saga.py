@@ -9,7 +9,7 @@
 Every compensable leg precedes the pivot, and every retriable leg follows it; `saga` refuses any
 other order before anything runs. An undo is itself a step with its own key, so a crash between an
 effect and its undo replays to both, once each. A rejected undo fails the run, since nothing
-compensates a compensation, and leaves the landed legs it had not reached for a person to undo.
+compensates a compensation, and leaves the landed legs it had not reached as they stand.
 """
 
 from collections.abc import Callable, Mapping, Sequence

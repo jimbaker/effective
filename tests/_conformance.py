@@ -1760,6 +1760,9 @@ class SqliteBackend:
     def raw_update_kind(self, event_id: str) -> None:
         self.app.conn.execute("UPDATE ledger SET kind='y' WHERE event_id=?", (event_id,))
 
+    def raw_delete(self, event_id: str) -> None:
+        self.app.conn.execute("DELETE FROM ledger WHERE event_id=?", (event_id,))
+
     def unclaimed_ctx(self, task_id: UUID) -> Any:
         """A WRITABLE ctx bound to a task this process never claimed — the exposed surface.
 
@@ -2079,6 +2082,12 @@ class AbsurdBackend:
 
         with psycopg.connect(PG_DSN, autocommit=True) as conn:
             conn.execute(t"UPDATE ledger SET kind='y' WHERE event_id={event_id}")
+
+    def raw_delete(self, event_id: str) -> None:
+        import psycopg
+
+        with psycopg.connect(PG_DSN, autocommit=True) as conn:
+            conn.execute(t"DELETE FROM ledger WHERE event_id={event_id}")
 
     def register_body(self, name: str, body, *, deployed: bool = False) -> None:
         """A task whose body is `(params, ctx)`, over the concurrent-gather ctx `register` uses,

@@ -83,6 +83,9 @@ DESIGNATED: frozenset[tuple[str, str]] = frozenset(
         # is decided above these, which only spell the marker
         ("src/effective/telemetry.py", "_captured"),
         ("src/effective/telemetry.py", "_media_marker"),
+        # the effect's spelling of a schema class: the bytes `repr` gives the same class inside a
+        # generic, so a bare class and a generic of it spell it alike
+        ("src/effective/handlers/base.py", "_spelled"),
     }
 )
 """Render backends: a processor's last step, where the structure is already decided and is

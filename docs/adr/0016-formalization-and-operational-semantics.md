@@ -249,16 +249,26 @@ deterministic normal form.
 
 Recording $\rightarrow_R$, Replay $\rightarrow_P$, Absurd $\rightarrow_A$ and SQLite
 $\rightarrow_S$ implement the same abstract $\rightarrow$. With $L(\kappa)$ the observable (the
-committed ledger), correctness is a trace-equivalence metatheorem:
+committed ledger), correctness is a trace-equivalence metatheorem up to a quotient:
 
 $$
 \forall W.\quad
-L\big(\,\Downarrow_{R}(W)\,\big) = L\big(\,\Downarrow_{P}(W)\,\big)
-                                 = L\big(\,\Downarrow_{A}(W)\,\big)
-                                 = L\big(\,\Downarrow_{S}(W)\,\big),
+L\big(\,\Downarrow_{R}(W)\,\big) \approx L\big(\,\Downarrow_{P}(W)\,\big)
+                                 \approx L\big(\,\Downarrow_{A}(W)\,\big)
+                                 \approx L\big(\,\Downarrow_{S}(W)\,\big),
 $$
 
-where $\Downarrow_H$ is the terminal observable under handler $H$. The runtime `ReplayMismatch`
+where $\Downarrow_H$ is the terminal observable under handler $H$, and $\approx$ holds when two
+ledgers have the same multiset of rows and each orders the rows $W$ requires to be ordered. The
+requirement is a partial order:
+
+| composition in $W$ | the order it requires |
+|---|---|
+| sequence, $a$ then $b$ | $a$'s rows before $b$'s |
+| a gather's branches | none between siblings; each branch keeps its own order, recursively |
+
+Under a gather on a concurrent engine the commit order across branches is a race, so a ledger is
+one linearization of that partial order, and two handlers may commit different ones. The runtime `ReplayMismatch`
 check is this theorem for one trace; the cross-backend conformance suite ([`tests/_conformance.py`](../../tests/_conformance.py))
 checks it by example on two engines; a model checker discharges it over a reachable space.
 

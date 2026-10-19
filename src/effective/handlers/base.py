@@ -296,10 +296,19 @@ def _holds_a_key(value: Any) -> bool:
 
 
 def _spelled(schema: Any) -> str:
-    """A schema as its source spells it, so `list[int]` and `list[str]` read apart."""
+    """A schema as `repr` spells a class inside a generic.
+
+    | schema                 | spelled            |
+    |------------------------|--------------------|
+    | a builtin class        | `dict`             |
+    | another class          | `one.Answer`       |
+    | a generic or a union   | `list[one.Answer]` |
+    """
     match schema:
-        case type() if not get_args(schema):
+        case type() if schema.__module__ == "builtins" and not get_args(schema):
             return schema.__qualname__
+        case type() if not get_args(schema):
+            return f"{schema.__module__}.{schema.__qualname__}"
         case _:
             return repr(schema)
 

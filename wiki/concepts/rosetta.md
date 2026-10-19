@@ -40,8 +40,9 @@ environment. `uv run --project examples/rosetta python examples/rosetta/compare.
 The unit each framework records explains most of the table: an op in Effective, a node or a task in
 LangGraph, a model request or a tool call in Pydantic AI, and nothing in DSPy. A side effect in its
 own recorded unit runs once in each of them, so the third row measures what an author writes inside
-one unit. The crash is an exception raised in the process, and Pydantic AI's Temporal, DBOS and
-Absurd engines need a service and were not run.
+one unit. The crash is an exception raised in the process. Pydantic AI 2.54.0 with DBOS 3.2.0 on
+local SQLite, run apart from this table, survived a `SIGKILL` without repeating the search or the
+model request; its Temporal and Absurd engines need a service and were not run.
 
 ## DSPy
 

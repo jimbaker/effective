@@ -3,15 +3,16 @@
 import subprocess
 import sys
 from datetime import UTC, datetime
+from types import GenericAlias
 from typing import Any, get_args, get_origin
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from effective import call_tool, permission
 from effective.domain import AskLLM, CallTool, Judge
 from effective.govern import GateState, govern
-from effective.handlers.base import UnshowableEffect, effect_of
+from effective.handlers.base import UnshowableEffect, effect_digest, effect_of
 from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 from effective.ops import (
@@ -151,12 +152,33 @@ def test_an_op_with_no_canonical_effect_is_refused_by_name():
         effect_of(Step("t", CallTool("t", dict, {"handle": object()})))
 
 
-def test_a_response_schema_reads_as_its_source_spells_it():
-    def schema_of(schema: Any) -> str:
-        return effect_of(Step("ask", AskLLM([], schema)))["schema"]
+def _ask(schema: Any) -> Step:
+    return Step("ask", AskLLM([], schema))
 
-    assert schema_of(list[int]) != schema_of(list[str])
-    assert schema_of(dict) == "dict"
+
+ONE = create_model("Answer", __module__="one", value=(int, ...))
+TWO = create_model("Answer", __module__="two", value=(str, ...))
+
+SPELLED = {
+    "a builtin class": (dict, "dict"),
+    "a class": (ONE, "one.Answer"),
+    "a generic": (GenericAlias(list, (ONE,)), "list[one.Answer]"),
+}
+"""A response schema, and how its op's effect spells it."""
+
+
+@pytest.mark.parametrize(("schema", "spelled"), SPELLED.values(), ids=SPELLED.keys())
+def test_an_effect_spells_a_response_schema_as_repr_does_inside_a_generic(schema, spelled):
+    assert effect_of(_ask(schema))["schema"] == spelled
+
+
+@pytest.mark.parametrize(
+    ("first", "second"), [(list[int], list[str]), (ONE, TWO)], ids=["generics", "two-modules"]
+)
+def test_two_schemas_that_parse_apart_bind_apart(first, second):
+    """A ruling bound to the ask for one names another effect than an ask for the other, so it
+    cannot settle it. `ONE` and `TWO` share a name and differ in module and field type."""
+    assert effect_digest(_ask(first)) != effect_digest(_ask(second))
 
 
 class _Frozen(BaseModel):

@@ -1186,7 +1186,7 @@ def test_durable_gather_runs_tools_concurrently(backend):
 
 def test_ledger_is_append_only(backend):
     """The two-bookkeepers invariant on both engines: idempotent by event_id, and the
-    DB blocks UPDATE (RAISE(ABORT) on SQLite, the plpgsql trigger on Postgres)."""
+    DB blocks UPDATE and DELETE (RAISE(ABORT) on SQLite, the plpgsql trigger on Postgres)."""
     run_id = f"r-{uuid4().hex[:8]}"
     event_id = compose_key(t"x:{Run(run_id)}").stored()
     backend.ledger_append(run_id, event_id, "k")
@@ -1194,6 +1194,9 @@ def test_ledger_is_append_only(backend):
     assert backend.ledger_kinds(run_id) == ["k"]
     with pytest.raises(backend.mutation_error):
         backend.raw_update_kind(event_id)
+    with pytest.raises(backend.mutation_error):
+        backend.raw_delete(event_id)
+    assert backend.ledger_kinds(run_id) == ["k"]
 
 
 # ── run_code: the segment machine on the durable path ──────────────

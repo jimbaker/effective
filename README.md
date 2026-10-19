@@ -9,7 +9,7 @@ the same generator is recorded in a test, replayed from that recording, or run d
 crashed worker resumes by replaying the steps it already took.
 
 The prompts are **t-strings**. A prompt is a `t"..."` whose interpolations are typed channels:
-inputs render in, and outputs declare the schema the response must parse into. A `Gated` output runs a
+inputs render in, and outputs declare the schema the response is parsed into. A `Gated` output runs a
 check over the response, which is a guardrail on the data boundary.
 
 ## An agent loop is a state machine
