@@ -22,7 +22,7 @@ from test_fork_sweep import new_message_id
 
 from effective.api import append_ledger, ask_llm, await_event, sleep_until
 from effective.bridge_absurd import read_absurd_task
-from effective.cost import MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage, marked
 from effective.fork import fork_seed, run_fork
 from effective.handlers.durable import DurableHandler, fork_event_name
 from effective.keys import Key, Segment, compose_key
@@ -127,6 +127,7 @@ def test_an_elapsed_prefix_sleep_replays_on_the_DEPLOYED_engine(conn):
                 forked_at_event=f"extracted:{message_id}",
                 fork_point=compose_key(t"review:{Segment(message_id)}"),
                 delta={"decision": "approve"},
+                base_params=marked({}),
             )
         finally:
             hyp.close()
@@ -216,6 +217,7 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
                 forked_at_event=f"extracted:{message_id}",
                 fork_point=compose_key(t"review:{Segment(message_id)}"),
                 delta={"decision": "approve"},
+                base_params=marked({}),
             )
         finally:
             hyp.close()

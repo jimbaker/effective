@@ -2,7 +2,7 @@
 
 - **Date:** 2026-07-17
 - **Status:** Accepted. Built: the `{result, usage}` checkpoint envelope behind the spawn-param
-  contract (`CONTRACT_PARAM`, `Contract` in [`src/effective/cost.py`](../../src/effective/cost.py)), the handler-owned
+  recorded format (`FORMAT_PARAM`, `RecordedFormat` in [`src/effective/cost.py`](../../src/effective/cost.py)), the handler-owned
   replay-derived meter with per-branch subtotals folded at the gather barrier, the sequential
   trip and park (`MeasuredBudget`, `enforce_measured` in [`src/effective/budget.py`](../../src/effective/budget.py), driven by
   `DurableHandler._enforce_measured`), the accrual carry across a `respawn`, conformance on both
@@ -55,24 +55,70 @@ axis is where spend becomes recorded state, and the two stores play different ro
 Writing the provider's usage to both the checkpoint and the ledger is a dual write of one fact,
 which the bookkeeper invariant permits; computing either book from the other stays forbidden.
 
-### 2. The envelope, and a versioned replay contract
+### 2. The envelope, and a versioned recorded format
 
 Accrual moves above the checkpoint boundary by enveloping the model call's `Step` checkpoint value
 as `{result, usage}` on the same row. A separate `usage:{op_key}` row is broken by a crash between
 the two commits: the first step replays without its thunk, and the usage lived only in the provider
 response.
 
-This is a checkpoint-schema change, and sniffing for a dict with `result` and `usage` keys would
-collide with a legitimate workflow result of that shape. So the replay contract is versioned
-explicitly and fixed at spawn, in the task's immutable spawn params: `CONTRACT_PARAM` is a reserved
-key, read by `Contract.from_params`. Absent means `Contract.V0` (bare results); `"v1"` means the
-enveloped path. A spawn param is present or absent from birth, immutable and replayed identically,
-so a v1-capable worker resuming a task spawned before the envelope existed reads no param, stays
-on v0, and keeps writing bare rows; no task ever holds mixed rows. A start-of-task checkpoint
-marker would not work: it is absent for a fresh v1 task and for a resumed v0 task alike until the
-first step writes it. Pinned by `test_measured_v0_task_stays_v0_under_a_v1_capable_worker`
-([`tests/test_conformance.py`](../../tests/test_conformance.py)) and `test_v1_handler_on_a_v0_checkpoint_fails_loud_not_silent`
-([`tests/test_budget_accrual.py`](../../tests/test_budget_accrual.py)).
+Sniffing for a dict with `result` and `usage` keys would collide with a legitimate workflow result
+of that shape, so the record says what it is: a run's `RecordedFormat` is fixed at spawn in its
+immutable params under the reserved key `__recorded_format__` (`FORMAT_PARAM`), read by
+`RecordedFormat.from_params`. The engines' `spawn` marks every run it spawns with the newest
+format, whatever mark its params carry, and the handler marks a spawned child and a respawned
+generation the same way, so a workflow cannot set it. A producer that spawns through
+the raw Absurd SDK marks its params with `marked`. A spawn param is present or absent from birth,
+immutable and replayed identically, so no task holds rows of two formats.
+
+`RecordedFormat.V1`, stored as `"v1"`, is the one format: a model call records `{result, usage}`,
+decided by the op class alone (an unmetered domain records zero usage), and every answer to an
+authority park is a ruling naming who ruled. With one format nothing chooses between formats, so
+a run's format is read for one purpose: to refuse a record this release cannot read. A handler
+reads it from its task context, and no argument names it:
+
+| the context | answers |
+|---|---|
+| an engine's, on either Absurd adapter or SQLite | the format its task's stored params mark, read from the store, never from the dict the task body was handed |
+| an in-process one | the newest: a log held in memory does not outlive the release that wrote it |
+| a gather or race branch's | its parent's context's, which reads the store once per run |
+
+Params without the key, which every run recorded before the format carries, or marking a format
+this release does not read, are `UnreadFormat` where the handler is built, unretried; so is a
+context that does not answer the format at all. A fork reads its base's params and its own task's
+record, and refuses either before it delivers its delta or writes its genesis; a measured export
+refuses an unread base before it exports a step. A fork's delta is the one answer at its fork
+point: the genesis records it, and the fork delivers it to the child itself.
+
+A second format has three things to decide that one format does not: whether a child or a fork
+records under its parent's format, how each decoder chooses by format, and what format an
+exported step carries.
+
+A refused run has no workflow effect: no step, event, ledger row, domain call, seal, or answer from
+the workflow. The engine keeps its own books: the worker's claim on the task, and the `Failed`
+answer it sends a parent's done event.
+
+The format grows additively, and a change that cannot is a new format:
+
+| rule | what holds |
+|---|---|
+| a record says what it is | the format is in the params under a key no earlier release wrote; a stored answer is a ruling around its payload |
+| a reader is strict about shape | it refuses a shape it does not know by name (`UnreadFormat`, `RecordedValueRejected`, `UnruledAnswer`), and ignores an optional key it does not know |
+| a change is additive | a new field is optional, and its default reads an older record as it was written; an optional field of a ruling goes inside `__ruling__` |
+| a change that is not additive is a new format | the release refuses a run under the older format by name before its walk, and an operator finishes such runs under the release that spawned them |
+| each sync proves it | runs banked under the released tree resume under the new one as they did there, or fail by name where the format broke (`tests/fixtures/public-runs/`) |
+
+Pinned by `test_a_bare_model_checkpoint_fails_loud_not_silent`
+([`tests/test_budget_accrual.py`](../../tests/test_budget_accrual.py)),
+`test_a_child_records_under_the_newest_format`
+([`tests/test_spawn_identity.py`](../../tests/test_spawn_identity.py)),
+`test_a_banked_run_resumes_as_it_did_there_or_fails_by_name`
+([`tests/test_public_runs_resume.py`](../../tests/test_public_runs_resume.py)) and
+`test_an_engine_marks_every_run_it_spawns` and `test_this_release_records_one_format`
+([`tests/test_contract_at_spawn.py`](../../tests/test_contract_at_spawn.py)), and
+`test_every_build_of_a_handler_refuses_a_run_whose_record_marks_no_format` and
+`test_a_fork_of_a_run_whose_format_is_unread_is_refused_before_it_writes`
+([`tests/test_the_record_decides_the_format.py`](../../tests/test_the_record_decides_the_format.py)).
 
 ### 3. A handler-owned, replay-derived meter
 
@@ -192,17 +238,16 @@ below them; a Lean boundary law waits until the crossing has more than one site.
 | (iii), ledger-projected spend, as the in-task trip source | bounding the fold to the replayed prefix reinvents the checkpoint stream's op-position correlation, plus a query per gate |
 | a lock on a shared meter | fixes the total, not the trip; formally non-confluent even when atomic |
 | usage in a separate `usage:{op_key}` checkpoint row | broken by a crash between the result commit and the usage commit |
-| a start-of-task checkpoint marker for the contract version | cannot distinguish a fresh v1 task from a resumed v0 task at the first step |
+| a start-of-task checkpoint marker for the contract version | absent from a fresh task until its first step writes it, so the first step cannot read it |
+| a reader per earlier format, kept until its runs retire | nobody can observe when an adopter's runs retire, so the readers never leave |
 
 ## Consequences
 
 - The measured park and ask is available: a run that crosses its ceiling waits durably for a
   grant, resumable from recorded state, with per-seam spend attribution, and a fork can re-run the
   free recorded prefix and probe both grant arms before the grant is decided.
-- Enabling it is a spawn-side choice: spawn with `Contract.V1.spawn_params(params)`, build the
-  handler with `Contract.from_params(params)`, and pass a `MeasuredBudget`. Tasks spawned without
-  the param replay on v0, and a budget handed to their handler is never checked: the handler
-  cannot tell such a task from one in flight before the envelope existed.
+- Enabling it is a handler-side choice: build the handler with `RecordedFormat.from_params(params)`
+  and pass a `MeasuredBudget`.
 - `CallTool` cost is out of scope until a tool reports usage; only model-call `Usage` is
   enveloped. Tokens ride the same `Usage`.
 - Bench cost totals read the handler-owned meter or a ledger projection; `MeteredInterpreter.meter`

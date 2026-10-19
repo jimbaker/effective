@@ -23,7 +23,9 @@ from uuid import UUID
 
 from effective.budget import BUDGET_GRANT_LIKE, Grant, names_a_budget_grant
 from effective.checkpoints import is_step_checkpoint, positional_key
-from effective.fork import MeteredEntry
+from effective.cost import refuse_an_unread_format
+from effective.engines.sqlite import read_sqlite_params
+from effective.fork import Bridged
 from effective.keys import Key
 from effective.parked import read_sqlite_parked_conn
 from effective.ruling import answer_of
@@ -32,14 +34,15 @@ from effective.sql import bind
 
 def export_measured_prefix(
     conn: sqlite3.Connection, task_id: str, run_id: str
-) -> tuple[list[MeteredEntry], dict[Key, Grant]]:
+) -> tuple[list[Bridged], dict[Key, Grant]]:
     """Export a parked measured run's prefix + delivered grants. Feed both to `measured_drive`.
 
     Exports the RAW checkpoint state per step, JSON-deserialized from storage and still
     envelope-encoded; `measured_drive` decodes it AT THE OP (`decode_checkpoint`). The bridge
     never sniffs a `{result, usage}` shape: that placement is the driver's, which holds the op
     class, and a content sniff here would disagree with it."""
-    entries: list[MeteredEntry] = []
+    refuse_an_unread_format(read_sqlite_params(conn, UUID(str(task_id))))
+    entries: list[Bridged] = []
     seen: dict[Key, int] = {}
     rows = conn.execute(
         *bind(t"SELECT name, state FROM checkpoints WHERE task_id={task_id} ORDER BY rowid")
@@ -57,7 +60,7 @@ def export_measured_prefix(
         # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
         # rather than being admitted as a Step.
         key = positional_key(name, seen)  # name#2 → name, refusing a gap
-        entries.append(MeteredEntry(key=key, state=raw))
+        entries.append(Bridged(key=key, state=raw))
 
     grants: dict[Key, Grant] = {}
     # `BUDGET_GRANT_LIKE` is in a VALUE position — it is the LIKE *pattern*, which reaches the

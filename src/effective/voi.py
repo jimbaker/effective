@@ -18,7 +18,7 @@ RE-runs from the park, with no fork promoted, so the informed policy's cost is
 `probe + grant`; hence the condition `probe ≪ grant`.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -134,7 +134,7 @@ def grant_full[T](
 
 def measured_prompt[T](
     program: Program[T],
-    prefix: list[MeteredEntry],
+    prefix: Sequence[MeteredEntry],
     budget: MeasuredBudget,
     domain: Any,
     grader: Grader,
@@ -163,8 +163,8 @@ def measured_prompt[T](
         recorded=prefix,
     )
     # The current best is the decoded last prefix entry. Read it from the driver's trace (which
-    # decodes each checkpoint AT THE OP), never off the raw bridged prefix entry: a bridged
-    # `MeteredEntry` carries un-decoded `state` and no `.result`. The driver replays
+    # decodes each checkpoint AT THE OP), never off the raw prefix entry: a `Bridged` entry
+    # carries un-decoded `state` and no `.result`. The driver replays
     # the whole prefix before the probe, so `trace[n-1]` is that entry, decoded.
     current = tail.trace[n - 1].result if n else None
     probed = tail.trace[-1].result if tail.trace else current

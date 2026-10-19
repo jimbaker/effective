@@ -15,6 +15,7 @@ import pytest
 from _approval_domain import CannedDomain, process_refund, review_name
 from psycopg.types.json import Json
 
+from effective.cost import marked
 from effective.handlers.durable import DurableHandler
 from effective.ledger import PostgresLedger
 
@@ -73,7 +74,7 @@ def test_auto_path_commits_and_writes_ledger():
         finally:
             ledger.close()
 
-    spawned = app.spawn("it-refund-auto", {"request_id": mid})
+    spawned = app.spawn("it-refund-auto", marked({"request_id": mid}))
     snap = _run_until_result(app, spawned["task_id"])
 
     assert snap is not None
@@ -100,7 +101,7 @@ def test_hitl_suspends_then_resumes_and_ledger_records_review():
         finally:
             ledger.close()
 
-    spawned = app.spawn("it-refund-hitl", {"request_id": mid})
+    spawned = app.spawn("it-refund-hitl", marked({"request_id": mid}))
 
     app.work_batch()  # runs to the review await and suspends
     mid_snap = app.fetch_task_result(spawned["task_id"])

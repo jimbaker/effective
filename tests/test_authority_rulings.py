@@ -149,7 +149,7 @@ def test_a_ruling_settles_the_grant_at_every_await_site(backend, site):
 
 def test_a_task_cannot_emit_an_unruled_answer_on_an_authority_name(sqlite_app):
     app = sqlite_app(":memory:")
-    ctx = SqliteTaskContext(app.conn, uuid4(), None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None)
     name = depth_grant_name("r1", generation=0, depth=1).stored()
 
     with pytest.raises(UnruledAnswer):

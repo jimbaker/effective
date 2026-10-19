@@ -17,8 +17,8 @@ examples.agent_firm sla-cap` runs one case; the module docstring has the others.
 | explain | an ask through a `Gated` channel: a credit within the shortfall, on the case's documents and the firm's rules | `engage.py`, `resolve.py` |
 | engage | an outside critic's review of the proposal, re-asked with the reason when a citation is not held: a `fixpoint` under `repair:engage`, one level per ask | `engage.py`, `critic.py` |
 | claim | the round, read and then claimed on the ledger by the settlement's claimant, a name minted from its task and placement that replay reads back: a settlement whose round another holds ends `Superseded` whatever its credit, before it asks when the read finds the holder and at the claim when the holder claimed after the read | `ar.py` |
-| authorize | a `govern` policy parking the claim on any case that breaks an invariant, a $0 credit included, until a principal other than its proposer approves it; the ask names the credit and the deduction, so a credit nobody approved holds no round; each ask and each ruling is a ledger row, paired by pass | `resolve.py` |
-| act | `saga`: compensable legs, at most one pivot, then retriable legs, checked at construction; a retriable leg is a `fixpoint` under `retry:{leg}`, one level per attempt, which a grantor may extend | `saga.py`, `ar.py` |
+| authorize | a `govern` policy parking the claim on any case that breaks an invariant, a $0 credit included, until a principal other than its proposer approves it; the ask names the credit and the deduction and binds the digest of the terms row, which carries the digest of the settlement's plan, and the ruling names that digest, so a credit nobody approved holds no round and a plan nobody approved runs no leg (ADR-0028); each ask and each ruling is a ledger row, paired by pass | `resolve.py` |
+| act | `saga` over the legs built from the settlement's plan, which is data: compensable legs, at most one pivot, then retriable legs, checked at construction; a retriable leg is a `fixpoint` under `retry:{leg}`, one level per attempt, which a grantor may extend | `saga.py`, `ar.py` |
 | end | how the settlement ended, appended to the ledger once its saga does: completed, compensated or unlanded; a round after the first opens only once the round before it ended compensated | `ar.py` |
 | settle the books | `firm`: a `fixpoint` under `firm:{books}` whose passes advance every open case concurrently by what the ledger says of its rounds, until two passes leave the same cases open in the same rounds for the same reasons, none of them one a pass can still run (ADR-0027) | `firm.py` |
 
@@ -53,7 +53,7 @@ A case's state is the ledger's, so a pass reads it round by round and acts on wh
 A settled case can still owe, since a credit smaller than the deduction leaves the rest reminded,
 so the books cannot say whether the firm is done with a case; the statement says what the firm did
 not do, such as a second payment. A denied case stays open and the next pass asks nobody; only
-the approval's refusal of the round's claim is a denial. `Converged` with open cases is the firm's
+the approval's refusal of the round's claim, on a ruler's word, is a denial, and it names the ruler. `Converged` with open cases is the firm's
 dissent, each open case stopped, denied or in flight; the firm passes again while a case is
 unlanded or compensated, and answers `Unconverged` when the budget runs out first. Two runs of the
 firm, the first converged with every case closed, equal one in the books and in what the customer
@@ -106,7 +106,8 @@ memory.
 | evidence doesn't move money | the firm's committed effects do not read the notes and tickets, over generated variants of them | `tests/test_agent_firm_resolve.py` |
 | a review acts through its answer | a critique changes the run at its own result and nowhere else; an uncited one posts nothing | `tests/test_agent_firm_resolve.py` |
 | deduction review | a critic finds the contract's cap on the customer's deduction, and its run replays without asking a model | `tests/test_agent_firm_engage.py` pins the program, and replays the three haiku runs `src/examples/agent_firm/deduction_review.py` banked from a live model, each finding the cap |
-| segregation of duties | an approval by the proposer does not count, and the memo parks again | `tests/test_agent_firm_resolve.py` |
+| separation of duties | an approval by the proposer does not count, and the memo parks again | `tests/test_agent_firm_resolve.py` |
+| approved as asked and planned | a resume deriving other terms, or under a plan with a step added, removed or changed, is refused before any leg, and so is a continuation under a changed plan; another policy's refusal in the approval's words is no denial | `tests/test_agent_firm_binding.py` |
 | approved as proposed | the attempt resumed after the approval replays the recorded proposal and review, and asks no model | `tests/test_agent_firm_resolve.py` |
 | rejection unwinds | a rejected notice unapplies the memo and the payment, then reverses the memo, every entry posted and matched | `tests/test_agent_firm_saga.py` |
 | each apply once | an apply sent by an attempt whose lease expired lands nothing after the compensation that undid it, for the payment and the memo; each undo names the apply it releases, and an earlier round's undo leaves a match a later round holds. `formal/quint/erp_claim.qnt` checks the protocol over every interleaving of two attempts in each of two rounds; the books hold wherever a first attempt's lease expires and wherever its held op lands, on both engines | `tests/test_agent_firm_stale_apply.py`, `tests/test_agent_firm_erp_port.py` |
@@ -130,6 +131,5 @@ one key with at most three switches (`tests/_turns.py`). `just odoo-test` runs t
 | | why |
 |---|---|
 | another vendor | QuickBooks and Xero keep keys for a limited time; the port's contract assumes the ERP keeps them |
-| an approval bound to its effect and its compensation | the approval names the claim of the round; binding it to the effect and its undo as one pair is not built |
 | a gathered park waking on any branch | a gathered park exposes its lowest branch's ask alone, so the first approved proposal the run resumes owns a round; no engine wakes a gathered park on any branch |
 | the firm improving its own knowledge | an adoption is made by hand; `evolve`, and the complementarity of agent labor and organizational knowledge it would test, are proposed. The interaction test runs on scripted worlds, which tests the instrument and nothing about the firm |

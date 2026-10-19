@@ -10,6 +10,7 @@ background worker is needed.
 import os
 
 from effective.absurd_worker import absurd_worker
+from effective.cost import marked
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective")
 
@@ -23,7 +24,7 @@ def smoke_add(params, ctx):
 
 
 def main() -> None:
-    spawned = app.spawn("smoke-add", {"a": 2, "b": 40})
+    spawned = app.spawn("smoke-add", marked({"a": 2, "b": 40}))
     print("spawn result:", dict(spawned))
     task_id = spawned["task_id"]
 

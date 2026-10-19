@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 import psycopg
 
+from effective.cost import RecordedFormat
 from effective.engines.absurd import AbsurdEngine
 from effective.keys import Key
 
@@ -49,6 +50,9 @@ class Fault:
 
 class FaultCtx:
     """Proxies an Absurd ctx, crashing once before the k-th step/await/sleep."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __init__(self, ctx: Any, fault: Fault) -> None:
         self._ctx: Any = ctx  # the Absurd TaskContext — duck-typed (step/await_event/sleep_until)

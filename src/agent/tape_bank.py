@@ -71,7 +71,7 @@ whether replay rebuilds what was actually sent. It also carries the cost and dur
 `engine.run` writes it next to the db by default; banking without it discarded the only evidence
 that could retire the premise, which is what happened on the first bank."""
 
-CURRENT_ERA = "tape-4"
+CURRENT_ERA = "tape-6"
 """Tapes written by the CURRENT loop and key grammar live under this name. Eras are told apart by
 PATH rather than by sniffing the keys, for the same reason `agent.bank` gives: the point of a
 fixture is to state what it expects, and a classifier that read the keys would agree with any tape

@@ -7,6 +7,7 @@ import pytest
 from _conformance import CountingDomain, gather_await_wf
 
 from effective.api import await_event, call_tool, gather
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.handlers.base import Attempt, failing_leaf
 from effective.handlers.durable import DurableHandler, GatherWakeRace
@@ -17,6 +18,9 @@ from effective.ops import leaves
 class _StubCtx:
     """A sequential ctx whose peek never sees the event but whose re-arm await
     resolves instantly — the mid-round-emission race, made deterministic."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     concurrent_safe = False
 
@@ -65,6 +69,9 @@ class _ReparkReturnsCtx(_StubCtx):
 class _NoPeekCtx:
     """A minimal ctx WITHOUT the optional peek capability — the wall must stay
     up here, legibly (a raw SDK ctx not wrapped in ConcurrentAbsurdCtx)."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def step(self, name, thunk, /):
         return thunk()

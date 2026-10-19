@@ -441,7 +441,12 @@ which is the whole point of the cut. They live here beside `Respawn` rather than
 DONE_EVENT_PARAM = "done_event"
 """The event a spawned child answers its parent on, named by the handler that spawned it."""
 
-SUBSTRATE_PARAMS = frozenset({GENERATION_PARAM, CARRY_PARAM, ACCRUAL_PARAM, DONE_EVENT_PARAM})
+FORMAT_PARAM = "__recorded_format__"
+"""The version of a run's recorded format (`cost.RecordedFormat`), fixed at spawn."""
+
+SUBSTRATE_PARAMS = frozenset(
+    {GENERATION_PARAM, CARRY_PARAM, ACCRUAL_PARAM, DONE_EVENT_PARAM, FORMAT_PARAM}
+)
 """The spawn params only the substrate writes. A spawn a workflow yields may not carry them."""
 
 
@@ -572,6 +577,11 @@ def noted[E: BaseException](leaf: E, raised: BaseException) -> E:
         if other is not leaf:
             leaf.add_note(repr(other))
     return leaf
+
+
+class UnreadFormat(ValueError, Unretryable):
+    """A run whose params mark no recorded format this release reads. It is refused where its
+    handler is built, before the walk, so nothing it would do runs or is written."""
 
 
 class RecordedValueRejected(ValueError, Unretryable):

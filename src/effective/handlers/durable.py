@@ -64,6 +64,7 @@ from effective.budget import (
     Parked,
     enforce_measured,
     refuse_an_unmetered_budget_gate,
+    refuse_an_unmetered_measured_budget,
     refuse_two_drivers,
 )
 from effective.cancel import Cancelled, ReservedShape, dump_cancelled, load_cancelled
@@ -75,7 +76,7 @@ from effective.choice import (
     endings_from_stored,
     stored_endings,
 )
-from effective.cost import Contract, MeteredDomain, Usage
+from effective.cost import MeteredDomain, RecordedFormat, Usage, marked
 from effective.counterfactual import ForkedDeadline, ForkedPrefixAwait, ForkedSleep
 from effective.domain import (
     SPAWN_TOOL,
@@ -183,6 +184,7 @@ from effective.ops import (
     SleepUntil,
     Step,
     StoreArtifact,
+    UnreadFormat,
     UnreadLedger,
     Unretryable,
     WaitOutcome,
@@ -852,6 +854,9 @@ class _PrefixedCtx:
         inner: Any = self._ctx
         return inner.settle(name.prefixed(self._prefix), value)
 
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
+
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
 
@@ -935,6 +940,9 @@ class RenamedAwaitCtx:
     def settle(self, name: Key, value: Any, /) -> Any:
         inner: Any = self._ctx
         return inner.settle(name, value)
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
@@ -1170,6 +1178,9 @@ class SeedingCtx:
     def settle(self, name: Key, value: Any, /) -> Never:
         refuse_a_settled_checkpoint_under("SeedingCtx")
 
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
+
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._ctx, attr)
 
@@ -1275,81 +1286,50 @@ def _encode_usage_envelope(result: Any, usage: Usage) -> dict[str, Any]:
 
 
 def _decode_usage_envelope(raw: Any) -> tuple[Any, Usage]:
-    """Split a v1 checkpoint back into `(dumped_result, usage)`. The contract (not a
+    """Split a model call's checkpoint back into `(dumped_result, usage)`. The op class (not a
     content sniff) selects this path, so a workflow result that happens to be a
-    `{result, usage}`-shaped dict is unambiguous — it rides nested under `result`."""
-    return raw["result"], _load(Usage, raw["usage"])
+    `{result, usage}`-shaped dict is unambiguous: it rides nested under `result`. A checkpoint
+    of any other shape was recorded under another format, and is `RecordedValueRejected`."""
+    match raw:
+        case {"result": result, "usage": usage}:
+            return result, _load(Usage, usage)
+        case _:
+            raise RecordedValueRejected(
+                f"a model call's step records {{result, usage}}; "
+                f"this one is a bare {type(raw).__name__}"
+            )
 
 
-def metered_call(inner: DomainOp[Any], contract: Contract, domain: object) -> bool:
-    """Whether an op is metered: a v1 model call (`AskLLM` or `Judge`) whose domain reports
-    usage (`cost.MeteredDomain`).
-
-    The one placement predicate for the usage envelope and the measured trip.
-    `DurableHandler._step` and the in-process `measured_drive` and `decode_checkpoint`
-    (`effective.fork`) all ask it, so no interpreter re-derives placement from a checkpoint's
-    shape."""
+def metered_call(inner: DomainOp[Any], domain: object) -> bool:
+    """Whether an op is metered: a model call (`AskLLM` or `Judge`) whose domain reports usage
+    (`cost.MeteredDomain`). The placement predicate for the measured trip, which
+    `DurableHandler._step` and the in-process `measured_drive` both ask; the envelope's
+    placement is `enveloped`."""
     match inner:
         case AsksModel():
-            return meters(contract, domain)
+            return meters(domain)
         case CallTool():
             return False
         case unreachable:
             assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
 
-def meters(contract: Contract, domain: object) -> bool:
-    """Whether a handler accrues spend: a V1 contract over a domain that reports usage. A
-    handler that does not keeps a `Usage` that stays zero."""
-    return contract is Contract.V1 and isinstance(domain, MeteredDomain)
+def enveloped(inner: DomainOp[Any]) -> bool:
+    """Whether a step's checkpoint is `{result, usage}`: a model call. The domain that recorded
+    it does not decide, so a replay over any domain reads the record as it was written."""
+    match inner:
+        case AsksModel():
+            return True
+        case CallTool():
+            return False
+        case unreachable:
+            assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
 
-def _contract_of(contract: Contract | None, params: Mapping[str, Any] | None) -> Contract:
-    """The contract a handler runs under: the one its run's `params` carry, `contract` for a run
-    whose params carry none, or `V0`. A `contract` the params contradict is refused."""
-    match contract, params:
-        case None, None:
-            return Contract.V0
-        case None, Mapping():
-            return Contract.from_params(params)
-        case Contract(), None:
-            return contract
-        case Contract(), Mapping() if Contract.from_params(params, absent=contract) is contract:
-            return contract
-        case _:
-            raise ValueError(
-                f"the handler is given contract {contract} and params spawned under "
-                f"{Contract.from_params(params or {})}; a run's contract is the one it was "
-                "spawned with"
-            )
-
-
-def _check_domain_reachable(domain: DomainInterpreter, contract: Contract) -> None:
-    """Reject a domain the handler provably cannot drive, at ASSEMBLY rather than mid-checkpoint.
-
-    A `serve(...)` stack is **metered-only**: it implements `run_metered` and its `.run` raises.
-    That is correct for the v1 measured path, but the handler's non-metered arm (`CallTool`, and a
-    V0 `AskLLM`) calls `domain.run`. Under `Contract.V0` EVERY model call takes that arm, so the
-    combination cannot work for any workflow — a fact known at construction, and therefore one to
-    refuse at construction rather than discover after the first step has committed.
-
-    Under V1 it depends on the ops: an all-`AskLLM` workflow is fine, one `CallTool` is not, and
-    which it is cannot be known here. That case keeps the runtime fence — `_ServedDomain.run`'s
-    named "metered-only" error — which is legible but late. The check is therefore deliberately
-    partial, and says so: prove what is provable at assembly, fail legibly for the rest.
-
-    NB this is a BELT. `ty` already rejects the call statically — a `MeteredDomain` has no `run`,
-    so it is not a `DomainInterpreter` — so a ty-clean consumer cannot reach here at all. The
-    check exists for consumers outside that gate, the same rationale as `serve()`'s runtime
-    rejection of an `@op_layer` service."""
-    if getattr(domain, "metered_only", False) and contract is Contract.V0:
-        raise TypeError(
-            f"{type(domain).__name__} is metered-only (it implements run_metered; its .run "
-            f"raises), but this handler runs under contract={contract.value}, where every "
-            f"AskLLM takes the non-metered arm. Spawn with `Contract.V1.spawn_params`, or put the "
-            f"serve(...) stack inside the metered domain rather than around the handler. "
-            f"See the serve() docstring."
-        )
+def meters(domain: object) -> bool:
+    """Whether a handler accrues spend: a domain that reports usage. A handler that does not keeps
+    a `Usage` that stays zero."""
+    return isinstance(domain, MeteredDomain)
 
 
 class DurableHandler:
@@ -1360,7 +1340,6 @@ class DurableHandler:
         ledger: LedgerWriter | None = None,
         op_layers: Sequence[OpLayer[Any]] = (),
         in_gather: bool = False,
-        contract: Contract | None = None,
         budget: MeasuredBudget | None = None,
         params: Mapping[str, Any] | None = None,
         stop: Stop = NO_RACE,
@@ -1368,6 +1347,9 @@ class DurableHandler:
     ) -> None:
         # What the engine raises to end the walk at an op, which no layer sees.
         self._signals = (EngineSignal, *sdk_signals())
+        # Errors a store call raised, which the record does not hold. Set first: reading the
+        # run's format is a store call.
+        self._unreplayed = _Unreplayed()
         self.ctx: Any = _StoreCalls(_adapt_ctx(ctx), self._store_failed)
         # Where the handler's own spans go: what the run settled that its result does not carry.
         self._sink = sink
@@ -1396,14 +1378,17 @@ class DurableHandler:
         self.ledger = ledger
         self.op_layers: tuple[OpLayer[Any], ...] = tuple(op_layers)
         check_seam("op", self.op_layers)  # a domain layer here would see the live pass only
-        contract = _contract_of(contract, params)
-        _check_domain_reachable(domain, contract)  # assembly-time, not mid-checkpoint
+        # A run whose record this release cannot read is refused here, before any effect.
+        try:
+            read_format = self.ctx.recorded_format
+        except AttributeError as missing:
+            raise UnreadFormat(
+                "this handler's context does not answer its run's recorded format"
+            ) from missing
+        read_format()
         refuse_two_drivers(budget, self.op_layers)
-        refuse_an_unmetered_budget_gate(meters(contract, domain), self.op_layers)
-        # The AskLLM checkpoint schema, fixed at spawn. V0 checkpoints bare results; V1
-        # envelopes `{result, usage}` so the meter re-derives on replay. A child gather-branch
-        # handler inherits the parent's contract.
-        self._contract = contract
+        refuse_an_unmetered_budget_gate(meters(domain), self.op_layers)
+        refuse_an_unmetered_measured_budget(meters(domain), budget)
         # The handler-owned, replay-derived meter. Accrual sits ABOVE `ctx.step` (this
         # instance folds each v1 AskLLM's usage AFTER the checkpoint returns, so replay
         # re-derives it), and a gather branch's child handler keeps its OWN subtotal, folded
@@ -1481,7 +1466,6 @@ class DurableHandler:
         self._domain_refusals: list[BaseException] = []
         self._inputs: list[Any | None] = []
         self._children: list[DurableHandler] = []
-        self._unreplayed = _Unreplayed()
 
     @property
     def domain(self) -> DomainInterpreter:
@@ -1542,7 +1526,7 @@ class DurableHandler:
     def run_task[T](self, program: Callable[[], Effect[T]]) -> Finished | Continued:
         """``run`` for a task body that must tell a finished walk from a generation boundary: a
         child answers its parent only when its walk finished."""
-        spend = (lambda: self._meter) if meters(self._contract, self.domain) else None
+        spend = (lambda: self._meter) if meters(self.domain) else None
         with _walk_run(spend):
             try:
                 return self._run(program)
@@ -1604,14 +1588,16 @@ class DurableHandler:
             refuse_respawn_under_a_rename(rename, op.task)
         key = respawn_name(op.run_id, op.generation)
         params = self._spawn_budget.stamp(
-            {
-                **op.params,
-                GENERATION_PARAM: op.generation,
-                CARRY_PARAM: op.state,
-                # The substrate's own carry, added HERE rather than by the combinator: an author's
-                # carry is theirs to declare, the measured accrual is ours to keep.
-                ACCRUAL_PARAM: [self._meter.cost, self._grants, self._trips],
-            }
+            marked(
+                {
+                    **op.params,
+                    GENERATION_PARAM: op.generation,
+                    CARRY_PARAM: op.state,
+                    # The substrate's own carry, added HERE rather than by the combinator: an
+                    # author's carry is theirs to declare, the measured accrual is ours to keep.
+                    ACCRUAL_PARAM: [self._meter.cost, self._grants, self._trips],
+                }
+            )
         )
         # The PARENT's queue: a chain working off a non-default queue continues there. Read
         # privately, and defaulted for engines that have no queues (SQLite).
@@ -1986,33 +1972,36 @@ class DurableHandler:
             case unreachable:
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
+    def _call_model(self, inner: DomainOp[Any]) -> tuple[Any, Usage]:
+        """A model call's result and usage: the domain's own report, or no usage from a domain
+        that reports none."""
+        match getattr(self.domain, "run_metered", None):
+            case None:
+                return self.domain.run(inner), Usage()
+            case run_metered:
+                return run_metered(inner)
+
     def _step(self, op: Step[Any], inner: DomainOp[Any]) -> Any:
-        """Interpret a `Step` onto a durable checkpoint. The guarded arm is the v1
-        usage-in-checkpoint path; the unguarded arm covers every other case (v0, CallTool,
-        or a domain with no `run_metered`) and names the model-call marker and `CallTool`, so an
-        op outside `ModelCall` is a type error here."""
+        """Interpret a `Step` onto a durable checkpoint: a model call's is `{result, usage}`, a
+        tool call's its bare result, and an op outside `AsksModel | CallTool` is a type error."""
         schema = _schema_of(inner)
         slot = self._slot(op)
         keyed_call(op, inner)  # a key nobody but the handler may write refuses before the step
         match inner:
-            case AsksModel() if (
-                run_metered := getattr(self.domain, "run_metered", None)
-            ) is not None and metered_call(inner, self._contract, self.domain):
-                # `metered_call` is the single placement predicate (shared with `measured_drive`);
-                # the walrus binds the narrowed `run_metered` callable for the fold below.
-                # Pre-check the measured ceiling BEFORE forwarding — refuse/park the *next*
-                # AskLLM once spend crosses the limit (the old `metered` semantics, now
-                # replay-derived and above the checkpoint).
-                self._enforce_measured(op)
+            case AsksModel():
+                # Pre-check the measured ceiling BEFORE forwarding, at a metered call only:
+                # refuse or park the *next* AskLLM once spend crosses the limit, replay-derived
+                # and above the checkpoint. `metered_call` is the placement predicate
+                # `measured_drive` shares.
+                if metered_call(inner, self.domain):
+                    self._enforce_measured(op)
                 # Envelope `{result, usage}` so usage becomes recorded state. The fold is
                 # ABOVE `ctx.step` — on replay the thunk is skipped and the recorded
                 # envelope returned, so the usage re-derives here and the meter re-trips at
                 # the same op. The workflow still sees the bare result, so
                 # its byte-identity holds.
                 raw = self._checkpoint(
-                    op,
-                    slot,
-                    lambda fn=run_metered, inner=inner: _encode_usage_envelope(*fn(inner)),
+                    op, slot, lambda inner=inner: _encode_usage_envelope(*self._call_model(inner))
                 )
                 result_raw, usage = _decode_usage_envelope(raw)
                 self._meter = self._meter + usage
@@ -2044,7 +2033,7 @@ class DurableHandler:
                             "cannot be re-bound. Drain runs parked on a child-done or fork-done "
                             "join."
                         )
-            case AsksModel() | CallTool():
+            case CallTool():
                 # The key is minted on a miss, so a step served from the store asks nothing of
                 # the ctx, which may have no task.
                 writer = self._writer(slot)
@@ -2064,8 +2053,9 @@ class DurableHandler:
         answers on.
 
         Refused when its depth is spent, its args are malformed, or it names itself. Otherwise the
-        child gets no more depth than one level below this task and none of the substrate's own
-        params but the done event, and the spawn and its done event are both named by `writer`.
+        child gets no more depth than one level below this task, the newest format, and none of
+        the substrate's other params but the done event, and the spawn and its done event are both
+        named by `writer`.
         Every spawn a workflow yields passes here, from authoring sugar or a model's tool request
         alike."""
         if self._spawn_budget.depth_exhausted():
@@ -2091,7 +2081,7 @@ class DurableHandler:
             case None, Writer() as placed:
                 name, done_event = idempotency_key_for(placed), spawn_done_name(placed)
         authored = {k: v for k, v in args.params.items() if k not in SUBSTRATE_PARAMS}
-        stamped = {**authored, DONE_EVENT_PARAM: done_event.stored()}
+        stamped = marked({**authored, DONE_EVENT_PARAM: done_event.stored()})
         request = args.model_copy(
             update={
                 "params": self._spawn_budget.descend_one().stamp(stamped),
@@ -2313,14 +2303,13 @@ class DurableHandler:
     def _child(self, prefix: str, stop: Stop) -> DurableHandler:
         """A child handler for a gather or race branch over `prefix`. It carries its OWN
         per-branch meter subtotal, folded into this parent at the barrier in
-        index order, inherits the parent's contract, and stops as `stop` says."""
+        index order, and stops as `stop` says."""
         child = DurableHandler(
             _PrefixedCtx(self.ctx, prefix),
             self.domain,
             ledger=self.ledger,
             op_layers=self.op_layers,
             in_gather=True,
-            contract=self._contract,
             params=None
             if self._spawn_budget.depth is None
             else {BUDGET_DEPTH_PARAM: self._spawn_budget.depth},

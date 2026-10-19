@@ -18,12 +18,12 @@ from effective.api import (
     store_artifact,
 )
 from effective.cost import (
-    CONTRACT_PARAM,
+    FORMAT_PARAM,
     BudgetExceeded,
-    Contract,
     CostBudget,
     MeteredDomain,
     MeteredInterpreter,
+    RecordedFormat,
     Service,
     Usage,
     serve,
@@ -84,11 +84,10 @@ from effective.permission import (
 )
 
 __all__ = [
-    "CONTRACT_PARAM",
+    "FORMAT_PARAM",
     "Allow",
     "Ask",
     "BudgetExceeded",
-    "Contract",
     "CostBudget",
     "Deny",
     "DomainLayer",
@@ -108,6 +107,7 @@ __all__ = [
     "Park",
     "Policy",
     "Proceed",
+    "RecordedFormat",
     "RecordingHandler",
     "Refuse",
     "Refused",

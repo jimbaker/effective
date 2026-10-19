@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from effective.api import append_ledger, await_event, call_tool, gather
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
@@ -29,6 +30,9 @@ RESPONSES = {"tool:b0": 100, "tool:b1": 200, "tool:b2": 300}
 class _SeqCtx:
     """A non-durable, non-concurrent ctx: a step runs its thunk inline. No `concurrent_safe`
     attribute, so the durable handler runs gather branches SEQUENTIALLY (L5's sequential mode)."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
         return thunk()

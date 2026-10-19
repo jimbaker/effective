@@ -1417,40 +1417,6 @@ def check_ruling_mint_file(path: str | Path) -> list[Violation]:
     ]
 
 
-# --- the contract's choice (`--contract-at-spawn`) -----------------------------------------
-#
-# A run's `Contract` is the version of its recorded format, so it is chosen once, where the run is
-# spawned, and every reader takes it from the run's params. A `contract=` argument naming a member
-# of `Contract` chooses it again at the reader, where it can disagree with the params; a contract
-# passed through as a variable, as the fork driver does, chooses nothing. The rule reads the
-# keyword's spelling: an alias, a module-qualified member or a literal bound to a name first goes
-# unseen, and a spawn wrapper taking `contract=` (the test harness's) is a spawn, not a reader.
-
-
-def check_contract_at_spawn_file(path: str | Path) -> list[Violation]:
-    path = Path(path)
-    return [
-        Violation(
-            "contract-chosen-outside-the-spawn",
-            "a contract is chosen where the run is spawned, with "
-            "`Contract.<version>.spawn_params`, and read back with `Contract.from_params(params)`",
-            chosen.lineno,
-            ast.unparse(chosen),
-            str(path),
-        )
-        for node in ast.walk(ast.parse(path.read_text(), filename=str(path)))
-        if (chosen := _chosen_contract(node)) is not None
-    ]
-
-
-def _chosen_contract(node: ast.AST) -> ast.keyword | None:
-    match node:
-        case ast.keyword(arg="contract", value=ast.Attribute(value=ast.Name(id="Contract"))):
-            return node
-        case _:
-            return None
-
-
 # --- the SQL-boundary rule (`--sql-templates`) -------------------------------------------
 #
 # An f-string that builds an IDENTITY, SQL, or a PROMPT is a defect, because at those three seams
@@ -4530,7 +4496,6 @@ _PER_FILE = {
     "--deps": check_deps_file,
     "--ledger-reads": check_ledger_reads_file,
     "--ruling-mint": check_ruling_mint_file,
-    "--contract-at-spawn": check_contract_at_spawn_file,
     "--sql-templates": check_sql_templates_file,
     "--lazy-imports": check_lazy_imports_file,
     "--sdk-private": check_sdk_private_file,
@@ -4774,7 +4739,6 @@ def main(argv: list[str] | None = None) -> int:
             "--deps": "seam dependency-direction",
             "--ledger-reads": "canonical ledger-read",
             "--ruling-mint": "ruling-mint (a ruling constructed outside the park answer)",
-            "--contract-at-spawn": "contract-at-spawn (a contract chosen where a run is read)",
             "--sql-templates": "SQL-boundary (t-string)",
             "--key-composition": "key-composition (an identity built by formatting)",
             "--terminal-holes": "terminal-hole (an unwrapped value in the exempt last position)",

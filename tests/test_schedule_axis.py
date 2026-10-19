@@ -6,7 +6,7 @@ The predictions were written before these ran.
 |-----------------------------------------------|-------------|
 | `halving`, `mcts`, `beam`                     | yes         |
 | the root meter's bits after a V1 gather       | yes         |
-| a `CostBudget` shared by the branches (V0)    | no          |
+| a `CostBudget` shared by the branches         | no          |
 | a count held in a layer's closure             | no          |
 | last write wins over the leaf rows            | no          |
 | the telemetry meter's bits                    | no          |
@@ -23,7 +23,7 @@ from test_search_conformance import SEARCHES
 from test_shape_conformance import BUDGETS, SPELLINGS, Tree, at, row
 
 from effective.api import Effect, ask_llm, call_tool, gather
-from effective.cost import Contract, CostBudget, MeteredInterpreter, Usage
+from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.govern import GateState, Proceed, Refused
 from effective.layers import OpLayer, op_layer
 from effective.ops import Step, WorkflowOp
@@ -137,7 +137,6 @@ def fold(reading: str) -> Shape:
         spellings={"gather": asks(BRANCHES)},
         domain=lambda: priced(COSTS),
         layers=governing(policy_for),
-        contract=Contract.V1,
         observe=observe,
     )
 

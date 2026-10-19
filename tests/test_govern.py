@@ -21,6 +21,7 @@ from effective import permission
 from effective.budget import Grant, MeasuredBudget
 from effective.budget import as_policy as budget_policy
 from effective.govern import (
+    ANOTHER_EFFECT,
     Ask,
     BudgetRefused,
     Exceeded,
@@ -28,9 +29,12 @@ from effective.govern import (
     Park,
     Policy,
     Proceed,
+    Refusal,
     Refuse,
     Refused,
     Resolution,
+    Unbound,
+    Verdict,
     answers_for,
     as_resolution,
     combine,
@@ -78,23 +82,33 @@ def test_any_park_parks_and_the_asks_fuse():
     assert combine([park(a), Proceed(), park(b)]) == Park((a, b))
 
 
+def _refusals(verdict: Verdict) -> tuple[tuple[Refusal, ...], Exceeded | None]:
+    """Each policy's refusal in `verdict`, and the spend when a budget refused."""
+    match verdict:
+        case Refuse(refusals=refusals, exceeded=exceeded):
+            return refusals, exceeded
+        case _:
+            pytest.fail(f"{verdict} is not a refusal")
+
+
 def test_any_refuse_refuses_and_every_reason_is_kept():
-    assert combine([refuse("broke"), park(Ask("p", "?")), refuse("denied")]) == Refuse(
-        ("broke", "denied")
+    ruling = combine(
+        [refuse("broke", policy="a"), park(Ask("p", "?")), refuse("denied", policy="b")]
     )
+    assert _refusals(ruling) == ((Refusal("a", "broke"), Refusal("b", "denied")), None)
 
 
 def test_refuse_dominates_park():
     """Fail-closed direction: a gate never asks a human to grant past a policy that said no."""
-    assert isinstance(combine([park(Ask("b", "?")), refuse("no")]), Refuse)
+    assert isinstance(combine([park(Ask("b", "?")), refuse("no", policy="p")]), Refuse)
 
 
 @pytest.mark.parametrize(
     "verdicts",
     [
-        [Proceed(), park(Ask("a", "?")), refuse("no")],
-        [refuse("no"), Proceed(), park(Ask("a", "?"))],
-        [park(Ask("a", "?")), refuse("no"), Proceed()],
+        [Proceed(), park(Ask("a", "?")), refuse("no", policy="p")],
+        [refuse("no", policy="p"), Proceed(), park(Ask("a", "?"))],
+        [park(Ask("a", "?")), refuse("no", policy="p"), Proceed()],
     ],
 )
 def test_the_ruling_is_order_free(verdicts):
@@ -202,7 +216,9 @@ def test_proceed_forwards_the_op():
 
 
 def test_refuse_raises_refused_carrying_every_reason():
-    gate = govern(_always(refuse("a")), _always(refuse("b")), gate="g", run_id=RUN)
+    gate = govern(
+        _always(refuse("a", policy="p")), _always(refuse("b", policy="p")), gate="g", run_id=RUN
+    )
     with pytest.raises(Refused) as ei:
         drive_through([gate], OP, _base)
     assert ei.value.reason == "a; b"
@@ -305,6 +321,51 @@ def test_ruled_records_each_answer_under_the_state_its_park_was_asked_under():
     ]
 
 
+BOUND, OTHER = Segment("sha256-0000000000000001"), Segment("sha256-0000000000000002")
+BINDING, UNBINDING = Ask("p", "approve?", binds=BOUND), Ask("p", "approve?")
+
+RULINGS = {
+    "the-bound-effect": (BINDING, {"p": {"effect": BOUND}}, True),
+    "another-effect": (BINDING, {"p": {"effect": OTHER}}, False),
+    "no-effect": (BINDING, {"p": {"decision": "approve"}}, False),
+    "no-answer": (BINDING, {}, False),
+    "an-ask-binding-nothing": (UNBINDING, {"p": {"effect": OTHER}}, True),
+}
+"""A ruling on an ask, and whether it reaches the policy that asked."""
+
+
+@pytest.mark.parametrize(("ask", "answer", "reaches"), RULINGS.values(), ids=RULINGS.keys())
+def test_a_ruling_reaches_its_policy_only_naming_the_effect_its_ask_binds(ask, answer, reaches):
+    """A ruling on another effect, or none, is refused before the gate records who ruled and
+    before the policy reads it."""
+    read, recorded = [], []
+
+    def policy(op, state):
+        match answers_for(state, "p"):
+            case [*_, latest]:
+                read.append(latest)
+                return Proceed()
+            case _:
+                return park(ask)
+
+    def ruled(parked, state, by, answer):
+        recorded.append(by)
+        return AppendLedgerRow(row=LedgerRow(event_id=Key.parse("ruled"), kind="ruled"))
+
+    generator = govern(policy, gate="g", run_id=RUN, ruled=ruled)(OP)
+    assert isinstance(generator.send(None), AwaitEvent)
+    ruling = AuthorityRuling(by=Segment("ann"), answer=answer)
+    if reaches:
+        assert isinstance(generator.send(ruling), AppendLedgerRow)
+        assert generator.send(None) == OP
+        assert (read, recorded) == ([answer["p"]], ["ann"])
+    else:
+        with pytest.raises(Unbound) as refused:
+            generator.send(ruling)
+        assert refused.value.refusals == (Refusal("p", ANOTHER_EFFECT, Segment("ann")),)
+        assert (read, recorded) == ([], [])
+
+
 @pytest.mark.parametrize("placed", ["gather:0,0;step:memo", "gather:0,1;step:memo", None])
 def test_a_policy_reads_where_the_gated_op_runs(placed):
     """Two gather branches gating one op differ in placement alone."""
@@ -384,7 +445,7 @@ def test_permission_policy_folds_pure_tiers_by_decide():
     deny = permission.as_policy([permission.rules(lambda op: Deny("nope"))])
     state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored())
     assert allow(OP, state) == Proceed()
-    assert deny(OP, state) == refuse("nope")
+    assert _refusals(deny(OP, state)) == ((Refusal("permission", "nope"),), None)
 
 
 def test_permission_policy_escalation_becomes_the_gates_park():
@@ -397,9 +458,8 @@ def test_permission_policy_escalation_becomes_the_gates_park():
 
 def test_permission_policy_can_fail_closed_where_no_park_is_possible():
     policy = permission.as_policy([permission.rules(lambda op: Escalate())], on_escalate="deny")
-    assert policy(
-        OP, GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored())
-    ) == refuse(permission.FAIL_CLOSED.reason)
+    verdict = policy(OP, GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()))
+    assert _refusals(verdict) == ((Refusal("permission", permission.FAIL_CLOSED.reason),), None)
 
 
 def test_permission_policy_reads_the_latest_answer_not_the_history():
@@ -445,8 +505,10 @@ def test_a_stop_grant_refuses_through_the_policy():
 
 def test_a_refusal_keeps_the_budget_policys_exceeded_whatever_its_position():
     over = Exceeded(spent=0.010, ceiling=0.005)
-    ruling = combine([refuse("denied"), Refuse((over.reason,), over), refuse("also")])
-    assert ruling == Refuse(("denied", over.reason, "also"), over)
+    budget = refuse(over.reason, policy="budget", exceeded=over)
+    ruling = combine([refuse("denied", policy="p"), budget, refuse("also", policy="p")])
+    expected = (Refusal("p", "denied"), Refusal("budget", over.reason), Refusal("p", "also"))
+    assert _refusals(ruling) == (expected, over)
 
 
 def test_a_denial_is_routable_and_a_budget_refusal_is_raised_again():

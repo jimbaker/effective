@@ -86,6 +86,9 @@ class Ask:
     policy: str
     prompt: str
     detail: Mapping[str, Any] = field(default_factory=dict)
+    binds: Segment | None = None
+    """The digest of the effect the ask is about, which a ruling on it names under `effect`.
+    `None` for an ask whose answer is not about one effect, as a grant of more budget is not."""
 
     def __post_init__(self) -> None:
         if self.policy == WRAPPER:
@@ -121,13 +124,26 @@ class Exceeded:
 
 
 @dataclass(frozen=True)
+class Refusal:
+    """Why `policy`'s part of a gate refused an op, and who ruled when a ruling caused it."""
+
+    policy: str
+    reason: str
+    by: Segment | None = None
+
+
+@dataclass(frozen=True)
 class Refuse:
     """Verdict: at least one policy blocks. Every refusing policy's reason is kept, so a gate that
     refuses for three reasons says all three.
     `exceeded` is set when a budget policy refused."""
 
-    reasons: tuple[str, ...]
+    refusals: tuple[Refusal, ...]
     exceeded: Exceeded | None = None
+
+    @property
+    def reasons(self) -> tuple[str, ...]:
+        return tuple(refusal.reason for refusal in self.refusals)
 
     @property
     def reason(self) -> str:
@@ -143,19 +159,24 @@ def park(*asks: Ask) -> Park:
     return Park(asks)
 
 
-def refuse(*reasons: str) -> Refuse:
-    """A policy's refusal verdict."""
-    return Refuse(reasons)
+def refuse(
+    reason: str, *, policy: str, by: Segment | None = None, exceeded: Exceeded | None = None
+) -> Refuse:
+    """A policy's refusal verdict, naming the policy, who ruled when a ruling caused it, and the
+    spend when a budget refused."""
+    return Refuse((Refusal(policy, reason, by),), exceeded)
 
 
 class Refused(Exception):
     """A governed boundary blocked this op — recourse existed and was denied (or was never
     offered). Distinct from `cost.BudgetExceeded`, the domain seam's no-recourse hard cap."""
 
-    def __init__(self, op: WorkflowOp, reason: str) -> None:
+    def __init__(self, op: WorkflowOp, reason: str, refusals: tuple[Refusal, ...] = ()) -> None:
         super().__init__(reason)
         self.op = op
         self.reason = reason
+        self.refusals = refusals
+        """Each policy's refusal, when a gate's policies refused the op."""
 
 
 class ChildRefused(Exception):
@@ -185,9 +206,57 @@ class BudgetRefused(Refused):
     """Spend reached its ceiling at this op. Every later metered op is refused the same way, so a
     loop that turns a `Refused` into an observation re-raises this one."""
 
-    def __init__(self, op: WorkflowOp, exceeded: Exceeded, reason: str | None = None) -> None:
-        super().__init__(op, exceeded.reason if reason is None else reason)
+    def __init__(
+        self,
+        op: WorkflowOp,
+        exceeded: Exceeded,
+        reason: str | None = None,
+        refusals: tuple[Refusal, ...] = (),
+    ) -> None:
+        super().__init__(op, exceeded.reason if reason is None else reason, refusals)
         self.exceeded = exceeded
+
+
+class Unbound(Refused):
+    """A ruling on an ask that binds an effect named another effect, or none: the op changed under
+    the ruling, so no policy reads it. Each refusal gives `ANOTHER_EFFECT` as its reason; the
+    message names the ruler and both effects."""
+
+
+ANOTHER_EFFECT = "the ruling is on an effect other than the op's"
+"""Why a gate refuses an op whose ruling names an effect other than the one its ask binds."""
+
+
+def refuse_an_unbound_ruling(
+    op: WorkflowOp, parked: Park, resolution: Resolution, by: Segment | None
+) -> None:
+    """Raise `Unbound` at `op` when the ruling on `parked` names another effect than an ask binds,
+    naming each such policy, the ruler, and both effects."""
+    unbound = [
+        (ask, named)
+        for ask in parked.asks
+        if ask.binds is not None
+        and (named := effect_named(resolution.answers.get(ask.policy))) != ask.binds
+    ]
+    if unbound:
+        raise Unbound(
+            op,
+            "; ".join(
+                f"{ask.policy}: the ruling by {by or 'nobody'} rules on "
+                f"{named or 'no effect'}, and the effect is {ask.binds}"
+                for ask, named in unbound
+            ),
+            tuple(Refusal(ask.policy, ANOTHER_EFFECT, by) for ask, _ in unbound),
+        )
+
+
+def effect_named(answer: object) -> str | None:
+    """The effect a ruling's answer names under `effect`."""
+    match answer:
+        case {"effect": str(digest)}:
+            return digest
+        case _:
+            return None
 
 
 def routable(refusal: Refused) -> Refused:
@@ -206,9 +275,9 @@ def refused(op: WorkflowOp, refusal: Refuse) -> Refused:
     """The exception a `Refuse` verdict raises at `op`."""
     match refusal.exceeded:
         case None:
-            return Refused(op, refusal.reason)
+            return Refused(op, refusal.reason, refusal.refusals)
         case Exceeded() as exceeded:
-            return BudgetRefused(op, exceeded, refusal.reason)
+            return BudgetRefused(op, exceeded, refusal.reason, refusal.refusals)
         case unreachable:
             assert_never(unreachable)
 
@@ -418,7 +487,7 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     collected = list(verdicts)
     if refusals := [v for v in collected if isinstance(v, Refuse)]:
         exceeded = next((v.exceeded for v in refusals if v.exceeded is not None), None)
-        return Refuse(tuple(chain.from_iterable(v.reasons for v in refusals)), exceeded)
+        return Refuse(tuple(chain.from_iterable(v.refusals for v in refusals)), exceeded)
     if parks := [v for v in collected if isinstance(v, Park)]:
         return Park(tuple(chain.from_iterable(v.asks for v in parks)))
     return Proceed()
@@ -518,9 +587,11 @@ def govern(
                         yield announce(parked, state)
                     asked = AwaitEvent(name=state.park_name, schema=ruling_schema(schema))
                     by, answer = split_ruling((yield asked))
+                    resolution = as_resolution(answer)
+                    refuse_an_unbound_ruling(op, parked, resolution, by)
                     if ruled is not None:
                         yield ruled(parked, state, by, answer)
-                    state = state.absorb(as_resolution(answer), by=by)
+                    state = state.absorb(resolution, by=by)
                     run_answers.update(state.run_answers)  # accrual outlives this op
                     run_rulers.update(state.run_rulers)
                 case unreachable:

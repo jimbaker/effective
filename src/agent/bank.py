@@ -32,7 +32,7 @@ STAMP_NAME = "STAMP.json"
 """Written at the ROOT of an era tree by the corpus writer. Its presence distinguishes a tree
 the writer banked from a directory someone happened to create with the right name."""
 
-CURRENT_ERA = "era-5"
+CURRENT_ERA = "era-7"
 """Stores written by the CURRENT writer live under this name. Eras are told apart by PATH rather
 than by sniffing the keys: the point of a fixture is to state what it expects, and a classifier
 that read the keys would agree with any corpus by construction.

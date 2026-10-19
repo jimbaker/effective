@@ -37,9 +37,9 @@ from effective.budget import Grant, MeasuredBudget, depth_grant_name
 from effective.budget import as_policy as budget_policy
 from effective.combinators import Converged, Grantor, Unconverged, fix, fixpoint
 from effective.contexts import RecordingCtx
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
-from effective.govern import BudgetRefused, Exceeded, GateState, Policy, Proceed, Refuse, Verdict
+from effective.govern import BudgetRefused, Exceeded, GateState, Policy, Proceed, Verdict, refuse
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
@@ -195,7 +195,9 @@ def refusing_to_halve(n: int) -> Callable[[str], Policy]:
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(op=CallTool(name="halve", args={"n": int(m)})) if m == n:
-                return Refuse(("halve refused",), Exceeded(spent=1.0, ceiling=1.0))
+                return refuse(
+                    "halve refused", policy="budget", exceeded=Exceeded(spent=1.0, ceiling=1.0)
+                )
             case _:
                 return Proceed()
 
@@ -210,9 +212,11 @@ def refusing(
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(op=CallTool(name=str(name))) if name in spend:
-                return Refuse((f"{name} refused",), Exceeded(spent=1.0, ceiling=1.0))
+                return refuse(
+                    f"{name} refused", policy="budget", exceeded=Exceeded(spent=1.0, ceiling=1.0)
+                )
             case Step(op=CallTool(name=str(name))) if name in deny:
-                return Refuse((f"{name} denied",))
+                return refuse(f"{name} denied", policy="deny")
             case _:
                 return Proceed()
 
@@ -384,7 +388,6 @@ def test_a_ceiling_reached_on_the_last_permitted_step_is_governed(backend):
         program,
         halving_asks,
         layers=governing(ceiling),
-        contract=Contract.V1,
         max_attempts=3,
     )
     assert outcome.snap.state == "completed", outcome.snap

@@ -17,14 +17,14 @@ from effective.budget import BUDGET_DEPTH_PARAM
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.compose import spawn_subagent_task
 from effective.contexts import LocalCtx
-from effective.cost import MeteredInterpreter, Usage
+from effective.cost import FORMAT_PARAM, NEWEST_FORMAT, MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, Spawned, SpawnResult
 from effective.fork import spawn_fork
 from effective.govern import Refused
 from effective.handlers.durable import DurableHandler, idempotency_key_for, respawn_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key, compose_key
-from effective.ops import Writer
+from effective.ops import Respawn, Writer
 from effective.spawning import (
     ChildAnswer,
     ChildFailed,
@@ -496,6 +496,41 @@ def test_every_placed_spawn_is_answered_on_a_name_the_handler_gives_it(backend):
     assert sorted(handed) == sorted(p["done_event"] for _id, p in backend.enqueued(child_task))
 
 
+def test_a_child_records_under_the_newest_format(backend):
+    """Reddens if a workflow's own format param reaches the child."""
+    child_task, parent = private("child"), private("parent")
+    backend.register_body(child_task, child)
+    args = SpawnArgs(task_name=child_task, params={FORMAT_PARAM: "v0"})
+
+    def workflow(_rid):
+        return (yield from call_tool(SPAWN_TOOL, args.model_dump(exclude_none=True), Spawned))
+
+    backend.register(parent, workflow, spawning(backend), Fault(), layers=[])
+    completes(backend, backend.spawn(parent, "r-parent"))
+    ((_task_id, params),) = backend.enqueued(child_task)
+    assert params[FORMAT_PARAM] == NEWEST_FORMAT.value
+
+
+def test_a_child_is_marked_with_the_newest_format_by_a_spawner_that_marks_nothing(backend):
+    """Reddens if a child's params can lack the newest format, or carry a mark its parent's
+    workflow wrote."""
+    seen: list[dict[str, Any]] = []
+
+    def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
+        seen.append(dict(params))
+        return str(uuid4())
+
+    name = private("marking-parent")
+    args = SpawnArgs(task_name=private("child"), params={FORMAT_PARAM: "v0"})
+
+    def workflow(_rid):
+        return (yield from call_tool(SPAWN_TOOL, args.model_dump(exclude_none=True), Spawned))
+
+    backend.register(name, workflow, spawning(backend, spawner), Fault(), layers=[])
+    backend.run_until_result(backend.spawn(name, "r-marking"))
+    assert [params.get(FORMAT_PARAM) for params in seen] == [NEWEST_FORMAT.value]
+
+
 def test_children_spawned_twice_under_one_name_each_answer_their_parent(backend):
     """Reddens if a done event carries its spawn's occurrence as a suffix: the child's emit step
     composes the name, and an engine that counts step names refuses a second suffix."""
@@ -562,6 +597,7 @@ class Recorded(LocalCtx):
     task_id = uuid.uuid4()
 
     def __init__(self, value: Any) -> None:
+        super().__init__()
         self.value = value
 
     def step(self, name, thunk):
@@ -581,3 +617,32 @@ def test_a_spawn_recorded_without_a_done_event_is_refused_by_name():
     with pytest.raises(Exception, match="no done event") as caught:
         DurableHandler(Recorded(old_checkpoint), domain).run(workflow)
     assert not isinstance(caught.value, KeyError)
+
+
+def test_a_respawned_generation_is_marked_with_the_newest_format(backend):
+    """Reddens if a successor's params can lack the newest format, or carry a mark its workflow
+    wrote: the spawner here marks nothing."""
+    seen: list[dict[str, Any]] = []
+
+    def spawner(task_name, params, idempotency_key, queue, *, max_attempts=None):
+        seen.append(dict(params))
+        return str(uuid4())
+
+    name = private("respawning")
+
+    def workflow(run_id: str):
+        yield Respawn(
+            task=name,
+            generation=1,
+            state=None,
+            params={"run_id": run_id, FORMAT_PARAM: "v0"},
+            run_id=run_id,
+        )
+
+    domain = MeteredInterpreter(
+        llm=lambda _op: ("", Usage()),
+        tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(spawner)}),
+    )
+    backend.register(name, workflow, domain, Fault(), layers=[])
+    backend.run_until_result(backend.spawn(name, "r-respawning"))
+    assert [params.get(FORMAT_PARAM) for params in seen] == [NEWEST_FORMAT.value]

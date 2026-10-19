@@ -13,6 +13,7 @@ where `SeedingCtx` wraps a real engine ctx.
 
 import pytest
 
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.counterfactual import ForkedPrefixAwait
 from effective.handlers.durable import SeedBoundaryError, SeedingCtx
 from effective.keys import Key, Segment
@@ -21,6 +22,9 @@ from effective.keys import Key, Segment
 class _SpyCtx:
     """A minimal TaskContext that RUNS each step's thunk and records `(name, result)` — standing in
     for a real ctx whose checkpoint would hold that result."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def __init__(self) -> None:
         self.committed: list[tuple[str, object]] = []

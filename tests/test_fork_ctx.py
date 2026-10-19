@@ -14,12 +14,16 @@ actually driven.
 
 from datetime import datetime
 
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.handlers.durable import RenamedAwaitCtx, _supports_peek
 from effective.keys import Key
 
 
 class _BaseCtx:
     """A minimal TaskContext WITHOUT the optional `peek_event` capability."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -88,13 +92,15 @@ def test_supports_peek_unwraps_the_fork_ctx_to_probe_the_real_ctx():
 def test_event_rename_composes_the_whole_chain_not_one_wrapper():
     """A fork inside a fork stacks TWO renames, and the guard must name what the engine sees.
 
-    Exactly `_PrefixedCtx.prefix`'s F3 defect, reproduced in `event_rename` — by a commit whose
-    own message cited that fix as precedent. The first version returned this wrapper's segment
-    (`fork:c2;`) while the engine awaited `fork:c1;fork:c2;{name}`, so the refusal named the
-    wrong half of the mismatch. Liveness was unaffected (non-empty is non-empty); the diagnostic
-    was not, and the nested stack is reachable by following the refusal's own advice."""
+    Returning this wrapper's segment alone (`fork:c2;`) while the engine awaits
+    `fork:c1;fork:c2;{name}` makes the refusal name the wrong half of the mismatch. Liveness
+    is unaffected (non-empty is non-empty); the diagnostic is not, and the nested stack is
+    reachable by following the refusal's own advice."""
 
     class _Base:
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def __init__(self) -> None:
             self.awaited: list[str] = []
 

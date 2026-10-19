@@ -26,7 +26,7 @@ import pytest
 
 from effective.api import append_ledger, await_event, call_tool, gather, scoped
 from effective.checkpoints import ENGINE_INTERNAL
-from effective.cost import Usage
+from effective.cost import NEWEST_FORMAT, RecordedFormat, Usage
 from effective.domain import DomainOp
 from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
@@ -44,6 +44,9 @@ def _keys(handler: RecordingHandler) -> list[str]:
 class _SeqCtx:
     """A non-durable ctx that runs a step's thunk inline — enough to drive `DurableHandler`
     over the same workflows without an engine, so the third interpreter is covered here too."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def __init__(self) -> None:
         self.names: list[str] = []

@@ -13,7 +13,7 @@ from decimal import Decimal
 
 import pytest
 
-from effective import Contract
+from effective import RecordedFormat
 from effective.checkpoints import read_sqlite_conn
 from effective.ledgerread import sqlite_payloads
 from examples.agent_firm.__main__ import (
@@ -81,5 +81,9 @@ def test_the_examples_own_run_spends_what_its_tape_recorded(tmp_path, name, spen
             for checkpoint in read_sqlite_conn(conn, task_id, exclude=())
         }
         recorded = factors(params, sqlite_payloads(conn, params["run_id"]), tape)
-    marked = Contract.from_params(params)
-    assert (recorded.spend, recorded.model_calls, marked) == (Decimal(spend), calls, Contract.V1)
+    marked = RecordedFormat.from_params(params)
+    assert (recorded.spend, recorded.model_calls, marked) == (
+        Decimal(spend),
+        calls,
+        RecordedFormat.V1,
+    )

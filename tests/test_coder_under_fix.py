@@ -23,7 +23,7 @@ from _fence import within
 
 from effective.api import Effect
 from effective.combinators import fix
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool, DomainOp
 from effective.keys import Run, compose_key
 from effective.machine.evidence import CommandRun
@@ -222,7 +222,7 @@ def test_a_refusal_climbs_the_recursion_and_each_level_commits_the_one_below(bac
     name = compose_key(t"coder-short:{Run(run_id)}").stored()
     factory = partial(recursive, depth=2)
     backend.register(name, factory, metered(), Fault(), [], budget_limit=SHORT, on_exhaust="fail")
-    task = backend.spawn(name, run_id, contract=Contract.V1)
+    task = backend.spawn(name, run_id)
     snap = backend.run_until_result(task)
 
     assert snap.state == "failed", snap

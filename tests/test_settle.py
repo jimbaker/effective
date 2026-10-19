@@ -114,7 +114,7 @@ def test_a_fork_refuses_to_settle(wrapper):
     """A fork seeds and steers steps by name, and neither can say what a race chose, so both
     wrappers refuse rather than let the call reach the engine beneath them."""
     app = SqliteApp()
-    base = sqlite.SqliteTaskContext(app.conn, uuid4(), app.write_lock)
+    base = sqlite.SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock)
     ctx = (
         SeedingCtx(base, {}, fork_point=Key.parse("never"))
         if wrapper == "seeding"

@@ -48,6 +48,7 @@ from collections.abc import Callable, Collection
 from datetime import datetime
 from typing import Any, Never
 
+from effective.cost import RecordedFormat
 from effective.handlers.base import TaskContext, framed_refusal_record, served_refusal
 from effective.keys import Key
 from effective.ops import WaitOutcome, settled_wait
@@ -246,6 +247,10 @@ class ViewingCtx:
         a pane showing nothing because the run has no record yet reads identically to one showing
         nothing because the viewer was pointed at the wrong task."""
         return tuple(self._reached)
+
+    def recorded_format(self) -> RecordedFormat:
+        """The format the viewed run records under: a read, and the one a replay needs."""
+        return self._ctx.recorded_format()
 
     def __getattr__(self, item: str) -> Any:
         """Delegate the reads in `DELEGATED`; refuse everything else by name.

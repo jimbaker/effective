@@ -17,7 +17,7 @@ from effective.api import Effect, ask_llm
 from effective.budget import Grant, MeasuredBudget, budget_grant_name
 from effective.budget import as_policy as budget_policy
 from effective.combinators import Answered, Branch, Level, tree_search
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.govern import Policy, Resolution
 from effective.permission import Allow, Deny
 
@@ -61,7 +61,6 @@ def governed(backend, policy_for: Callable[[str], Policy]) -> Outcome:
         search,
         domain(),
         layers=governing(policy_for),
-        contract=Contract.V1,
         max_attempts=1,
     )
 
@@ -70,7 +69,7 @@ def test_a_trip_at_the_sequential_ask_keeps_the_rounds_before_it(backend):
     """Round 0 spends past the ceiling; round 1's `select` trips, so the search answers round 0."""
     name, run_id = private("governed"), str(uuid4())
     backend.register(name, search, domain(), Fault(), (), budget_limit=0.0015, on_exhaust="fail")
-    task = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task = backend.spawn(name, run_id, max_attempts=1)
     snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
     assert snap.result == len(LEAVES)
@@ -79,7 +78,7 @@ def test_a_trip_at_the_sequential_ask_keeps_the_rounds_before_it(backend):
 def test_a_trip_answered_stop_at_a_park_keeps_the_rounds_before_it(backend):
     name, run_id = private("governed"), str(uuid4())
     backend.register(name, search, domain(), Fault(), (), budget_limit=0.0015, on_exhaust="park")
-    task = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task = backend.spawn(name, run_id, max_attempts=1)
     assert backend.run_until_result(task).state != "completed"
     backend.emit_event(
         task, budget_grant_name(run_id, 0).stored(), ruled(Grant(stop=True).model_dump())
@@ -175,7 +174,6 @@ def test_a_ceiling_reached_on_the_last_permitted_round_keeps_every_round(backend
                 MeasuredBudget(overall=COST * (ASKS - 0.5), run_id=run_id, on_exhaust="fail")
             )
         ),
-        contract=Contract.V1,
         max_attempts=1,
     )
     assert outcome.snap.state == "completed", outcome.snap
@@ -211,7 +209,7 @@ def test_one_budget_takes_one_driver(backend, assembly):
         layers,
         budget_limit=budget.overall if on_handler else None,
     )
-    task = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task = backend.spawn(name, run_id, max_attempts=1)
     snap = backend.run_until_result(task)
     assert snap.state == ended, snap
     if ended == "failed":

@@ -19,7 +19,7 @@ from effective.cancel import (
 )
 from effective.cost import Usage
 from effective.domain import CallTool
-from effective.fork import MeteredEntry, decode_checkpoint
+from effective.fork import Bridged, decode_checkpoint
 from effective.handlers.durable import DurableHandler, _dump, _load_step
 from effective.keys import Key, Run, compose_key
 from effective.react import ESCAPED, AssistantTurn, Ran, ToolRequest, ToolResult, run_turns
@@ -187,9 +187,12 @@ def test_a_stop_that_raises_leaves_the_others_to_run():
 
 
 def test_a_bridged_checkpoint_holding_a_cancel_decodes_to_it():
-    entry = MeteredEntry(key=Key.parse("tool:ls"), state=dump_cancelled(Cancelled(partial="a")))
+    entry = Bridged(
+        key=Key.parse("tool:ls"),
+        state=dump_cancelled(Cancelled(partial="a")),
+    )
     op = CallTool(name="ls", args={}, result_schema=ToolResult)
-    assert decode_checkpoint(op, entry, object()) == (Cancelled(partial="a"), Usage())
+    assert decode_checkpoint(op, entry) == (Cancelled(partial="a"), Usage())
 
 
 def test_a_cancel_after_a_reset_never_runs_a_stop_again():

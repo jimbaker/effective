@@ -22,7 +22,7 @@ from _durable import DSN, IMMEDIATE_RETRY, pg_ready
 
 from effective.api import ask_llm, await_event, call_tool, gather
 from effective.budget import MeasuredBudget
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
@@ -272,7 +272,7 @@ def test_a_child_whose_measured_budget_trips_answers_its_parent_refused(backend)
     def child_body(params, ctx):
         budget = MeasuredBudget(overall=0.0015, run_id=params["run_id"], on_exhaust="fail")
         domain = MeteredInterpreter(llm=lambda _op: ("", Usage(cost=0.001)), tools=lambda _op: 0)
-        handler = DurableHandler(ctx, domain, params=params, budget=budget, contract=Contract.V1)
+        handler = DurableHandler(ctx, domain, params=params, budget=budget)
         return run_child(ctx, params, handler, overspends)
 
     def supervises():

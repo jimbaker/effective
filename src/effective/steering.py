@@ -44,6 +44,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Never, assert_never
 
+from effective.cost import RecordedFormat
 from effective.handlers.base import TaskContext, refuse_a_settled_checkpoint_under
 from effective.keys import Key, Segment
 
@@ -122,6 +123,9 @@ class SteeringCtx:
 
     def settle(self, name: Key, value: Any, /) -> Never:
         refuse_a_settled_checkpoint_under("SteeringCtx")
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __getattr__(self, item: str) -> Any:
         """Delegate everything not steered — `await_event`, `sleep_until`, `concurrent_safe`,

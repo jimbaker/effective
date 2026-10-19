@@ -25,7 +25,7 @@ the difference between a rate nobody can act on and a fix anyone can verify.
 import json
 import threading
 from collections import Counter
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from _authority import ruled
@@ -55,7 +55,7 @@ def _ctx(sqlite_app) -> tuple[SqliteApp, SqliteTaskContext]:
     the lock is passed explicitly rather than defaulted into.
     """
     app = sqlite_app(":memory:")
-    return app, SqliteTaskContext(app.conn, uuid4(), app.write_lock)
+    return app, SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock)
 
 
 def _run_concurrently(*targets) -> None:
@@ -146,7 +146,7 @@ def test_a_lockless_context_still_serves_the_single_threaded_case(sqlite_app):
     `nullcontext` — this pins that the guard added for concurrency did not make the lock
     mandatory."""
     app = sqlite_app(":memory:")
-    ctx = SqliteTaskContext(app.conn, uuid4(), None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None)
 
     assert ctx.concurrent_safe is False
     ctx.emit_event(APPROVED.stored(), APPROVAL)

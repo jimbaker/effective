@@ -43,7 +43,7 @@ from effective.budget import Grant as Grant  # explicit re-export (pinned: test_
 from effective.budget import TripOutcome as TripOutcome  # explicit re-export (same pin)
 from effective.cancel import Cancelled, cancelled_or
 from effective.checkpoints import Checkpoint
-from effective.cost import Contract, Usage
+from effective.cost import Usage, refuse_an_unread_format
 from effective.counterfactual import (
     ForkedPrefixAwait,
     ForkLedger,
@@ -73,6 +73,7 @@ from effective.handlers.durable import (
     Seeding,
     SeedingCtx,
     _decode_usage_envelope,
+    enveloped,
     fork_event_name,
     metered_call,
 )
@@ -454,45 +455,46 @@ def live_drive(
 # above); `test_measured_fork` pins the re-export.
 
 
-_UNSET: Any = object()  # sentinel: "no raw state — this entry is already decoded"
-
-
 @dataclass(frozen=True)
-class MeteredEntry:
-    """A recorded step for the measured fork — two provenances, ONE decode placement:
-
-    - a BRIDGED entry (from a durable checkpoint, which stores no op) sets `state` to the RAW
-      checkpoint value and leaves `op`/`result`/`usage` at defaults. The driver decodes `state`
-      **at the op** during replay (`decode_checkpoint` → `metered_call`), so envelope-ness is
-      decided by op class; a `{result, usage}` content sniff would disagree with the driver,
-      which holds the op.
-    - a DRIVEN entry (produced by `measured_drive`'s own trace) carries the live `op` and the
-      already-decoded `result`/`usage`, and leaves `state` unset: a driver trace is re-feedable
-      as a prefix without re-decoding.
-
-    `measured_drive` keys by the *live* op (`key`) and never reads `op`, so a bridged entry
-    leaves it `None`."""
+class Driven:
+    """A step `measured_drive` ran or replayed, with its decoded `result` and `usage`."""
 
     key: Key
     op: WorkflowOp | None = None
     result: Any = None
     usage: Usage = field(default_factory=Usage)
-    state: Any = _UNSET
 
 
-def decode_checkpoint(inner: DomainOp[Any], entry: MeteredEntry, domain: Any) -> tuple[Any, Usage]:
+@dataclass(frozen=True)
+class Bridged:
+    """A step exported from a durable run's checkpoint. Its raw `state` is decoded at the op by
+    the driver, which holds the op class the checkpoint does not store."""
+
+    key: Key
+    state: Any
+
+
+type MeteredEntry = Driven | Bridged
+"""A recorded step for the measured fork: the driver decodes either at the op."""
+
+
+def decode_checkpoint(inner: DomainOp[Any], entry: MeteredEntry) -> tuple[Any, Usage]:
     """A prefix entry's `(result, usage)`, decoded **at the op**. A driven entry
     is already decoded; a bridged entry carries raw checkpoint `state` split by op class via
-    the shared `metered_call` predicate: a metered model call's row is a `{result, usage}`
-    envelope, every other op a bare value with zero usage. The driver, which holds the live op,
+    `enveloped`: a model call's row is a `{result, usage}` envelope, a tool call's a bare value
+    with zero usage. The driver, which holds the live op,
     owns the placement, and the bridge reads no shape: the loop decides where, and the
     transition decides what."""
-    if entry.state is _UNSET:
-        return entry.result, entry.usage
-    if metered_call(inner, Contract.V1, domain):
-        result, usage = _decode_usage_envelope(entry.state)
-        return cancelled_or(result), usage
-    return cancelled_or(entry.state), Usage()
+    match entry:
+        case Driven(result=result, usage=usage):
+            return result, usage
+        case Bridged(state=state) if enveloped(inner):
+            result, usage = _decode_usage_envelope(state)
+            return cancelled_or(result), usage
+        case Bridged(state=state):
+            return cancelled_or(state), Usage()
+        case unreachable:
+            assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
 
 @dataclass
@@ -501,7 +503,7 @@ class MeasuredTail:
     `live_usage` is the tail-only spend (the domain-called steps) — the free-prefix payoff in
     dollars is `usage - live_usage`. `tripped_at` names the park if spend crossed the ceiling."""
 
-    trace: list[MeteredEntry] = field(default_factory=list)
+    trace: list[Driven] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     live_usage: Usage = field(default_factory=Usage)
     result: Any = None
@@ -542,7 +544,7 @@ def _run_live(op: Step[Any], domain: MeteredDomain) -> tuple[Any, Usage]:
 
 
 def _step_result(
-    op: Step[Any], prefix: list[MeteredEntry], i: int, domain: MeteredDomain
+    op: Step[Any], prefix: Sequence[MeteredEntry], i: int, domain: MeteredDomain
 ) -> tuple[Any, Usage, bool]:
     """One Step's result: replayed FREE from the prefix, or run live. Returns
     `(result, usage, ran_live)` so the caller folds the live-only meter separately.
@@ -554,7 +556,7 @@ def _step_result(
     entry = prefix[i]
     if entry.key != op_key(op):
         raise ReplayMismatch(f"measured prefix divergence at {i}: {op_key(op)!r}")
-    return (*decode_checkpoint(op.op, entry, domain), False)
+    return (*decode_checkpoint(op.op, entry), False)
 
 
 def trip_at(
@@ -570,9 +572,9 @@ def trip_at(
 
     Returns the advanced `(granted, trips)` when the run may proceed, a `Parked` when it must
     suspend, and raises `BudgetRefused` when there is no recourse. It asks `metered_call`, the
-    predicate `decode_checkpoint` and `DurableHandler` ask, so the driver trips where it decodes
-    and where the durable handler trips, including under a domain that does not meter."""
-    if not metered_call(op.op, Contract.V1, domain):
+    predicate `DurableHandler` asks, so the driver trips where the durable handler trips,
+    including under a domain that does not meter."""
+    if not metered_call(op.op, domain):
         return granted, trips
     match enforce_measured(meter.cost, budget, granted, trips, grants):
         case Parked() as parked:
@@ -591,7 +593,7 @@ def measured_drive[T](
     domain: MeteredDomain,
     grants: Mapping[Key, Any],
     *,
-    recorded: list[MeteredEntry] | None = None,
+    recorded: Sequence[MeteredEntry] | None = None,
 ) -> MeasuredTail:
     """Drive a measured (dollars) workflow. The first `len(recorded)` Steps replay FREE (recorded
     result + usage; domain NOT called); the tail runs live. The measured trip fires **only before a
@@ -609,7 +611,7 @@ def measured_drive[T](
     Every non-`Step` op is INSPECT-ONLY (see `_inspect_only`): a fork observes ledger rows and
     artifacts without committing them, because a counterfactual that writes is a second run. It
     REFUSES a `SleepUntil` (`ForkedSleep`): a fork explores a decision, and a clock is not one."""
-    run = _MeasuredRun(prefix=recorded or [], budget=budget, domain=domain, grants=grants)
+    run = _MeasuredRun(prefix=recorded or (), budget=budget, domain=domain, grants=grants)
     # The per-run ambient, established HERE rather than in `drive`, which recurses per scope —
     # see `live_drive` for the finding and why a fork needs it more than it looks.
     with walk_run():
@@ -623,7 +625,7 @@ class _MeasuredState:
     hand it back. Every field continues ACROSS a scope — a scope is sequential, so unlike a gather
     barrier there is nothing to fold and nothing that could double-count."""
 
-    trace: list[MeteredEntry] = field(default_factory=list)
+    trace: list[Driven] = field(default_factory=list)
     meter: Usage = field(default_factory=Usage)
     live: Usage = field(default_factory=Usage)
     granted: float = 0.0
@@ -638,7 +640,7 @@ class _MeasuredRun:
     """The fixed configuration of a measured drive, so `drive` can recurse into a scoped body
     without re-threading four parameters that never change."""
 
-    prefix: list[MeteredEntry]
+    prefix: Sequence[MeteredEntry]
     budget: MeasuredBudget
     domain: MeteredDomain
     grants: Mapping[Key, Any]
@@ -695,9 +697,7 @@ class _MeasuredRun:
                     if ran_live:
                         state.live = state.live + usage
                     state.meter = state.meter + usage
-                    state.trace.append(
-                        MeteredEntry(op_key(op).prefixed(prefix_path), op, result, usage)
-                    )
+                    state.trace.append(Driven(op_key(op).prefixed(prefix_path), op, result, usage))
                     send = result
                 case _:
                     with placing(op, position):
@@ -708,9 +708,7 @@ class _MeasuredRun:
                                 return state
                             case Observed(value=value):
                                 state.trace.append(
-                                    MeteredEntry(
-                                        op_key(probe).prefixed(prefix_path), op, value, Usage()
-                                    )
+                                    Driven(op_key(probe).prefixed(prefix_path), op, value, Usage())
                                 )
                                 send = value
                             case unreachable:
@@ -754,6 +752,20 @@ def fork_seed(checkpoints: Sequence[Checkpoint], *, through: str) -> dict[Key, A
     raise ValueError(f"fork boundary {through!r} not among the base's {len(checkpoints)} ckpts")
 
 
+def _refuse_a_point_in_a_region(fork_point: Key) -> None:
+    """Refuse a fork point inside a gather or race region."""
+    point = fork_point.stored()
+    if point.startswith((GATHER_PREFIX, RACE_PREFIX)):
+        region = "gather" if point.startswith(GATHER_PREFIX) else "race"
+        raise ForkPointInGather(
+            f"fork_point {point!r} names an await INSIDE a {region} region. The fork point "
+            f"is a boundary on `await_event`, but a gather branch's await resolves by "
+            f"`peek_event` on every replay, so the phase would cross once and never again. A "
+            f"gather is ONE node in the fork's order: fork at an await before it, or after the "
+            f"whole region."
+        )
+
+
 def run_fork(
     ctx: TaskContext,
     workflow: Callable[[], Effect[Any]],
@@ -766,8 +778,8 @@ def run_fork(
     forked_from: str,
     forked_at_event: str,
     delta: dict[str, Any] | None = None,
+    base_params: Mapping[str, Any],
     at_op_index: OpIndex | None = None,
-    contract: Contract = Contract.V0,
     op_layers: Sequence[Any] = (),
     budget: MeasuredBudget | None = None,
     allow: frozenset[str] = frozenset(),
@@ -805,11 +817,11 @@ def run_fork(
     refused (`ForkPointInGather`): a gather is one node in the fork's order. (`fork_at`, the
     in-process driver, refuses a `Gather` at the fork point — the two drivers genuinely differ.)
 
-    `contract`/`op_layers`/`budget` MUST match the base run's: the raw seed carries a v1 base's
-    `{result, usage}` envelope, which only the `Contract.V1` arm folds, so a v1 base forked under
-    v0 leaks the envelope into the workflow's values. On completion the whole prefix seed must be
-    consumed, or the child diverged from the base: `run_fork` asserts `SeedingCtx.unconsumed()`
-    empty.
+    `op_layers`/`budget` MUST match the base run's. The seed is the base's checkpoints copied
+    unchanged, and `base_params` the params the base was spawned with: a base, or a fork task,
+    whose record this release cannot read is refused before the fork writes. On
+    completion the whole prefix seed must be consumed, or the child diverged from the base:
+    `run_fork` asserts `SeedingCtx.unconsumed()` empty.
 
     Idempotent under replay: the genesis append is idempotent by `event_id`, and the seeded prefix
     re-commits to the child's OWN checkpoints, so a crash mid-tail replays the prefix, not the
@@ -821,7 +833,11 @@ def run_fork(
     re-yielded by the replay itself, so a base that parked for a grant once would fork into a
     child that waits for it always. `transplanted`
     names awaits whose answers the caller HAS delivered under the child's names; it is the opt-out
-    and the seam the unbuilt transplant will arrive behind."""
+    and the seam the unbuilt transplant will arrive behind.
+
+    `delta` is the answer at the fork point: the genesis records it, and it is delivered into the
+    child's own event world after every check has passed and before the genesis, so a refused fork
+    writes neither. `None` leaves the point open for whoever answers it."""
     # A fork point inside a gather region is refused. Attempted, it would survive one pass and
     # then break: a gather branch's await resolves by `peek_event`, so the phase crosses on the
     # first run and never on a replay, and a durable fork is replay. The resume would die with a
@@ -831,29 +847,42 @@ def run_fork(
     # TEXT (does it open with the gather namespace?) that the type offers no primitive for.
     # `Key` withholds `startswith` on purpose: prefix tests are the string surgery the opaque
     # type refuses, and going through the named form keeps the one legitimate case greppable.
-    point = fork_point.stored()
-    if point.startswith((GATHER_PREFIX, RACE_PREFIX)):
-        region = "gather" if point.startswith(GATHER_PREFIX) else "race"
-        raise ForkPointInGather(
-            f"fork_point {point!r} names an await INSIDE a {region} region. The fork point "
-            f"is a boundary on `await_event`, but a gather branch's await resolves by "
-            f"`peek_event` on every replay, so the phase would cross once and never again. A "
-            f"gather is ONE node in the fork's order: fork at an await before it, or after the "
-            f"whole region."
-        )
+    _refuse_a_point_in_a_region(fork_point)
+    refuse_an_unread_format(base_params)
     # Coerce ONCE, here, where the value enters the substrate (it arrives as a task param, i.e.
     # JSON): `Segment` refuses a `:`-bearing lineage id, and everything downstream is typed to
     # require the guarantee rather than re-checking it.
     child = Segment(child_run_id)
     # The SDK ctx is adapted where the stack is built; the handler's own `_adapt_ctx` descends
     # the stack too, so the two agree (`tests/test_fork_durable_absurd.py`).
+    ctx = _adapt_ctx(ctx)
     fork_ctx = SeedingCtx(
-        RenamedAwaitCtx(_adapt_ctx(ctx), child),
+        RenamedAwaitCtx(ctx, child),
         seed,
         fork_point=fork_point,
         transplanted=transplanted,
     )
     fork_ledger = ForkLedger(hypothetical_ledger, child_run_id=child)
+    # Built before the delta and the genesis, so a fork its handler refuses writes neither.
+    handler = DurableHandler(
+        fork_ctx,
+        DryRun(domain, allow=allow, canned=dict(canned or {})),
+        ledger=fork_ledger,
+        op_layers=op_layers,
+        budget=budget,
+        params=params,
+    )
+    if delta is not None:
+        # A crash after the delivery re-emits it on replay; the first write wins, so the child
+        # hears it once.
+        answer_at = fork_event_name(child_run_id, fork_point)
+        ctx.step(
+            compose_key(t"emit;{answer_at:domain=address}"),
+            lambda: (
+                deliver(ctx, answer_at, ruled_answer(answer_at, delta, by=HYPOTHETICAL))
+                or {"emitted": True}
+            ),
+        )
     fork_ledger.append(
         genesis_row(
             child,
@@ -863,16 +892,7 @@ def run_fork(
             at_op_index=at_op_index,
         )
     )
-    dry = DryRun(domain, allow=allow, canned=dict(canned or {}))
-    result = DurableHandler(
-        fork_ctx,
-        dry,
-        ledger=fork_ledger,
-        op_layers=op_layers,
-        contract=contract,
-        budget=budget,
-        params=params,
-    ).run(workflow)
+    result = handler.run(workflow)
     # On CLEAN COMPLETION the whole prefix seed must be consumed: a leftover
     # key means the child diverged from the base prefix (a stale/bogus key). Checked ONLY on the
     # return path, NOT in a finally: a crash mid-prefix (the durable retry path) legitimately
@@ -1139,7 +1159,7 @@ def run_fork_as_task(
     domain: Any,
     hypothetical_ledger: Callable[[str], LedgerWriter],
     read_base: Callable[[str], Sequence[Checkpoint]],
-    contract: Contract = Contract.V0,
+    read_base_params: Callable[[str], Mapping[str, Any]],
     op_layers: Sequence[Any] = (),
     budget: MeasuredBudget | None = None,
     allow: frozenset[str] = frozenset(),
@@ -1160,6 +1180,7 @@ def run_fork_as_task(
             domain=domain,
             hypothetical_ledger=lambda rid: SqliteLedger(conn, rid, lock, hypothetical=True),
             read_base=lambda tid: read_sqlite_conn(conn, tid),   # see the lock note below
+            read_base_params=lambda tid: read_sqlite_params(conn, tid),
         ))
 
     `read_base` is the injection seam that keeps this body engine-agnostic: `read_sqlite_conn` on
@@ -1180,7 +1201,8 @@ def run_fork_as_task(
     leaves of either, at any depth, so the classification does not depend on whether the
     counterfactual happened to fan out; and it is all or nothing, so an error that is not a refusal
     reaches the worker with every leaf beside it."""
-    ctx = _adapt_ctx(ctx)  # the delta's delivery below reaches the SDK too, and it speaks text
+    ctx = _adapt_ctx(ctx)  # the answer to the parent reaches the SDK too, and it speaks text
+    base_params = read_base_params(str(params["base_task_id"]))
     child_run_id = str(params["child_run_id"])
     forked_from = str(params["forked_from"])
     # `Key.parse` — params arrive as JSON, so this is the read side of the identity axis.
@@ -1192,19 +1214,10 @@ def run_fork_as_task(
     # straight through its fork point to a marginal. `Ask()` (a `None` delta on the wire) means the
     # caller has no answer: the child parks at the fork point exactly as the base did and waits for
     # a real one. That is the promoted fork — a counterfactual that became a live, human-in-the-
-    # loop session — and it needs no separate mechanism, just an unanswered await. Checkpointed, so
-    # a retry re-delivers at most once; first-write-wins would make a second emit inert anyway.
+    # loop session — and it needs no separate mechanism, just an unanswered await. `run_fork`
+    # delivers it once its checks have passed, so a refused fork writes none.
     raw_delta = params.get("delta")
     delta = None if raw_delta is None else dict(raw_delta)
-    if delta is not None:
-        answer_at = fork_event_name(child_run_id, fork_point)
-        ctx.step(
-            compose_key(t"emit;{answer_at:domain=address}"),
-            lambda: (
-                deliver(ctx, answer_at, ruled_answer(answer_at, delta, by=HYPOTHETICAL))
-                or {"emitted": True}
-            ),
-        )
     try:
         result = run_fork(
             ctx,
@@ -1223,7 +1236,7 @@ def run_fork_as_task(
             forked_from=forked_from,
             forked_at_event=str(params["forked_at_event"]),
             delta=delta,
-            contract=contract,
+            base_params=base_params,
             op_layers=op_layers,
             budget=budget,
             allow=allow,

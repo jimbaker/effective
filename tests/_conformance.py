@@ -42,7 +42,7 @@ from effective.coding.states import (
 from effective.coding.transition import transition
 from effective.coding.verdicts import mechanical_judges
 from effective.combinators import Answered, Deeper, descend, recurse
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, RecordedFormat, Usage, marked
 from effective.domain import CallTool, DomainOp
 from effective.engines import TaskSnapshot, open
 from effective.engines.absurd import AbsurdEngine
@@ -140,14 +140,11 @@ def refusals_of(outcome: ForkOutcome) -> list[tuple[str, str]]:
     raise AssertionError(f"the fork child did not answer a refusal: {outcome.answer!r}")
 
 
-def _spawn_params(
-    run_id: str, contract: Contract, admitted: Mapping[str, Any] | None = None
-) -> dict:
-    """A task's immutable spawn params: its run id and what it was `admitted` with, marked with
-    `contract`."""
+def _spawn_params(run_id: str, admitted: Mapping[str, Any] | None = None) -> dict:
+    """A task's spawn params: its run id and what it was `admitted` with."""
     if "run_id" in (admitted := dict(admitted or {})):
         raise ValueError("the admitted params' run_id is the harness's own")
-    return contract.spawn_params({"run_id": run_id} | admitted)
+    return {"run_id": run_id} | admitted
 
 
 # ── the self-contained workflow + domain ─────────────────────────────────────
@@ -637,8 +634,8 @@ class MeteringDomain:
     """A domain with AskLLM *usage*, for the measured-trip conformance. Each AskLLM costs
     a fixed ``cost`` and records one LIVE call — replay re-binds a committed step without
     touching the domain, so ``len(calls)`` is the *real* spend (x cost) and never the
-    replayed prefix. Wraps a ``MeteredInterpreter`` so it exposes both ``run`` (v0/CallTool)
-    and ``run_metered`` (the v1 usage-in-checkpoint seam)."""
+    replayed prefix. Wraps a ``MeteredInterpreter`` so it exposes both ``run`` (a CallTool) and
+    ``run_metered`` (the usage-in-checkpoint seam)."""
 
     def __init__(self, cost: float = 0.001) -> None:
         self.cost = cost
@@ -1398,6 +1395,9 @@ class FaultCtx:
     """Proxies a durable ctx, crashing once at the configured step/await/sleep — in the
     half of the op named by ``fault.position``."""
 
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
+
     def __init__(self, ctx: Any, fault: Fault) -> None:
         self._ctx = ctx
         self._f = fault
@@ -1643,10 +1643,6 @@ class SqliteBackend:
         @app.register_task(name, default_max_attempts=3)
         def task(params, ctx):
             rid = params["run_id"]
-            # The accrual contract is read from the immutable spawn params (the real
-            # migration seam) and never hardcoded, so a param-less (in-flight) task stays
-            # v0 under this v1-capable worker.
-            contract = Contract.from_params(params)
             # Share the app's write-lock so a concurrent gather branch's ledger append
             # serializes with the checkpoint writes on the one connection. `wrap`
             # (e.g. RaceOnFirstPeek) sits INSIDE FaultCtx so faults still see every op.
@@ -1665,7 +1661,6 @@ class SqliteBackend:
                 domain if fresh is None else fresh(),
                 ledger=ledger,
                 op_layers=layers,
-                contract=contract,
                 budget=budget,
             ).run(lambda: factory(params if admitted else rid))
 
@@ -1674,10 +1669,9 @@ class SqliteBackend:
         name: str,
         run_id: str,
         max_attempts: int | None = None,
-        contract: Contract = Contract.V0,
         params: Mapping[str, Any] | None = None,
     ) -> UUID:
-        params = _spawn_params(run_id, contract, params)
+        params = _spawn_params(run_id, params)
         if max_attempts is not None:
             return self.app.spawn(name, params, max_attempts=max_attempts)
         return self.app.spawn(name, params)
@@ -1854,7 +1848,6 @@ class AbsurdBackend:
         @self.engine.register_task(name, default_max_attempts=3)
         def task(params, ctx):
             rid = params["run_id"]
-            contract = Contract.from_params(params)  # the real migration seam
             # Opt into concurrent gather: parallel tools, serialized writes via the SDK
             # begin/complete split. PostgresLedger pools, so its appends are already
             # concurrent; only the single SDK checkpoint connection needs the lock. `wrap`
@@ -1874,7 +1867,6 @@ class AbsurdBackend:
                     domain if fresh is None else fresh(),
                     ledger=ledger,
                     op_layers=layers,
-                    contract=contract,
                     budget=budget,
                 ).run(lambda: factory(params if admitted else rid))
             finally:
@@ -1885,10 +1877,9 @@ class AbsurdBackend:
         name: str,
         run_id: str,
         max_attempts: int | None = None,
-        contract: Contract = Contract.V0,
         params: Mapping[str, Any] | None = None,
     ) -> UUID:
-        return self.engine.spawn(name, _spawn_params(run_id, contract, params), max_attempts)
+        return self.engine.spawn(name, _spawn_params(run_id, params), max_attempts)
 
     def task_attempts(self, task_id: UUID) -> int:
         import psycopg
@@ -2126,7 +2117,8 @@ class AbsurdBackend:
         app: Any = self._spawner_app
         spawned = app.spawn(
             task_name,
-            params,
+            # The SDK enqueues params as given, so this spawner marks them as the engine would.
+            marked(params),
             idempotency_key=idempotency_key,
             max_attempts=max_attempts,
             queue=queue,

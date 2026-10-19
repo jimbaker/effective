@@ -28,7 +28,7 @@ from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, respawn
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnResult
-from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.engines.sqlite import SqliteApp, SqliteLedger, read_sqlite_params
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
@@ -168,6 +168,7 @@ def _register(app: SqliteApp, base_task_id: UUID, message_id: str) -> None:
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
         )
     )
 
@@ -295,6 +296,7 @@ def test_a_sweep_at_an_authority_park_answers_each_delta_as_a_hypothetical(tmp_p
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
         )
     )
 
@@ -527,6 +529,7 @@ def test_the_workflow_argument_is_the_BASE_run_id_so_a_workflow_may_use_it(tmp_p
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
         )
     )
 
@@ -611,6 +614,7 @@ def test_a_generation_boundary_inside_a_fork_is_refused_and_names_promotion(tmp_
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
             # The sandbox exit its own message recommends — so what refuses below is the
             # composition rule, not `DryRun`.
             allow=frozenset({SPAWN_TOOL}),
@@ -712,6 +716,7 @@ def test_a_composition_refusal_in_a_child_answers_instead_of_hanging_the_sweep(
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
             # `canned`, not `allow`: the grandchild's own execution is not what is under test —
             # the JOIN is — and canning the spawn keeps this pin to one moving part. That the
             # grandchild really is enqueued (and orphaned) is measured separately, on both
@@ -792,6 +797,7 @@ def test_a_GOVERNED_denial_in_a_forked_tail_answers_the_parent(tmp_path, sqlite_
                 app.conn, rid, app.write_lock, hypothetical=True
             ),
             read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
             op_layers=[cascade([rules(deny_the_commit)])],
         )
     )

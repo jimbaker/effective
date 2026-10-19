@@ -25,7 +25,7 @@ from effective.budget import as_policy as budget_policy
 from effective.checkpoints import read_sqlite_conn
 from effective.coding.tier import tree_paths
 from effective.combinators import hoisted
-from effective.cost import Contract, MeteredInterpreter
+from effective.cost import MeteredInterpreter
 from effective.engines.sqlite import SqliteApp, SqliteLedger, TaskSnapshot
 from effective.govern import govern
 from effective.handlers.durable import DurableHandler
@@ -173,7 +173,6 @@ def run_in(
             interpreter,
             ledger=ledger,
             op_layers=(gate,),
-            contract=Contract.from_params(params, absent=Contract.V1),
         )
         return handler.run(
             lambda: hoisted(
@@ -190,7 +189,7 @@ def run_in(
         )
 
     params = {"run_id": run_id, "goal": args.goal, "tree": seed}
-    task_id = app.spawn("coder", Contract.V1.spawn_params(params))
+    task_id = app.spawn("coder", params)
     snapshot = app.run_until_result(task_id)
     cost = interpreter.meter.cost
     match snapshot:

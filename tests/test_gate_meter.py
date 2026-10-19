@@ -13,7 +13,7 @@ from _schedules import Turnstile, step_name
 from effective.api import Effect, ask_llm, call_tool, gather
 from effective.budget import Grant, MeasuredBudget, OnExhaust
 from effective.budget import as_policy as budget_policy
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import DomainOp
 from effective.govern import GateState, Policy, Proceed, Resolution, govern
 from effective.handlers.base import _walk_run, walk_run
@@ -56,7 +56,6 @@ def gated(
     policy_for: Callable[[str], Policy],
     *,
     domain: Callable[[], Any] = metered,
-    contract: Contract = Contract.V1,
     max_attempts: int = 3,
     outer_layers: tuple[Any, ...] = (),
 ) -> tuple[Any, Any]:
@@ -77,12 +76,11 @@ def gated(
             ctx,
             domain(),
             op_layers=(*outer_layers, govern(policy_for(run_id), gate="spend", run_id=run_id)),
-            contract=contract,
         )
         return handler.run(lambda: program(run_id))
 
     backend.register_body(name, body)
-    task = backend.spawn(name, str(uuid4()), max_attempts=max_attempts, contract=contract)
+    task = backend.spawn(name, str(uuid4()), max_attempts=max_attempts)
     return task, backend.run_until_result(task)
 
 
@@ -202,13 +200,6 @@ def test_a_gate_in_a_branch_reads_the_root_spend(backend, order):
     assert [siblings_in[leaf] for leaf in order] == [0, 1, 2, 3]
 
 
-RUNS = {
-    "V0 over a metered domain": (Contract.V0, metered),
-    "V1 over a domain that reports no usage": (Contract.V1, Unmetered),
-}
-"""A run that does not meter: the contract it runs under, and its domain."""
-
-
 def only_the_second(policy: Policy) -> Policy:
     """`policy` on the second ask; every other op proceeds. A gate cannot see the budget policy
     inside, so the handler cannot refuse it when it is built."""
@@ -231,17 +222,14 @@ PLACEMENTS = {
 
 
 @pytest.mark.parametrize("placement", PLACEMENTS)
-@pytest.mark.parametrize("run", RUNS)
-def test_a_budget_gate_refuses_to_compose_over_a_run_that_does_not_meter(backend, run, placement):
+def test_a_budget_gate_refuses_to_compose_over_a_run_that_does_not_meter(backend, placement):
     """Without the refusal both asks go through: the unmetered handler's spend stays zero."""
-    contract, domain = RUNS[run]
     wrap, ran = PLACEMENTS[placement]
     task, snap = gated(
         backend,
         asks("first", "second"),
         lambda run_id: wrap(ceiling(DOLLAR / 2)(run_id)),
-        domain=domain,
-        contract=contract,
+        domain=Unmetered,
     )
     assert snap.state == "failed", snap
     assert backend.failure_kind(snap) == "CompositionRefused", snap.failure
@@ -254,11 +242,9 @@ def nothing(_run_id: str) -> Effect[None]:
     yield from ()
 
 
-@pytest.mark.parametrize("run", RUNS)
-def test_the_handler_refuses_a_gate_holding_a_budget_policy_when_it_is_built(backend, run):
+def test_the_handler_refuses_a_gate_holding_a_budget_policy_when_it_is_built(backend):
     """A program with no op for the gate to see still fails: the refusal is the handler's."""
-    contract, domain = RUNS[run]
-    _task, snap = gated(backend, nothing, ceiling(DOLLAR / 2), domain=domain, contract=contract)
+    _task, snap = gated(backend, nothing, ceiling(DOLLAR / 2), domain=Unmetered)
     assert snap.state == "failed", snap
     assert backend.failure_kind(snap) == "CompositionRefused", snap.failure
 
@@ -291,7 +277,7 @@ def test_a_handlers_domain_is_fixed_when_it_is_built(backend):
     name = compose_key(t"gate-meter:{Run(str(uuid4()))}").stored()
 
     def body(params: Any, ctx: Any) -> str:
-        handler = DurableHandler(ctx, metered(), contract=Contract.V1)
+        handler = DurableHandler(ctx, metered())
         try:
             # the assignment under test is the one `ty` refuses
             handler.domain = Unmetered()  # ty: ignore[invalid-assignment]
@@ -300,5 +286,5 @@ def test_a_handlers_domain_is_fixed_when_it_is_built(backend):
         return "replaced"
 
     backend.register_body(name, body)
-    snap = backend.run_until_result(backend.spawn(name, str(uuid4()), contract=Contract.V1))
+    snap = backend.run_until_result(backend.spawn(name, str(uuid4())))
     assert snap.result == "fixed", snap

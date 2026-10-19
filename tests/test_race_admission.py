@@ -39,7 +39,7 @@ from effective.api import (
 from effective.choice import Chosen, EndingLost, Stopped, Unchosen, Won
 from effective.combinators import recurse
 from effective.domain import CallTool
-from effective.engines.sqlite import SqliteTaskContext
+from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.govern import Refused
 from effective.handlers.admission import digest, observed
 from effective.handlers.base import Racing, Stopping
@@ -279,7 +279,7 @@ def test_A5_the_handler_acts_on_the_choice_the_store_returned(sqlite_app):
         assert isinstance(answer, Chosen)
         return [winner.index for winner in answer.winners]
 
-    ctx: Any = _Overruled(SqliteTaskContext(app.conn, uuid4(), app.write_lock))
+    ctx: Any = _Overruled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock))
     assert DurableHandler(ctx, _Calls()).run(program) == [1]
     assert calls == ["a", "b"]
 
@@ -311,7 +311,7 @@ def test_A6_a_loser_looping_on_cached_answers_stops_on_every_interpreter(sqlite_
     looped[0] = 0
     app = sqlite_app()
     answer = DurableHandler(
-        SqliteTaskContext(app.conn, uuid4(), None), _Tools(), op_layers=[_cached]
+        SqliteTaskContext(app.conn, app.spawn("run", {}), None), _Tools(), op_layers=[_cached]
     ).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert looped[0] < 10_000
@@ -339,7 +339,7 @@ def test_A7_an_upper_layer_looping_over_a_cache_after_the_choice_stops_at_once(s
         branches = [lambda: call_tool("won", {}, str), lambda: call_tool("loser", {}, str)]
         return _described((yield from race(branches)))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, uuid4(), app.write_lock), settled)
+    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
     answer = DurableHandler(ctx, tools, op_layers=[upper, _cached]).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert looped[0] <= 1
@@ -452,7 +452,10 @@ _DEATH = os.path.join(os.path.dirname(__file__), "_admission_death.py")
 def test_A1_an_injected_op_a_worker_death_interrupts_after_the_choice_is_not_rerun(tmp_path):
     """SQLite, by a real `os._exit`: the process dies inside an injected `audit` call after the
     choice is saved, and recovery does not call `audit` again."""
-    db, calls, task = str(tmp_path / "run.db"), str(tmp_path / "calls"), str(uuid4())
+    db, calls = str(tmp_path / "run.db"), str(tmp_path / "calls")
+    app = SqliteApp(db)
+    task = str(app.spawn("run", {}))
+    app.close()
     died = subprocess.run(
         [sys.executable, _DEATH, db, task, calls, "dying"], timeout=60, check=False
     )
@@ -497,7 +500,8 @@ def test_A8_a_loser_or_winner_whose_inputs_change_on_the_retry_fails_with_ending
 
 
 def test_A8_an_ending_saved_without_an_input_digest_fails_loudly_on_a_retry(sqlite_app):
-    app, task, answer = sqlite_app(), uuid4(), ["first"]
+    app, answer = sqlite_app(), ["first"]
+    task = app.spawn("run", {})
 
     def cached(op: Any) -> Any:
         return answer[0]
@@ -575,7 +579,7 @@ def test_A9_a_horizon_holds_one_entry_per_live_loser_handler(sqlite_app, loser_d
     def program() -> Any:
         return (yield from race([lambda: call_tool("won", {}, int), loser]))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, uuid4(), app.write_lock), settled)
+    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
     DurableHandler(ctx, _Domain()).run(program)
     horizon = _horizon(app)
     assert len(horizon) == entries
@@ -640,7 +644,7 @@ def test_A13_an_op_admitted_before_the_choice_finishes_through_its_layers(sqlite
         branches = [lambda: call_tool("won", {}, str), lambda: call_tool("held", {}, str)]
         return _described((yield from race(branches)))
 
-    ctx = _Settled(SqliteTaskContext(app.conn, uuid4(), app.write_lock), settled)
+    ctx = _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled)
     answer = DurableHandler(ctx, tools, op_layers=[layer]).run(program)
     assert answer == ["chosen", [["won", 0, "won"], ["unchosen", 1, "held"]]]
     assert sorted(after) == ["held", "won"]
@@ -692,7 +696,8 @@ def test_a_finished_gathers_replay_is_capped_by_its_parents_count(sqlite_app, ch
     in the horizon, so the parent's count, with the finished children folded in, caps them. A
     cache that answers the same way replays to the same value; one that now answers so the body
     loops is stopped within that cap, and the retry fails with `EndingLost`."""
-    app, task, run = sqlite_app(), uuid4(), _FinishedGather(changed)
+    app, run = sqlite_app(), _FinishedGather(changed)
+    task = app.spawn("run", {})
 
     def attempt() -> Any:
         ctx = _Settled(SqliteTaskContext(app.conn, task, app.write_lock), run.settled)
@@ -732,7 +737,7 @@ def test_A11_a_stop_from_below_never_reaches_a_layer_above(sqlite_app, monkeypat
         return _described((yield from _injected_race()))
 
     monkeypatch.setattr(Racing, "read", reading)
-    ctx = SqliteTaskContext(app.conn, uuid4(), app.write_lock)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock)
     answer = DurableHandler(ctx, _Tools(), op_layers=[swallowing, injector.layer]).run(program)
     assert answer[1][1] == ["stopped", 1, None]
     assert caught == []

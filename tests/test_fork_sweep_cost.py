@@ -35,13 +35,16 @@ cost numbers here are SQLite-measured: they are a measurement of one engine's st
 cross-engine property.
 """
 
+import json
 from uuid import UUID
 
 import pytest
+from pydantic_core import to_jsonable_python
 from test_fork_sweep import new_message_id
 
 from effective.api import append_ledger, ask_llm, await_event
 from effective.checkpoints import read_sqlite_conn
+from effective.cost import Usage, marked
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import fork_seed, run_fork
 from effective.handlers.durable import DurableHandler, fork_event_name
@@ -50,6 +53,7 @@ from effective.ops import LedgerRow
 from effective.sql import bind
 
 PAYLOAD = "x" * 512  # a stand-in for a real extraction result, so bytes mean something
+ENVELOPE = len(json.dumps({"result": "", "usage": to_jsonable_python(Usage())}))
 
 
 def _wf(prefix_ops: int):
@@ -135,6 +139,7 @@ def _run_sweep(app: SqliteApp, db: str, prefix_ops: int, forks: int) -> tuple[in
                 forked_at_event=f"extracted:{message_id}",
                 fork_point=compose_key(t"review:{Segment(message_id)}"),
                 delta={"decision": "approve"},
+                base_params=marked({}),
             )
 
         fid = app.spawn(f"fork-{i}", {"run_id": rid})
@@ -168,7 +173,8 @@ def test_seeded_prefix_storage_is_exactly_forks_times_prefix(
 
     assert rows == expected_rows
     per_row = size / rows
-    assert 500 < per_row < 600, f"{per_row:.0f} bytes/row — the payload is {len(PAYLOAD)}"
+    recorded = len(PAYLOAD) + ENVELOPE
+    assert recorded < per_row < recorded + 100, f"{per_row:.0f} bytes/row; recorded {recorded}"
     # linear in BOTH factors: doubling either doubles the bill (no cross-term, no re-seeding)
     assert size == pytest.approx(rows * per_row, rel=0.01)
 

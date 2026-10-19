@@ -30,7 +30,7 @@ import pytest
 from _authority import ruled
 
 from effective.budget import Grant, MeasuredBudget
-from effective.cost import Contract, Usage
+from effective.cost import NEWEST_FORMAT, RecordedFormat, Usage
 from effective.domain import AskLLM, DomainOp
 from effective.fork import Cleared, Exceeded, Parked, enforce_measured
 from effective.govern import BudgetRefused
@@ -95,6 +95,9 @@ class _GrantCtx:
     """A `TaskContext` double: `await_event` returns a delivered grant's payload or PARKS (raises
     `_Park`) — enough to drive `DurableHandler._enforce_measured` without a live engine."""
 
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
+
     def __init__(self, delivered: dict[str, Any]) -> None:
         self._delivered = delivered
 
@@ -114,9 +117,12 @@ class _GrantCtx:
 
 
 class _NoDomain:
-    """A domain that is never called (`_enforce_measured` touches only ctx + budget)."""
+    """A metered domain that is never called (`_enforce_measured` touches only ctx + budget)."""
 
     def run(self, op: DomainOp[Any]) -> Any:
+        raise NotImplementedError
+
+    def run_metered(self, op: DomainOp[Any]) -> Any:
         raise NotImplementedError
 
 
@@ -129,7 +135,9 @@ def _drive_durable(row: dict) -> tuple:
         for i, g in enumerate(row["grants"])
     }
     handler = DurableHandler(
-        ctx=_GrantCtx(delivered), domain=_NoDomain(), contract=Contract.V1, budget=_budget(row)
+        ctx=_GrantCtx(delivered),
+        domain=_NoDomain(),
+        budget=_budget(row),
     )
     handler._meter = Usage(cost=row["meter"] * UNIT)
     try:
@@ -197,7 +205,7 @@ def test_trip_index_carries_forward_across_enforce_calls():
         }
     )
     budget = MeasuredBudget(overall=3 * UNIT, run_id=RUN, on_exhaust="park")
-    h = DurableHandler(ctx=ctx, domain=_NoDomain(), contract=Contract.V1, budget=budget)
+    h = DurableHandler(ctx=ctx, domain=_NoDomain(), budget=budget)
 
     h._meter = Usage(cost=4 * UNIT)  # 0.004 >= 0.003 -> trip :0; +g0 (ceiling 0.008) -> clear
     h._enforce_measured(ASK)

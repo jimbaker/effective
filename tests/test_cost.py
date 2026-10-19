@@ -14,7 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter, Usage
+from effective.cost import (
+    NEWEST_FORMAT,
+    BudgetExceeded,
+    CostBudget,
+    MeteredInterpreter,
+    RecordedFormat,
+    Usage,
+)
 from effective.domain import AskLLM, CallTool
 from effective.handlers.durable import DurableHandler
 from effective.keys import Key
@@ -84,6 +91,9 @@ def test_cost_budget_flips_at_the_ceiling():
 
 class _LocalCtx:
     """A non-durable Absurd ctx: a step just runs its thunk inline."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def step(self, name, thunk):
         return thunk()

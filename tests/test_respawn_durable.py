@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from effective.api import append_ledger, ask_llm, call_tool, gather, scoped
 from effective.budget import Budget, MeasuredBudget
 from effective.combinators import Again, Chain, Done, Turn, respawn
-from effective.cost import Contract, Usage
+from effective.cost import Usage, marked
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
@@ -262,7 +262,7 @@ def test_the_measured_accrual_CROSSES_a_generation_boundary(tmp_path, sqlite_app
 
     The workflow must ACTUALLY SPEND for this to test anything: `call_tool` accrues nothing, so
     every seed would be 0.0 and the assertion would pass with the carry deleted. Metered spend
-    rides `ask_llm` under `Contract.V1`."""
+    rides `ask_llm` under `RecordedFormat.V1`."""
     app = sqlite_app(str(tmp_path / "accrual.db"))
     domain = _SpendingDomain(app, cost=0.001)
 
@@ -278,10 +278,14 @@ def test_the_measured_accrual_CROSSES_a_generation_boundary(tmp_path, sqlite_app
         chain = Chain.from_params(params, task="spend", schema=Watch, initial=Watch())
         budget = MeasuredBudget(run_id=run_id, overall=100.0, on_exhaust="fail")
         return DurableHandler(
-            ctx, domain, ledger=None, budget=budget, params=params, contract=Contract.V1
+            ctx,
+            domain,
+            ledger=None,
+            budget=budget,
+            params=params,
         ).run(lambda: respawn(spend_batch, chain, budget=Budget(generations=3)))
 
-    app.spawn("spend", Contract.V1.spawn_params({"run_id": "r1"}))
+    app.spawn("spend", marked({"run_id": "r1"}))
     _drain(app)
 
     tasks = _tasks(app)
@@ -332,10 +336,14 @@ def test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED(tmp_path, sqlite_app):
         chain = Chain.from_params(params, task="pergen", schema=Watch, initial=Watch())
         budget = MeasuredBudget(run_id=params["run_id"], per_generation=0.0015, on_exhaust="fail")
         return DurableHandler(
-            ctx, domain, ledger=None, budget=budget, params=params, contract=Contract.V1
+            ctx,
+            domain,
+            ledger=None,
+            budget=budget,
+            params=params,
         ).run(lambda: respawn(spend_twice, chain, budget=Budget(generations=1)))
 
-    app.spawn("pergen", Contract.V1.spawn_params({"run_id": "r1"}))
+    app.spawn("pergen", marked({"run_id": "r1"}))
     _drain(app)
 
     state = _tasks(app)[0][1]
@@ -362,10 +370,14 @@ def test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED(tmp_path, sqlite_app):
             run_id=params["run_id"], overall=100.0, per_generation=0.0015, on_exhaust="fail"
         )
         return DurableHandler(
-            ctx, domain2, ledger=None, budget=budget, params=params, contract=Contract.V1
+            ctx,
+            domain2,
+            ledger=None,
+            budget=budget,
+            params=params,
         ).run(lambda: respawn(spend_once, chain, budget=Budget(generations=2)))
 
-    app2.spawn("pergen2", Contract.V1.spawn_params({"run_id": "r1"}))
+    app2.spawn("pergen2", marked({"run_id": "r1"}))
     _drain(app2)
     # Each generation spends 0.001 under a 0.0015 per-generation ceiling and must SURVIVE, while
     # the chain total (0.002) already exceeds it.

@@ -18,7 +18,7 @@ from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import LLMCall, MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, AskLLM, SpawnArgs, SpawnResult
-from effective.engines.sqlite import SqliteApp, SqliteLedger
+from effective.engines.sqlite import SqliteApp, SqliteLedger, read_sqlite_params
 from effective.fork import ForkOutcome, join_fork, run_fork_as_task, spawn_fork
 from effective.govern import Refused
 from effective.handlers.base import op_key
@@ -235,6 +235,7 @@ def fork_of_a_spawning_base(tmp_path, *, base_depth, sweep_params):
                 app.conn, run, app.write_lock, hypothetical=True
             ),
             read_base=lambda task: read_sqlite_conn(app.conn, task),
+            read_base_params=lambda task: read_sqlite_params(app.conn, task),
         )
     )
 

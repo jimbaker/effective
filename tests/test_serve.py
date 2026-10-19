@@ -11,7 +11,7 @@ import pytest
 
 from effective.api import step
 from effective.budget import MeasuredBudget
-from effective.cost import Usage, serve
+from effective.cost import NEWEST_FORMAT, RecordedFormat, Usage, serve
 from effective.domain import AskLLM
 from effective.fork import measured_drive
 from effective.keys import Key
@@ -163,6 +163,9 @@ def test_structured_extract_maps_transient_provider_error_to_transient_error():
 class _NullCtx:
     """The smallest `TaskContext` a constructor check needs: nothing is ever driven."""
 
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
+
     def step(self, name: Key, thunk, /) -> Any:
         return thunk()
 
@@ -180,37 +183,18 @@ class _PlainDomain(FlakyDomain):
         return "ok"
 
 
-def test_a_metered_only_domain_under_V0_is_rejected_at_ASSEMBLY():
-    """The T1 hardening beyond the legible `.run` message: under `Contract.V0` EVERY AskLLM takes
-    the non-metered arm, so a serve stack cannot work for ANY workflow — a fact known at
-    construction. Refuse there, not after the first step has committed."""
-    from effective.cost import Contract, serve
-    from effective.handlers.durable import DurableHandler
-
-    served = serve(retry_domain(1), base=FlakyDomain(fail_times=0))
-    with pytest.raises(TypeError, match="metered-only"):
-        # `ty` already rejects this statically (`MeteredDomain` has no `run`, so it is not a
-        # `DomainInterpreter`) — which is WHY the assembly check exists: it is the belt for a
-        # consumer outside the ty gate, the same rationale as serve()'s @op_layer rejection.
-        # Suppressed deliberately: the statically-invalid call IS the case under test.
-        DurableHandler(ctx=_NullCtx(), domain=served, contract=Contract.V0)  # ty: ignore[invalid-argument-type]
-
-
-def test_a_metered_only_domain_under_V1_is_allowed_to_assemble():
-    """Deliberately partial: under V1 whether it works depends on the workflow's ops (an
-    all-AskLLM run is fine, one CallTool is not), which assembly cannot know. That case keeps
-    the runtime `.run` fence — legible, but late."""
-    from effective.cost import Contract, serve
+def test_a_metered_only_domain_is_allowed_to_assemble():
+    """Whether it works depends on the workflow's ops (an all-AskLLM run is fine, one CallTool is
+    not), which assembly cannot know, so the runtime `.run` fence answers: legible, but late."""
+    from effective.cost import serve
     from effective.handlers.durable import DurableHandler
 
     served = serve(retry_domain(1), base=FlakyDomain(fail_times=0))
     # (statically invalid for the same reason; the runtime path is what is under test)
-    DurableHandler(ctx=_NullCtx(), domain=served, contract=Contract.V1)  # ty: ignore[invalid-argument-type]
+    DurableHandler(ctx=_NullCtx(), domain=served)  # ty: ignore[invalid-argument-type]
 
 
-def test_an_ordinary_domain_is_unaffected_under_either_contract():
-    from effective.cost import Contract
+def test_an_ordinary_domain_assembles():
     from effective.handlers.durable import DurableHandler
 
-    for contract in (Contract.V0, Contract.V1):
-        DurableHandler(ctx=_NullCtx(), domain=_PlainDomain(fail_times=0), contract=contract)
+    DurableHandler(ctx=_NullCtx(), domain=_PlainDomain(fail_times=0))

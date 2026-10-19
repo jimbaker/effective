@@ -13,18 +13,26 @@ Absurd) persist each step; these keep it in memory, for runs that need no file a
 `await_event` raises on all four, so a workflow that waits needs an engine. `sleep_until` raises
 on `LocalCtx` and returns at once on the other three, so an in-process run does not wait out a
 timer.
+
 """
 
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.keys import Key
 
 _CANNOT_SUSPEND = "an in-process context cannot suspend; a workflow that waits needs an engine"
 
 
-class LocalCtx:
+class _InProcess:
+    def recorded_format(self) -> RecordedFormat:
+        """The newest: a log held in memory does not outlive the release that wrote it."""
+        return NEWEST_FORMAT
+
+
+class LocalCtx(_InProcess):
     """Runs each step's thunk inline and checkpoints nothing."""
 
     def step(self, name: Key, thunk: Callable[[], Any]) -> Any:
@@ -37,7 +45,7 @@ class LocalCtx:
         raise NotImplementedError(f"LocalCtx: {_CANNOT_SUSPEND}")
 
 
-class RecordingCtx:
+class RecordingCtx(_InProcess):
     """Runs each step for real and logs its result by name."""
 
     def __init__(self) -> None:
@@ -55,7 +63,7 @@ class RecordingCtx:
         return None
 
 
-class ReplayCtx:
+class ReplayCtx(_InProcess):
     """Replays a `RecordingCtx.log`: a step returns its logged result, and its thunk never runs.
 
     The thunk is what would call the model or a tool, so replay performs no I/O. A step whose name
@@ -74,7 +82,7 @@ class ReplayCtx:
         return None
 
 
-class ResumeCtx:
+class ResumeCtx(_InProcess):
     """Resumes after a crash: a logged step replays, and a step missing from the log runs and is
     logged. `ran` lists what ran again, so a caller can tell a resume from a restart."""
 

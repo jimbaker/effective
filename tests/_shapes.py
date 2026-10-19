@@ -38,7 +38,6 @@ from _schedules import Label, Turnstile, branch_of
 
 from effective.api import Effect
 from effective.budget import Grant
-from effective.cost import Contract
 from effective.govern import Policy, govern
 from effective.keys import race_prefix
 from effective.keys.frame import (
@@ -83,19 +82,18 @@ class Schedule:
 class Shape:
     """A row of a conformance table.
 
-    | field        | what it is                                                  |
-    |--------------|-------------------------------------------------------------|
-    | `spellings`  | each way of writing the shape, by name                      |
-    | `domain`     | builds the domain a run answers its ops from, fresh per run |
-    | `answer`     | the result every run returns                                |
-    | `ledger_ids` | a run's ledger ids, sorted, from its run id                 |
-    | `count`      | a run's number of checkpoints, from the run                 |
-    | `calls`      | what the spellings' domains must agree on                   |
-    | `layers`     | the op layers a run's handler holds, from its run id        |
-    | `contract`   | the contract a run is spawned under                         |
-    | `schedules`  | the orders `interleave` forces, by name; derived when empty |
-    | `observe`    | what else a run shows, from the backend and the run         |
-    | `stopped`    | the branches a run cut short, from the backend and the run  |
+    | field             | what it is                                                  |
+    |-------------------|-------------------------------------------------------------|
+    | `spellings`       | each way of writing the shape, by name                      |
+    | `domain`          | builds the domain a run answers its ops from, fresh per run |
+    | `answer`          | the result every run returns                                |
+    | `ledger_ids`      | a run's ledger ids, sorted, from its run id                 |
+    | `count`           | a run's number of checkpoints, from the run                 |
+    | `calls`           | what the spellings' domains must agree on                   |
+    | `layers`          | the op layers a run's handler holds, from its run id        |
+    | `schedules`       | the orders `interleave` forces, by name; derived when empty |
+    | `observe`         | what else a run shows, from the backend and the run         |
+    | `stopped`         | the branches a run cut short, from the backend and the run  |
     """
 
     spellings: Mapping[str, Program]
@@ -105,7 +103,6 @@ class Shape:
     count: Callable[[Outcome], int] | None = None
     calls: Callable[[Any], Any] | None = None
     layers: Callable[[str], Sequence[OpLayer[Any]]] = field(default=no_layers)
-    contract: Contract = Contract.V0
     schedules: Mapping[str, Schedule] = field(default_factory=dict)
     observe: Callable[[Any, Outcome], Any] | None = None
     stopped: Callable[[Any, Outcome], Collection[tuple[str, ...]]] | None = None
@@ -118,7 +115,6 @@ def run(
     *,
     fault: Fault | None = None,
     layers: Callable[[str], Sequence[OpLayer[Any]]] = no_layers,
-    contract: Contract = Contract.V0,
     wrap: Callable[[Any], Any] | None = None,
     **spawn: Any,
 ) -> Outcome:
@@ -128,7 +124,7 @@ def run(
     is released by the choice landing, and nothing else in the run can say when that was."""
     name, run_id = private("shape"), str(uuid4())
     backend.register(name, program, domain, fault or Fault(), layers(run_id), wrap)
-    task = backend.spawn(name, run_id, contract=contract, **spawn)
+    task = backend.spawn(name, run_id, **spawn)
     return Outcome(backend.run_until_result(task), task, run_id, domain)
 
 
@@ -139,7 +135,6 @@ def run_shape(backend, shape: Shape, spelling: str, fault: Fault | None = None) 
         shape.domain(),
         fault=fault,
         layers=shape.layers,
-        contract=shape.contract,
     )
 
 
@@ -365,7 +360,6 @@ def branch_schedules(backend, shape: Shape, spelling: str) -> dict[str, Schedule
         shape.spellings[spelling],
         shape.domain(),
         layers=lambda run_id: (spy, *shape.layers(run_id)),
-        contract=shape.contract,
         max_attempts=1,
     )
     # A refused step is in `reached`, since the spy records it before its admission.
@@ -455,7 +449,6 @@ def interleave(backend, shape: Shape) -> dict[tuple[str, str], Seen]:
                 shape.spellings[spelling],
                 shape.domain(),
                 layers=lambda run_id, t=turnstile: (t.layer(), *shape.layers(run_id)),
-                contract=shape.contract,
                 max_attempts=1,
             )
             assert outcome.snap.state in ("completed", "failed"), (spelling, name, outcome.snap)

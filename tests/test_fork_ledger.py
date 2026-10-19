@@ -17,6 +17,7 @@ import json
 import pytest
 from pydantic_core import to_jsonable_python
 
+from effective.cost import marked
 from effective.counterfactual import (
     FORK_SCOPE,
     ForkLedger,
@@ -324,6 +325,7 @@ def _seal_scenario(
             forked_at_event=f"extracted:{mid}",
             fork_point=compose_key(t"review:{Segment(mid)}"),
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"}, max_attempts=4)

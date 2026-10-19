@@ -22,9 +22,14 @@ from typing import Any
 import pytest
 from _conformance import Fault, FaultCtx, FaultInjected, FaultPosition, at_every_op
 
+from effective.cost import NEWEST_FORMAT, RecordedFormat
+
 
 class _Store:
     """A ctx that runs a step's thunk and keeps a settled value, recording each name it commits."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def __init__(self) -> None:
         self.committed: list[str] = []

@@ -39,6 +39,7 @@ def _sites(name: str, roots: list[str], *, member: bool) -> list[tuple]:
 
 GRAMMAR = "src/effective/keys/grammar.py"
 FORK = "src/effective/fork.py"
+ELK = "src/effective/graphlayout/elk.py"
 API = "src/effective/api.py"
 BUDGET = "src/effective/budget.py"
 
@@ -125,21 +126,20 @@ def test_a_line_that_really_defines_nothing_is_still_refused() -> None:
 def test_a_multi_line_receiver_does_not_crash() -> None:
     """`column = text.index(f".{name}") + 1` assumed the attribute sits on the match's first line.
 
-    `DurableHandler(\\n    ...\\n).run(...)` in `fork.py` puts `.run` below its opening line. Two
-    of 169 member names under `src/effective` raised `ValueError: substring not found`, and this
-    is one of them."""
-    sites = _sites("run", ["src"], member=True)
-    assert sites, "`.run` has call sites"
+    `json.dumps(\\n    ...\\n).encode(...)` in `elk.py` puts `.encode` below its opening line.
+    Two of 169 member names under `src/effective` raised `ValueError: substring not found`."""
+    sites = _sites("encode", ["src"], member=True)
+    assert sites, "`.encode` has call sites"
 
     at = {(str(p), line + 1) for p, line, _col, _text in sites}
-    assert (FORK, _line_of(FORK, ").run(workflow)")) in at, (
-        "the `).run(` line, below the receiver's first"
+    assert (ELK, _line_of(ELK, ').encode("utf-8")')) in at, (
+        "the `).encode(` line, below the receiver's first"
     )
 
     for path, line, column, _text in sites:
         source = path.read_text().splitlines()[line]
-        assert source[column : column + 3] == "run", (
-            f"{path}:{line + 1} column {column} points at {source[column : column + 3]!r}"
+        assert source[column : column + 6] == "encode", (
+            f"{path}:{line + 1} column {column} points at {source[column : column + 6]!r}"
         )
 
 
@@ -219,7 +219,7 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `_domain_effect` a tool's name and args and a model request's parts.
     # A ledger read's id is read by `effect_of`, `op_key`, the durable handler, the recorder and
     # the sandbox that refuses it.
-    # `lint._chosen_contract` reads a keyword's name and the class and member it names.
+    # `fork.decode_checkpoint` reads a driven entry's result and usage and a bridged entry's state.
     # `grammar._render_terms` reads whether a projected term wraps, as it reads a term's.
     assert reached == 326, f"the corpus this fix was measured on held 326; found {reached}"
 

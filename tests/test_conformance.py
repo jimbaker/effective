@@ -85,7 +85,7 @@ from effective.api import (
     sleep_until,
 )
 from effective.budget import Grant, depth_grant_name
-from effective.cost import Contract, Usage, serve
+from effective.cost import FORMAT_PARAM, RecordedFormat, Usage, serve
 from effective.domain import CallTool, DomainOp
 from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
@@ -149,10 +149,15 @@ def test_a_run_reads_the_params_it_was_admitted_with(backend):
         return params
 
     backend.register(f"admit-{run_id}", admitted, CountingDomain(), Fault(None), (), admitted=True)
-    task_id = backend.spawn(f"admit-{run_id}", run_id, params={"manifest": {"case": "sla-cap"}})
+    task_id = backend.spawn(
+        f"admit-{run_id}",
+        run_id,
+        params={"manifest": {"case": "sla-cap"}},
+    )
     assert backend.run_until_result(task_id).result == {
         "run_id": run_id,
         "manifest": {"case": "sla-cap"},
+        FORMAT_PARAM: RecordedFormat.V1.value,
     }
     with pytest.raises(ValueError, match="run_id"):
         backend.spawn(f"admit-{run_id}", run_id, params={"run_id": "another"})
@@ -1473,7 +1478,7 @@ def test_measured_trip_parks_grants_and_resumes(backend):
         budget_limit=0.0015,
         on_exhaust="park",
     )
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.01})
 
@@ -1511,7 +1516,7 @@ def test_measured_trip_inside_a_scope_parks_on_the_UNSCOPED_grant_name(backend):
         budget_limit=0.0015,
         on_exhaust="park",
     )
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.01})
 
@@ -1538,7 +1543,7 @@ def test_measured_trip_fail_fast_aborts_within_the_ceiling(backend):
         budget_limit=0.0015,
         on_exhaust="fail",
     )
-    task_id = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id, max_attempts=1)
 
     snap = backend.run_until_result(task_id)
 
@@ -1565,7 +1570,7 @@ def test_measured_trip_survives_worker_death(backend):
             budget_limit=0.0015,
             on_exhaust="park",
         )
-        task_id = backend.spawn(name, run_id, contract=Contract.V1)
+        task_id = backend.spawn(name, run_id)
 
         snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.01})
 
@@ -1594,7 +1599,7 @@ def test_measured_concurrent_gather_runaway_trips_deterministically(backend):
         budget_limit=0.0015,
         on_exhaust="park",
     )
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.01})
 
@@ -1602,25 +1607,6 @@ def test_measured_concurrent_gather_runaway_trips_deterministically(backend):
     assert parks == 1  # only the sequential tail ask trips; the gather branches do not
     assert len(domain.calls) == 3  # g0, g1, tail — exactly once
     assert len(domain.calls) * domain.cost <= 0.0015 + 0.01
-
-
-def test_measured_v0_task_stays_v0_under_a_v1_capable_worker(backend):
-    """The migration guard, end-to-end: a task spawned with NO contract param
-    (indistinguishable from one in flight before the envelope existed) resolves to v0 via
-    `Contract.from_params`, so the SAME v1-capable worker runs it on the bare path: no
-    envelope, and the measured ceiling is inert (the trip lives on the v1 arm only). It
-    completes without ever parking, even with a budget that WOULD trip under v1."""
-    domain = MeteringDomain(cost=0.001)
-    run_id = f"mv0-{uuid4().hex[:8]}"
-    name = f"metered-v0-{run_id}"
-    backend.register(name, metered_trip_wf, domain, Fault(), (), budget_limit=0.0015)
-    task_id = backend.spawn(name, run_id)  # NO contract param → v0
-
-    snap = backend.run_until_result(task_id)
-
-    assert snap is not None
-    assert snap.state == "completed", snap  # never parked — the trip is inert on v0
-    assert len(domain.calls) == 3  # all three asks ran; the ceiling did not gate them
 
 
 def test_measured_trip_just_sufficient_grant_respects_the_overshoot_bound(backend):
@@ -1632,7 +1618,7 @@ def test_measured_trip_just_sufficient_grant_respects_the_overshoot_bound(backen
     run_id = f"mj-{uuid4().hex[:8]}"
     name = f"metered-just-{run_id}"
     backend.register(name, metered_trip_wf, domain, Fault(), (), budget_limit=0.0015)
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.0006})
 
@@ -1653,7 +1639,7 @@ def test_measured_trip_multiple_grants_re_derive_trip_n_across_replays(backend):
     run_id = f"mm-{uuid4().hex[:8]}"
     name = f"metered-multi-{run_id}"
     backend.register(name, metered_trip_wf, domain, Fault(), (), budget_limit=0.0015)
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.0002})
 
@@ -1671,7 +1657,7 @@ def test_measured_concurrent_gather_trip_survives_worker_death(backend):
         run_id = f"mgc-{uuid4().hex[:8]}"
         name = f"metered-gather-crash-{run_id}"
         backend.register(name, metered_gather_trip_wf, domain, Fault(k), (), budget_limit=0.0015)
-        task_id = backend.spawn(name, run_id, contract=Contract.V1)
+        task_id = backend.spawn(name, run_id)
 
         snap, parks = _drain_with_grants(backend, task_id, run_id, {"add_dollars": 0.01})
 
@@ -1694,7 +1680,7 @@ def test_a_flaky_metered_service_recovers_under_serve_on_both_engines(backend):
     run_id = f"flaky-{uuid4().hex[:8]}"
     name = f"flaky-metered-{run_id}"
     backend.register(name, metered_trip_wf, domain, Fault(), (), budget_limit=1.0)
-    task_id = backend.spawn(name, run_id, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id)
 
     snap = backend.run_until_result(task_id)
 

@@ -9,11 +9,11 @@ from uuid import UUID, uuid4
 from _conformance import Fault
 
 from effective.api import Effect
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.govern import GateState, Policy, Proceed, Verdict, govern, rulers_for
 from effective.handlers.durable import DurableHandler
 from effective.keys import Segment
-from effective.parked import answer
+from effective.parked import ParkedTask, answer
 from effective.viewing import ViewingCtx
 from examples.agent_firm.ar import REMIND, Round
 from examples.agent_firm.cases import SLA_CAP, Case
@@ -21,7 +21,15 @@ from examples.agent_firm.critic import AS_CLAIMED
 from examples.agent_firm.engage import CritiqueWire
 from examples.agent_firm.knowledge import NO_RULES, Pinned
 from examples.agent_firm.manifest import Manifest
-from examples.agent_firm.resolve import APPROVAL, admitted, announced, approval, ruled, terms_of
+from examples.agent_firm.resolve import (
+    APPROVAL,
+    admitted,
+    announced,
+    approval,
+    bindings,
+    ruled,
+    terms_of,
+)
 from examples.agent_firm.world import World
 
 PROPOSER, CONTROLLER = Segment("ar-clerk"), Segment("controller")
@@ -122,6 +130,21 @@ def gate(run_id: str, policy: Policy | None = None):
     )
 
 
+def ruling(
+    backend,
+    run_id: str,
+    park: ParkedTask,
+    decision: str = "approve",
+    *,
+    hypothetical: bool = False,
+) -> dict[str, Any]:
+    """The approval's answer at `park` of `run_id`: `decision`, on the effect its ask binds, read
+    from the run's hypothetical rows when it is `hypothetical`."""
+    rows = backend.hypothetical_payloads if hypothetical else backend.ledger_payloads
+    effect = bindings(rows(run_id), park.wake_event)[APPROVAL]
+    return {"answers": {APPROVAL: {"decision": decision, "effect": effect}}}
+
+
 def resolved(
     backend,
     scripted: WorldHolder,
@@ -131,10 +154,9 @@ def resolved(
     fault: Fault | None = None,
     approvers: tuple[Segment, ...] = (CONTROLLER,),
     decision: str = "approve",
-    contract: Contract = Contract.V0,
 ) -> Run:
-    """Resolve what `admission` admits under `contract`, answering each park with `decision` as
-    each of `approvers` in turn."""
+    """Resolve what `admission` admits, answering each park with
+    `decision` as each of `approvers` in turn."""
     run_id = f"r-{uuid4().hex[:8]}"
     passed: list[tuple[Segment | None, ...]] = []
 
@@ -151,14 +173,14 @@ def resolved(
         hypothetical=hypothetical,
         budget_limit=None if admission.budget is None else float(admission.budget),
     )
-    task_id = backend.spawn(run_id, run_id, contract=contract, params=admission.params())
+    task_id = backend.spawn(run_id, run_id, params=admission.params())
     snapshot = backend.run_until_result(task_id)
     asked, parks, waiting = None, 0, list(approvers)
     while waiting and (parked := backend.parked(task_id)):
         asked = asked or dict(scripted.world.asked)
         (park,) = parked
-        payload = {"answers": {APPROVAL: {"decision": decision}}}
-        answer(backend.engine, park, payload, by=waiting.pop(0))
+        ruled_on = ruling(backend, run_id, park, decision, hypothetical=hypothetical)
+        answer(backend.engine, park, ruled_on, by=waiting.pop(0))
         parks += 1
         snapshot = backend.run_until_result(task_id)
     ((_, params),) = backend.enqueued(run_id)
@@ -186,7 +208,6 @@ def replayed(backend, run: Run, program: Callable[[], Effect[Any]] | None = None
             unasked,
             ledger=None,
             op_layers=(gate(run.run_id),),
-            contract=Contract.from_params(run.params),
         )
         return handler.run(program or admitted(Manifest.admitted(run.params)))
     finally:

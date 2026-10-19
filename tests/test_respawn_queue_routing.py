@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from effective.api import call_tool
 from effective.budget import Budget
 from effective.combinators import Again, Chain, Done, Turn, respawn
+from effective.cost import marked
 from effective.handlers.durable import DurableHandler
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
@@ -130,7 +131,7 @@ def test_a_respawned_generation_stays_on_its_parents_queue(isolated_queue):
             lambda: respawn(body, chain, budget=Budget(generations=2))
         )
 
-    app.spawn(task_name, {"run_id": f"r-{task_name}"})
+    app.spawn(task_name, marked({"run_id": f"r-{task_name}"}))
     for _ in range(12):
         app.work_batch()
 

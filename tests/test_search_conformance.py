@@ -24,7 +24,7 @@ from effective.api import Effect, ask_llm, call_tool, gather, scoped
 from effective.budget import Grant, MeasuredBudget, round_grant_name
 from effective.budget import as_policy as budget_policy
 from effective.combinators import Answered, Branch, Decision, Deeper, Level, fix, unfold
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
 from effective.govern import (
     BudgetRefused,
@@ -32,8 +32,8 @@ from effective.govern import (
     GateState,
     Policy,
     Proceed,
-    Refuse,
     Verdict,
+    refuse,
 )
 from effective.keys import Index, Name, Run, compose_key
 from effective.keys.grammar import parse
@@ -282,11 +282,15 @@ def refuses(step: str) -> PolicyFor:
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(name=name) if name == step:
-                return Refuse((f"{name} refused",), Exceeded(spent=COST, ceiling=COST))
+                return refuse(
+                    f"{name} refused", policy="budget", exceeded=Exceeded(spent=COST, ceiling=COST)
+                )
             case Step(op=CallTool(name="children", args={"node": str(node)})) if (
                 step == f"expand:{node}"
             ):
-                return Refuse((f"{step} refused",), Exceeded(spent=COST, ceiling=COST))
+                return refuse(
+                    f"{step} refused", policy="budget", exceeded=Exceeded(spent=COST, ceiling=COST)
+                )
             case _:
                 return Proceed()
 
@@ -299,7 +303,7 @@ def denies(step: str) -> PolicyFor:
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(name=name) if name == step:
-                return Refuse((f"{name} denied",))
+                return refuse(f"{name} denied", policy="deny")
             case _:
                 return Proceed()
 
@@ -347,7 +351,6 @@ def gated(policy_for: PolicyFor, answer: Callable[[], Any] | None = None) -> Sha
         domain=spending,
         answer=answer,
         layers=governing(policy_for),
-        contract=Contract.V1,
     )
 
 

@@ -3,14 +3,13 @@
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from uuid import UUID
 
 import pytest
 from pydantic import BaseModel
 
 from effective import RecordingHandler, ReplayHandler, TraceEntry
 from effective.api import judge, select
-from effective.cost import BudgetExceeded, Contract, CostBudget, MeteredInterpreter, Usage
+from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter, Usage
 from effective.domain import (
     Answers,
     AskLLM,
@@ -29,16 +28,14 @@ from effective.ops import Step
 from effective.sandbox import DryRun
 from effective.telemetry import Span, traced
 
-_TASK = UUID("019fa000-0000-7000-8000-000000000a01")
-
 KIND = Choice({"guest": "someone the resident invited", "delivery": None})
 EXPECTED = Noul(true="expected today")
 SIZE = Score(["one person", "a couple", "a group"])
 
 
-visitor = "Sam Ortiz"
-caller = SimpleNamespace(name="Sam Ortiz", door="front door")
-names = ["Samuel Ortiz", "Sam Ortiz-Reyes"]
+visitor = "Alice Smith"
+caller = SimpleNamespace(name="Alice Smith", door="front door")
+names = ["Alicia Smith", "Alice Smith-Jones"]
 
 
 @pytest.mark.parametrize(
@@ -52,14 +49,14 @@ names = ["Samuel Ortiz", "Sam Ortiz-Reyes"]
         ),
         pytest.param(
             t"The visitor {visitor} Expected? {EXPECTED}",
-            {"visitor": "Sam Ortiz", "context": "The visitor `visitor`"},
+            {"visitor": "Alice Smith", "context": "The visitor `visitor`"},
             {"EXPECTED": WireNoul(instructions="Expected?", criteria={"true": "expected today"})},
             id="a state hole becomes a field and its literal text becomes context",
         ),
         pytest.param(
             t"{caller.name} came to the {caller.door} How many? {SIZE}",
             {
-                "caller": {"name": "Sam Ortiz", "door": "front door"},
+                "caller": {"name": "Alice Smith", "door": "front door"},
                 "context": "`caller.name` came to the `caller.door`",
             },
             {"SIZE": WireScore(instructions="How many?", criteria=list(SIZE.levels))},
@@ -139,7 +136,7 @@ def test_judge_yields_one_judge_op_and_types_its_answers():
     recorder = RecordingHandler({"judge:screen": SCREENED})
     out = recorder.run(_screen)
     assert out == Screened(KIND=ChoiceAnswer(**_choice("delivery")), EXPECTED=NoulAnswer(p=0.12))
-    assert _asked(recorder).state == {"visitor": "Sam Ortiz", "context": "`visitor`"}
+    assert _asked(recorder).state == {"visitor": "Alice Smith", "context": "`visitor`"}
     assert ReplayHandler(recorder.trace).run(_screen) == out
 
 
@@ -164,14 +161,14 @@ def test_select_offers_the_candidates_and_no_match_only():
     def pick():
         return (
             yield from select(
-                "resolve", t"{visitor} Which one is it?", ["Samuel Ortiz", "Alex Moreau"]
+                "resolve", t"{visitor} Which one is it?", ["Alicia Smith", "Bob Brown"]
             )
         )
 
     recorder = RecordingHandler({"judge:resolve": {"pick": _choice(NO_MATCH)}})
     assert recorder.run(pick) == ChoiceAnswer(**_choice(NO_MATCH))
     assert _asked(recorder).questions["pick"].criteria == dict.fromkeys(
-        ["Samuel Ortiz", "Alex Moreau", NO_MATCH]
+        ["Alicia Smith", "Bob Brown", NO_MATCH]
     )
 
 
@@ -236,10 +233,10 @@ def app():
 
 def test_a_durable_judge_records_its_usage_and_replays_without_the_judge(app):
     call, asked = _judging(SCREENED)
+    task = app.spawn("screen", {})
     first = DurableHandler(
-        SqliteTaskContext(app.conn, _TASK),
+        SqliteTaskContext(app.conn, task),
         MeteredInterpreter(llm=_poison, tools=_poison, judge=call),
-        contract=Contract.V1,
     )
     out = first.run(_screen)
     assert out["KIND"]["choice"] == "delivery"  # a durable run returns its result as JSON
@@ -247,9 +244,8 @@ def test_a_durable_judge_records_its_usage_and_replays_without_the_judge(app):
     assert first.meter == JEV_USAGE
 
     again = DurableHandler(
-        SqliteTaskContext(app.conn, _TASK),
+        SqliteTaskContext(app.conn, task),
         MeteredInterpreter(llm=_poison, tools=_poison, judge=_poison),
-        contract=Contract.V1,
     )
     assert again.run(_screen) == out
     assert again.meter == first.meter
@@ -291,7 +287,7 @@ def test_a_judgment_is_traced_as_a_model_call():
     [span] = spans
     assert (span.name, span.kind, span.tool_name) == ("LM.0", "LLM", None)
     assert span.fields == {"effective.judge.questions": ["EXPECTED", "KIND"]}
-    assert "Sam Ortiz" in span.input_messages[0]["content"]
+    assert "Alice Smith" in span.input_messages[0]["content"]
 
 
 @pytest.mark.parametrize(
@@ -312,7 +308,7 @@ def test_an_answer_that_does_not_fit_its_question_is_refused(answered):
 
 def test_select_refuses_a_bare_string_of_candidates():
     def pick():
-        return (yield from select("resolve", t"{visitor} Which?", "Alex Moreau"))
+        return (yield from select("resolve", t"{visitor} Which?", "Bob Brown"))
 
     with pytest.raises(TemplateError, match="str"):
         RecordingHandler({}).run(pick)

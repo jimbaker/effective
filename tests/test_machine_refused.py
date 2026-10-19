@@ -15,7 +15,7 @@ from _conformance import Fault
 
 from effective.api import Effect, append_ledger, ask_llm, gather
 from effective.combinators import Grant
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.govern import ChildRefused
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Name, Run, compose_key
@@ -169,7 +169,7 @@ def run(backend, body, attempts: int | None):
     run_id = f"x{uuid4().hex}"
     name = compose_key(t"refused:{Run(run_id)}").stored()
     backend.register(name, body, domain(), Fault(), (), budget_limit=LIMIT, on_exhaust="fail")
-    task = backend.spawn(name, run_id, max_attempts=attempts, contract=Contract.V1)
+    task = backend.spawn(name, run_id, max_attempts=attempts)
     return run_id, task, backend.run_until_result(task)
 
 

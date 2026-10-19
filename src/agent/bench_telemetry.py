@@ -284,7 +284,13 @@ def run_strategy(
             res.passed += score(traj.answer, task)
             res.total += 1
             res.recordings.append(
-                RecordedTrajectory(task, traj.answer, interp.meter, dict(rec_ctx.log), max_iters)
+                RecordedTrajectory(
+                    task,
+                    traj.answer,
+                    interp.meter,
+                    dict(rec_ctx.log),
+                    max_iters,
+                )
             )
         except BudgetExceeded:  # ran out mid-task: don't count it, stop the strategy
             truncated = True

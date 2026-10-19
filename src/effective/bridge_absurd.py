@@ -2,7 +2,7 @@
 
 The Absurd-engine sibling of `effective.bridge_sqlite` — same `(entries, grants)` contract,
 engine-specific reads. Carries RAW checkpoint state; envelope-ness is NOT decided here, because
-the driver decodes at the op (`decode_checkpoint` → `metered_call`) where the op class is known.
+the driver decodes at the op (`decode_checkpoint` → `enveloped`) where the op class is known.
 A per-engine reader, not a widened `TaskContext` Protocol member.
 
 Differences from SQLite (each verified against `absurd."*_default"`):
@@ -31,7 +31,9 @@ from effective.checkpoints import (
     is_step_checkpoint,
     positional_key,
 )
-from effective.fork import MeteredEntry
+from effective.cost import refuse_an_unread_format
+from effective.engines.absurd import read_absurd_params
+from effective.fork import Bridged
 from effective.keys import Key
 from effective.ruling import answer_of
 
@@ -41,10 +43,11 @@ from effective.ruling import answer_of
 
 def export_measured_prefix(
     conn: psycopg.Connection[Any], task_id: UUID, run_id: str, *, queue: str = "default"
-) -> tuple[list[MeteredEntry], dict[Key, Grant]]:
+) -> tuple[list[Bridged], dict[Key, Grant]]:
     """Export a parked measured run's prefix + delivered grants. Feed both to `measured_drive`."""
+    refuse_an_unread_format(read_absurd_params(conn, task_id, queue))
     c_tbl = f"c_{queue}"
-    entries: list[MeteredEntry] = []
+    entries: list[Bridged] = []
     seen: dict[Key, int] = {}
     rows = _committed(conn, task_id, queue)
     steps = [(name, state, at) for name, state, at in rows if is_step_checkpoint(name)]
@@ -62,7 +65,7 @@ def export_measured_prefix(
         # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
         # rather than being admitted as a Step.
         key = positional_key(name, seen)  # name#2 → name, refusing a gap
-        entries.append(MeteredEntry(key=key, state=state))
+        entries.append(Bridged(key=key, state=state))
 
     # `payload IS NOT NULL` selects only DELIVERED grants: an Absurd park writes a pending-await
     # MARKER row into e_{queue} with a null payload (SQLite does not — it uses waiting_event),

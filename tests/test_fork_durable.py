@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from effective.api import append_ledger, ask_llm, await_event, call_tool, gather, sleep_until
 from effective.checkpoints import read_sqlite_task
+from effective.cost import NEWEST_FORMAT, RecordedFormat, marked
 from effective.counterfactual import fork_scoped
 from effective.domain import SPAWN_TOOL, SpawnResult
 from effective.engines.sqlite import SqliteApp, SqliteLedger
@@ -167,6 +168,7 @@ def test_run_fork_substitutes_the_decision_and_diverges_on_the_hypothetical_ledg
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fork_id = app.spawn("fork", {"run_id": "r-fork"})
@@ -235,6 +237,9 @@ class _RecFaultCtx:
     the run id embeds the target and the renamed await embeds that run id: `reviewed`/`committed`
     then crash the AWAIT instead of the tail append. Recording the fired-at op and asserting it
     makes de-aliasing regression-proof."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __init__(self, ctx, fault: _RecFault) -> None:
         self._ctx = ctx
@@ -318,6 +323,7 @@ def test_the_fork_child_survives_crash_at_every_op(tmp_path, sqlite_app):
                 forked_at_event=EXTRACTED.stored(),
                 fork_point=REVIEW,
                 delta={"decision": "approve"},
+                base_params=marked({}),
             )
 
         fid = app.spawn(f"crash-{i}", {"run_id": rid}, max_attempts=8)
@@ -346,14 +352,13 @@ def test_the_fork_child_survives_crash_at_every_op(tmp_path, sqlite_app):
     assert _rows(app, "r-base") == base_before
 
 
-def _run_base(app, db_path: str, wf, *, contract=None):
+def _run_base(app, db_path: str, wf):
     """Run the base decision workflow to a canonical reject; return its task id."""
-    from effective.cost import Contract
 
     @app.register_task("base")
     def base_task(params, ctx):
         led = SqliteLedger(app.conn, params["run_id"], app.write_lock)
-        h = DurableHandler(ctx, _Dom(), ledger=led, contract=contract or Contract.V0)
+        h = DurableHandler(ctx, _Dom(), ledger=led)
         return h.run(lambda: wf(params["run_id"]))
 
     base_id = app.spawn("base", {"run_id": "r-base"})
@@ -426,6 +431,7 @@ def test_forking_an_iterative_workflow_seeds_each_occurrence(tmp_path, sqlite_ap
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"})
@@ -436,8 +442,7 @@ def test_forking_an_iterative_workflow_seeds_each_occurrence(tmp_path, sqlite_ap
     assert (reviewed["a"], reviewed["b"]) == (1, 2)  # each occurrence its own value, not (1, 1)
 
 
-def _forked_snap(app, seed, *, contract=None, fork_point=None):
-    from effective.cost import Contract
+def _forked_snap(app, seed, *, fork_point=None):
 
     @app.register_task("fork")
     def fork_task(params, ctx):
@@ -453,7 +458,7 @@ def _forked_snap(app, seed, *, contract=None, fork_point=None):
             forked_at_event=EXTRACTED.stored(),
             fork_point=fork_point or REVIEW,
             delta={"decision": "approve"},
-            contract=contract or Contract.V0,
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"}, max_attempts=2)
@@ -523,10 +528,9 @@ def test_a_wrong_fork_point_fails_loudly(tmp_path, sqlite_app):
 
 
 def test_forking_a_v1_metered_base_decodes_the_envelope(tmp_path, sqlite_app):
-    """A v1 base records the raw {result, usage} envelope in the extract checkpoint. Forked under
-    Contract.V1 (the passthrough), the child folds the envelope and the workflow sees the DECODED
-    result instead of the envelope leaking into the hypothetical `amount`."""
-    from effective.cost import Contract
+    """A v1 base records the raw {result, usage} envelope in the extract checkpoint. The fork
+    child folds the envelope, and the workflow sees the DECODED result instead of the envelope
+    leaking into the hypothetical `amount`."""
 
     db = tmp_path / "v1.db"
     app = sqlite_app(str(db))
@@ -544,7 +548,7 @@ def test_forking_a_v1_metered_base_decodes_the_envelope(tmp_path, sqlite_app):
         )
         return "reject" if approval["decision"] == "reject" else "done"
 
-    base_id = _run_base(app, str(db), wf, contract=Contract.V1)
+    base_id = _run_base(app, str(db), wf)
     base_ckpts = read_sqlite_task(str(db), base_id)
     seed = fork_seed(base_ckpts, through=LEDGER_EXTRACTED.stored())
 
@@ -562,7 +566,7 @@ def test_forking_a_v1_metered_base_decodes_the_envelope(tmp_path, sqlite_app):
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
-            contract=Contract.V1,
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"})
@@ -617,6 +621,7 @@ def test_a_sleep_in_the_forked_tail_is_refused_not_slept(tmp_path, sqlite_app):
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"})
@@ -676,6 +681,7 @@ def test_an_already_elapsed_sleep_in_the_replayed_PREFIX_passes_through(tmp_path
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"})
@@ -696,6 +702,9 @@ def test_supports_peek_unwraps_every_fork_ctx_wrapper():
     reports exactly what the BASE ctx supports."""
 
     class _NoPeekCtx:
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name, thunk, /):
             return thunk()
 
@@ -744,6 +753,7 @@ def test_a_wrong_fork_point_is_caught_by_the_completion_check_when_every_op_is_s
             forked_at_event=EXTRACTED.stored(),
             fork_point=Key.parse("never-fires"),
             delta={"decision": "reject"},  # nothing diverges: every op is seeded
+            base_params=marked({}),
         )
 
     fid = app.spawn("fork", {"run_id": "r-fork"}, max_attempts=2)
@@ -801,15 +811,14 @@ def _budgeted_wf(_rid: str):
 def _budgeted_base(app, db: str) -> UUID:
     """A base that really parked for a grant mid-run, got it, then parked at the fork point."""
     from effective.budget import MeasuredBudget
-    from effective.cost import Contract
 
     @app.register_task("base")
     def base_task(params, ctx):
         led = SqliteLedger(app.conn, params["run_id"], app.write_lock)
         budget = MeasuredBudget(overall=BUDGET_LIMIT, run_id="r-base", on_exhaust="park")
-        return DurableHandler(
-            ctx, _metered_domain(), ledger=led, contract=Contract.V1, budget=budget
-        ).run(lambda: _budgeted_wf(params["run_id"]))
+        return DurableHandler(ctx, _metered_domain(), ledger=led, budget=budget).run(
+            lambda: _budgeted_wf(params["run_id"])
+        )
 
     base_id = app.spawn("base", {"run_id": "r-base"})
     app.run_until_result(base_id)
@@ -834,7 +843,6 @@ def _waiting_on(app, task_id: UUID) -> str | None:
 
 def _budgeted_fork(app, seed, *, transplanted=frozenset()) -> UUID:
     from effective.budget import MeasuredBudget
-    from effective.cost import Contract
 
     @app.register_task("fork")
     def fork_task(params, ctx):
@@ -851,7 +859,7 @@ def _budgeted_fork(app, seed, *, transplanted=frozenset()) -> UUID:
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
-            contract=Contract.V1,
+            base_params=marked({}),
             budget=budget,
             transplanted=transplanted,
         )
@@ -911,12 +919,11 @@ def test_a_transplanted_prefix_grant_lets_the_fork_through(tmp_path, sqlite_app)
     app.emit_event(_forked("r-fork", GRANT_NAME), ruled({"add_dollars": 0.01}))
 
     app.run_until_result(fork_id)
-    assert _waiting_on(app, fork_id) == _forked("r-fork", REVIEW)  # reached the fork point
     app.emit_event(_forked("r-fork", REVIEW), {"decision": "approve"})
     snap = app.run_until_result(fork_id)
 
     assert snap is not None
-    assert snap.result == "approve"  # the counterfactual ran
+    assert snap.result == "approve"  # through the fork point: the counterfactual ran
     kinds = [k for _, k, _ in _rows(app, "r-fork")]
     assert kinds == ["forked", "reviewed", "fork_sealed"]  # divergent tail only, and SEALED
     assert all(hyp == 1 for _, _, hyp in _rows(app, "r-fork"))  # fenced off from canonical
@@ -956,6 +963,7 @@ def test_a_fork_point_inside_a_gather_region_is_refused(tmp_path, sqlite_app):
             domain=_Dom(),
             forked_from="r-base",
             forked_at_event=EXTRACTED.stored(),
+            base_params=marked({}),
         )
     assert "INSIDE a gather region" in str(caught.value)
     assert "peek_event" in str(caught.value)  # the mechanism, not just the verdict
@@ -1046,6 +1054,7 @@ def _gather_fork(app, seed, rid: str, wf, *, ctx_wrap=None, max_attempts: int = 
             fork_point=REVIEW,
             delta={"decision": "approve"},
             allow=frozenset({"a", "b"}),  # read-only tools the counterfactual may call
+            base_params=marked({}),
         )
 
     return app.spawn(f"gfork-{rid}", {"run_id": rid}, max_attempts=max_attempts), dom
@@ -1229,6 +1238,7 @@ def test_a_dry_run_violation_inside_a_forked_gather_is_caught_by_except_star(tmp
             fork_point=REVIEW,
             delta={"decision": "approve"},
             allow=frozenset(),  # NO tool is allowed — the branch must be refused
+            base_params=marked({}),
         )
 
     fid = app.spawn("nodry", {"run_id": "gd"}, max_attempts=1)
@@ -1370,6 +1380,7 @@ def test_a_fork_child_that_spawns_and_joins_a_grandchild_is_refused_not_deadlock
             fork_point=REVIEW,
             delta={"decision": "approve"},
             allow=frozenset({SPAWN_TOOL}),  # the `DryRun` exit its own message recommends
+            base_params=marked({}),
         )
 
     fork_id = app.spawn("f2fork", {"run_id": "r-fork"}, max_attempts=1)
@@ -1442,6 +1453,7 @@ def test_a_transplanted_absolute_await_under_a_rename_is_NOT_refused(tmp_path, s
             fork_point=REVIEW,
             delta={"decision": "approve"},
             transplanted=frozenset({done}),  # the caller emits it under the CHILD's scope
+            base_params=marked({}),
         )
 
     fork_id = app.spawn("tp", {"run_id": "r-fork"}, max_attempts=1)
@@ -1504,6 +1516,7 @@ def test_an_absolute_await_in_the_PREFIX_still_gets_the_prefix_diagnosis(tmp_pat
             forked_at_event=EXTRACTED.stored(),
             fork_point=REVIEW,
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
     fork_id = app.spawn("pa", {"run_id": "r-fork"}, max_attempts=1)

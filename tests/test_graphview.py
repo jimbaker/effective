@@ -19,7 +19,7 @@ from _keymap import including
 from effective.api import append_ledger, ask_llm, await_event, call_tool, gather
 from effective.checkpoints import keys, read_sqlite_conn
 from effective.combinators import Answered, Deeper, descend, recurse
-from effective.cost import MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage, marked
 from effective.domain import CallTool
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphview import (
@@ -1175,14 +1175,13 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
             forked_at_event=f"extracted:{message_id}",
             fork_point=compose_key(t"review:{Segment(message_id)}"),
             delta={"decision": "approve"},
+            base_params=marked({}),
         )
 
+    answer_at = fork_event_name("r-fork", compose_key(t"review:{Segment(message_id)}"))
     child_id = app.spawn("child", {"run_id": "r-fork"})
     app.run_until_result(child_id, max_batches=8)
-    app.emit_event(
-        fork_event_name("r-fork", compose_key(t"review:{Segment(message_id)}")).stored(),
-        {"decision": "approve"},
-    )
+    app.emit_event(answer_at.stored(), {"decision": "approve"})
     snap = app.run_until_result(child_id, max_batches=8)
     assert snap is not None
     assert snap.state == "completed", snap
@@ -1198,7 +1197,12 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
 
     # ...and the child's own trace projects with the same projector, sharing the base's prefix —
     # which is what "the same run" means to the view: one graph vocabulary across the fork edge.
-    child_keys = list(keys(read_sqlite_conn(app.conn, child_id)))
+    # The task's delivery of its delta is the fork task's own step, outside the child's trace.
+    # lint: terminal-hole: `answer_at` is the `Key` `fork_event_name` mints.
+    delivery = compose_key(t"emit;{answer_at:domain=address}")
+    child_keys = [
+        key for key in keys(read_sqlite_conn(app.conn, child_id)) if key != delivery.stored()
+    ]
     assert child_keys[: len(seed)] == base_keys[: len(seed)]
     assert keys_of(from_keys("r-fork", child_keys))[:2] == [
         "step:extract",

@@ -18,7 +18,7 @@ import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from _conformance import private
@@ -35,7 +35,7 @@ from effective.choice import (
     Unchosen,
     Won,
 )
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, RecordedFormat, Usage
 from effective.domain import CallTool, DomainOp
 from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.govern import Refused
@@ -97,6 +97,9 @@ class _Tools:
 
 class _Settled:
     """Wraps a ctx and sets `settled` each time a checkpoint is settled through it."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __init__(self, ctx: Any, settled: threading.Event) -> None:
         self._ctx, self._settled = ctx, settled
@@ -502,10 +505,9 @@ def test_D8_a_losers_spend_and_ledger_row_reach_the_record(sqlite_app):
         return _described((yield from race([lambda: ask_llm("w", "w", str), loser])))
 
     handler = DurableHandler(
-        _Settled(SqliteTaskContext(app.conn, uuid4(), app.write_lock), settled),
+        _Settled(SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), settled),
         MeteredInterpreter(llm=llm, tools=lambda op: None),
         ledger=SqliteLedger(app.conn, "r1", app.write_lock),
-        contract=Contract.V1,
     )
     assert handler.run(program) == ["chosen", [["won", 0, "w"], ["stopped", 1, None]]]
     assert handler.meter.cost == pytest.approx(spend["w"] + spend["l0"])
@@ -513,8 +515,10 @@ def test_D8_a_losers_spend_and_ledger_row_reach_the_record(sqlite_app):
     assert [p for (p,) in placements] == [race_prefix(0, 1) + "ledger;led:loser"]
 
 
-def _metered_race(app: SqliteApp, settled: threading.Event, llm: Callable[[Any], Any]) -> Any:
-    """D8's race over a fresh ctx of one task, so a second call is the task's next attempt."""
+def _metered_race(
+    app: SqliteApp, task: UUID, settled: threading.Event, llm: Callable[[Any], Any]
+) -> Any:
+    """D8's race over a fresh ctx of `task`, so a second call is the task's next attempt."""
 
     def loser():
         yield from ask_llm("l0", "l0", str)
@@ -524,14 +528,10 @@ def _metered_race(app: SqliteApp, settled: threading.Event, llm: Callable[[Any],
         return _described((yield from race([lambda: ask_llm("w", "w", str), loser])))
 
     handler = DurableHandler(
-        _Settled(SqliteTaskContext(app.conn, _TASK, app.write_lock), settled),
+        _Settled(SqliteTaskContext(app.conn, task, app.write_lock), settled),
         MeteredInterpreter(llm=llm, tools=lambda op: None),
-        contract=Contract.V1,
     )
     return handler.run(program), handler.meter.cost
-
-
-_TASK = uuid4()
 
 
 def test_D3_a_retry_serves_the_ops_a_loser_recorded(sqlite_app):
@@ -554,8 +554,9 @@ def test_D3_a_retry_serves_the_ops_a_loser_recorded(sqlite_app):
     def never(op: Any) -> Any:
         raise AssertionError(f"a retry called {op.messages!r}, which the record serves or stops")
 
-    first = _metered_race(app, settled, llm)
-    assert _metered_race(app, threading.Event(), never) == first
+    task = app.spawn("run", {})
+    first = _metered_race(app, task, settled, llm)
+    assert _metered_race(app, task, threading.Event(), never) == first
     assert first == (
         ["chosen", [["won", 0, "w"], ["stopped", 1, None]]],
         pytest.approx(spend["w"] + spend["l0"]),
@@ -583,7 +584,9 @@ def test_D4_a_loser_stops_only_for_a_choice_the_store_holds(sqlite_app):
     def program():
         return (yield from race([_calls("a"), _calls("b0", "b1")]))
 
-    ctx = _SaveFails(SqliteTaskContext(app.conn, uuid4(), app.write_lock), threading.Event())
+    ctx = _SaveFails(
+        SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), threading.Event()
+    )
     with pytest.raises(RuntimeError, match="refused the choice"):
         DurableHandler(ctx, tools).run(program)
     assert sorted(tools.calls) == ["a", "b0", "b1"]
@@ -603,7 +606,7 @@ def test_a_park_a_layer_injects_in_a_race_branch_is_refused(concurrent, sqlite_a
     where it would otherwise park the branch and let a gated op that never ran win the race."""
     app = sqlite_app()
     tools = _Tools()
-    ctx = SqliteTaskContext(app.conn, uuid4(), app.write_lock if concurrent else None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock if concurrent else None)
 
     def program():
         return (yield from race([_calls("a")]))
@@ -620,7 +623,7 @@ def test_a_branch_refused_an_injected_park_loses_to_its_sibling(concurrent, sqli
     the gated op never runs."""
     app = sqlite_app()
     tools = _Tools()
-    ctx = SqliteTaskContext(app.conn, uuid4(), app.write_lock if concurrent else None)
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock if concurrent else None)
 
     def program():
         return _described((yield from race([_calls("a"), _calls("b")])))
@@ -634,7 +637,8 @@ def test_a_losers_value_survives_a_retry_that_stops_it(sqlite_app):
     """The loser's op, admitted before the flag, is refused after the choice; the loser catches
     the refusal and returns a value. The refusal is recorded beside the op, so the next attempt
     re-raises it there and the loser replays to the same value."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
 
     def attempt() -> Any:
         started, settled = threading.Event(), threading.Event()
@@ -667,7 +671,8 @@ def test_a_losers_value_survives_a_retry_that_stops_it(sqlite_app):
 def test_a_viewer_reads_a_race_without_writing_it(sqlite_app):
     """A viewer over a finished run's tape serves the race's choice, its winner and its endings,
     and answers as the run did."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
 
     def program():
         return _described((yield from race([_calls("a"), _refuses("no")])))
@@ -698,7 +703,9 @@ def test_a_race_answers_with_values_that_have_no_json_form(sqlite_app):
     def _labelled(name: str):
         return _Opaque((yield from call_tool(name, {}, str)))
 
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+
+    task = app.spawn("run", {})
     for _ in range(2):
         ctx = SqliteTaskContext(app.conn, task, app.write_lock)
         assert DurableHandler(ctx, _Tools()).run(program) == ["_Opaque"]
@@ -747,7 +754,9 @@ def test_a_refusal_survives_a_crash_before_the_endings(sqlite_app, source):
         ctx = wrap(SqliteTaskContext(app.conn, task, app.write_lock))
         return DurableHandler(ctx, tools, op_layers=layers).run(program)
 
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+
+    task = app.spawn("run", {})
     with pytest.raises(RuntimeError, match="before the endings"):
         attempt(app, task, lambda ctx: _DiesAtTheEndings(ctx, threading.Event()))
     assert attempt(app, task, lambda ctx: ctx) == [
@@ -787,7 +796,9 @@ def test_a_gates_refusal_keeps_its_type_across_a_retry(sqlite_app):
                 raise RuntimeError("the worker dies before the endings are saved")
             return self._ctx.settle(name, value)
 
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+
+    task = app.spawn("run", {})
 
     def attempt(wrap: Callable[[Any], Any]) -> Any:
         tools = _Tools()
@@ -810,7 +821,8 @@ def test_a_served_refusal_keeps_the_count_of_its_name(sqlite_app):
     """A branch calls `b`, is refused, and calls `b` again. On the retry the refusal is served
     from the record, and the engine still counts that first `b`, so the second is read from its
     own checkpoint and the domain is not called again."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
     calls: list[str] = []
 
     asked: list[str] = []
@@ -847,7 +859,8 @@ def test_a_gate_that_decides_differently_on_a_retry_fails_before_the_call(sqlite
     """A gate refuses the loser's op on the first attempt and forwards it on the next. The
     record says the op was refused, so the retry fails, `Unretryable`, without the domain call a
     flagged loser would otherwise make after the choice."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
     decisions = iter([True, False])
     calls: list[str] = []
 
@@ -892,7 +905,8 @@ def test_an_op_a_layer_yields_runs_in_a_race_branch(sqlite_app):
     def program():
         return _described((yield from race([_calls("a")])))
 
-    ctx = SqliteTaskContext(sqlite_app().conn, uuid4(), None)
+    app = sqlite_app()
+    ctx = SqliteTaskContext(app.conn, app.spawn("run", {}), None)
     tools = _Tools()
     assert DurableHandler(ctx, tools, op_layers=[announces]).run(program) == [
         "chosen",
@@ -905,7 +919,8 @@ def test_a_transient_error_after_the_choice_retries_the_attempt(sqlite_app):
     """A loser's held op fails after the choice with an error a
     retry could clear, so the attempt fails at the barrier and saves no endings; the retry stops
     the loser at that op, which it never recorded."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
     started, settled = threading.Event(), threading.Event()
 
     def fails_after_the_choice() -> None:
@@ -958,7 +973,9 @@ def test_an_inner_races_save_in_flight_lands_before_the_outer_flag(sqlite_app):
 
     tools = _Tools({"won": lambda: inner_saving.wait(10)})
     app = sqlite_app()
-    ctx = _SlowInnerSave(SqliteTaskContext(app.conn, uuid4(), app.write_lock), threading.Event())
+    ctx = _SlowInnerSave(
+        SqliteTaskContext(app.conn, app.spawn("run", {}), app.write_lock), threading.Event()
+    )
     DurableHandler(ctx, tools).run(program)
     choices = [name for name in order if name in ("inner", race_choice(0).stored())]
     assert choices[0] == "inner" or "inner" not in choices, choices
@@ -968,7 +985,8 @@ def test_a_viewer_reads_a_race_whose_branch_caught_a_domain_refusal(sqlite_app):
     """A branch's first call is refused by the domain and its second answered, under one name.
     A viewer over the tape passes the recorded refusal to the engine, which counts it, so the
     second call reads its own checkpoint and the view answers as the run did."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
     asked: list[str] = []
 
     def refused_first() -> None:
@@ -997,7 +1015,8 @@ def test_a_gate_that_flips_after_a_crash_before_the_endings_fails_the_task(sqlit
     """The worker dies before the endings are saved, and the gate then forwards what it refused.
     With no endings to rebuild, the divergence is the loser's error, and it fails the task at the
     barrier rather than becoming the loser's ending."""
-    app, task = sqlite_app(), uuid4()
+    app = sqlite_app()
+    task = app.spawn("run", {})
     decisions = iter([True, False])
     calls: list[str] = []
 

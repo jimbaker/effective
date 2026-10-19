@@ -19,23 +19,26 @@ under the key it was first sent with. A settlement appends how it ended once its
 round after the first starts only once the round before it has ended.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Context, Decimal, Inexact
 from functools import partial
 from typing import Any, assert_never
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, JsonValue
 
 from effective.api import Effect, claim_ledger, read_ledger, step
 from effective.combinators import Grantor
 from effective.domain import CallTool
+from effective.handlers.base import digest_atom
 from effective.handlers.durable import named_idempotency_key
-from effective.keys import Index, Key, Name, Subject, compose_key
-from effective.ops import LedgerRow, Minted, Named
+from effective.keys import Index, Key, Name, Segment, Subject, compose_key
+from effective.ops import LedgerRow, Minted, Named, Unretryable
 
 from .cases import WITHIN, Case, in_cents
 from .erp.port import (
+    OPS,
     RESULTS,
     Applied,
     Apply,
@@ -45,7 +48,6 @@ from .erp.port import (
     PostMemo,
     Read,
     Refused,
-    Reverse,
     Statement,
     Unapplied,
     Unapply,
@@ -198,10 +200,10 @@ def performed(name: str, op: ErpOp, fact: Named) -> Effect[Outcome]:
             assert_never(unreachable)
 
 
-def _told(tool: str, args: dict[str, Any], fact: Named) -> Effect[Outcome]:
+def _told(name: str, tool: str, args: dict[str, Any], fact: Named) -> Effect[Outcome]:
     """A tool that answers `{"ok": bool, "reason": str}`, read as an outcome."""
     call = CallTool(name=tool, args=args, result_schema=dict)
-    match (yield from step(tool, call, idempotency_key=fact)):
+    match (yield from step(name, call, idempotency_key=fact)):
         case {"ok": True}:
             return Landed()
         case {"reason": str(reason)}:
@@ -211,18 +213,39 @@ def _told(tool: str, args: dict[str, Any], fact: Named) -> Effect[Outcome]:
             return Rejected(reason="the tool's answer is unreadable")
 
 
-def settlement(
-    case: Case,
-    credit: Decimal,
-    reason: str,
-    round: Round,
-    grantor: Grantor | None = None,
-    continued: int = 0,
-) -> list[Leg]:
-    """Credit `credit`, apply the payment and then the memo, tell the customer, and queue what is
-    still owed, with more attempts at the collection as `grantor` grants them. The notice is the
-    settlement's pivot, so a payment in full is told of a $0 credit too. A credit the case does not
-    absorb raises `Unabsorbed` before any leg exists."""
+ERP = "erp"
+"""The tool every ERP op is sent through."""
+
+
+class Sent(BaseModel, frozen=True):
+    """A step a leg sends: the step's name, the tool it calls and its arguments, each argument in
+    `filled` taken from what the leg it names landed. The arguments are JSON values, the form the
+    plan's digest reads, and each send gets its own copy, so what a tool does with them leaves the
+    plan as approved."""
+
+    step: str
+    tool: str
+    args: dict[str, JsonValue]
+    filled: dict[str, str] = Field(default_factory=dict)
+
+    def args_with(self, landed: Mapping[str, Any]) -> dict[str, Any]:
+        return deepcopy(self.args) | {arg: landed[leg] for arg, leg in self.filled.items()}
+
+
+class Planned(BaseModel, frozen=True):
+    """A leg as data: its name and kind, the step it sends, and the step that undoes it."""
+
+    name: str
+    kind: LegKind
+    act: Sent
+    undo: Sent | None = None
+
+
+def settlement(case: Case, credit: Decimal, reason: str, round: Round) -> list[Planned]:
+    """The plan that credits `credit`, applies the payment and then the memo, tells the customer,
+    and queues what is still owed. The notice is the settlement's pivot, so a payment in full is
+    told of a $0 credit too. A credit the case does not absorb raises `Unabsorbed` before any leg
+    exists."""
     if not in_cents(case.gap):
         raise Unabsorbed(f"the shortfall {case.gap} is not in whole cents")
     if not case.absorbs(credit):
@@ -231,58 +254,95 @@ def settlement(
     credited, still_owed = _dollars(credit), _dollars(owed)
     invoice, payment = case.invoice.id, case.payment.id
     fact = partial(about, case, round)
-    memo = PostMemo(invoice=invoice, amount=credit, date=case.payment.received, reason=reason)
-    post_memo = Leg(
-        MEMO,
-        LegKind.COMPENSABLE,
-        lambda _attempt, _landed: performed(MEMO, memo, fact(MEMO)),
-        lambda landed: performed(
-            "reverse-credit-memo",
-            Reverse(entry=landed[MEMO], reason="reversal"),
-            fact("reverse-credit-memo"),
+    received = case.payment.received
+    memo = PostMemo(invoice=invoice, amount=Decimal(credited), date=received, reason=reason)
+    post_memo = Planned(
+        name=MEMO,
+        kind=LegKind.COMPENSABLE,
+        act=Sent(step=MEMO, tool=ERP, args=memo.model_dump(mode="json")),
+        undo=Sent(
+            step="reverse-credit-memo",
+            tool=ERP,
+            args={"op": "reverse", "reason": "reversal"},
+            filled={"entry": MEMO},
         ),
     )
-    apply_payment = Leg(
-        APPLY,
-        LegKind.COMPENSABLE,
-        lambda _attempt, _landed: performed(
-            APPLY, Apply(entry=payment, invoice=invoice), fact(APPLY)
+    applied = Apply(entry=payment, invoice=invoice)
+    unapplied = Unapply(entry=payment, invoice=invoice, undoes=key_of(fact(APPLY)))
+    apply_payment = Planned(
+        name=APPLY,
+        kind=LegKind.COMPENSABLE,
+        act=Sent(step=APPLY, tool=ERP, args=applied.model_dump(mode="json")),
+        undo=Sent(step=UNAPPLY, tool=ERP, args=unapplied.model_dump(mode="json")),
+    )
+    apply_memo = Planned(
+        name=APPLY_MEMO,
+        kind=LegKind.COMPENSABLE,
+        act=Sent(
+            step=APPLY_MEMO,
+            tool=ERP,
+            args={"op": "apply", "invoice": invoice},
+            filled={"entry": MEMO},
         ),
-        lambda _landed: performed(
-            UNAPPLY,
-            Unapply(entry=payment, invoice=invoice, undoes=key_of(fact(APPLY))),
-            fact(UNAPPLY),
+        undo=Sent(
+            step=UNAPPLY_MEMO,
+            tool=ERP,
+            args={"op": "unapply", "invoice": invoice, "undoes": key_of(fact(APPLY_MEMO))},
+            filled={"entry": MEMO},
         ),
     )
-    apply_memo = Leg(
-        APPLY_MEMO,
-        LegKind.COMPENSABLE,
-        lambda _attempt, landed: performed(
-            APPLY_MEMO, Apply(entry=landed[MEMO], invoice=invoice), fact(APPLY_MEMO)
-        ),
-        lambda landed: performed(
-            UNAPPLY_MEMO,
-            Unapply(entry=landed[MEMO], invoice=invoice, undoes=key_of(fact(APPLY_MEMO))),
-            fact(UNAPPLY_MEMO),
-        ),
+    notify = Planned(
+        name="notify",
+        kind=LegKind.PIVOT,
+        act=Sent(step="notify", tool="notify", args={"invoice": invoice, "credit": credited}),
     )
-    notify = Leg(
-        "notify",
-        LegKind.PIVOT,
-        lambda _attempt, _landed: _told(
-            "notify", {"invoice": invoice, "credit": credited}, fact("notify")
-        ),
-    )
-    remind = Leg(
-        REMIND,
-        LegKind.RETRIABLE,
-        lambda attempt, _landed: _told(
-            REMIND, {"invoice": invoice, "owed": still_owed}, fact(REMIND, attempt, continued)
-        ),
-        grantor=grantor,
+    remind = Planned(
+        name=REMIND,
+        kind=LegKind.RETRIABLE,
+        act=Sent(step=REMIND, tool=REMIND, args={"invoice": invoice, "owed": still_owed}),
     )
     credits = [post_memo, apply_payment, apply_memo] if credit else [apply_payment]
     return [*credits, notify, *([remind] if owed else [])]
+
+
+def legs_of(
+    plan: list[Planned],
+    case: Case,
+    round: Round,
+    grantor: Grantor | None = None,
+    continued: int = 0,
+) -> list[Leg]:
+    """The legs that send what `plan` says, each step about `case`'s settlement in `round`: a
+    retriable leg's attempts counted within the `continued`-th continuation, with more attempts as
+    `grantor` grants them."""
+
+    def sending(sent: Sent, retried: bool) -> Callable[[int, Mapping[str, Any]], Effect[Outcome]]:
+        def send(attempt: int, landed: Mapping[str, Any]) -> Effect[Outcome]:
+            fact = about(case, round, sent.step, *((attempt, continued) if retried else ()))
+            args = sent.args_with(landed)
+            if sent.tool == ERP:
+                return performed(sent.step, OPS.validate_python(args), fact)
+            return _told(sent.step, sent.tool, args, fact)
+
+        return send
+
+    def leg(planned: Planned) -> Leg:
+        retried = planned.kind is LegKind.RETRIABLE
+        undo = None if planned.undo is None else partial(sending(planned.undo, False), 0)
+        granted = grantor if retried else None
+        return Leg(planned.name, planned.kind, sending(planned.act, retried), undo, granted)
+
+    return [leg(planned) for planned in plan]
+
+
+def planned(plan: list[Planned]) -> Segment:
+    """The digest of `plan`: every leg's name and kind, and each step it sends or undoes with."""
+    return digest_atom([leg.model_dump(mode="json") for leg in plan])
+
+
+class Replanned(ValueError, Unretryable):
+    """A continuation whose settlement plans other legs than the plan its round's approval bound,
+    refused before any leg runs."""
 
 
 def settle(
@@ -293,7 +353,8 @@ def settle(
     settlement finding another's claim ends `Superseded`, and the claim is the op an approval of
     the credit gates. A round after the first opens only once the round before it ended
     compensated."""
-    run = saga(settlement(case, credit, reason, round))
+    plan = settlement(case, credit, reason, round)
+    run, digest = saga(legs_of(plan, case, round)), planned(plan)
     settled = claim_of(case, round)
     earlier = Round(round.books, round.number - 1) if round.number else None
 
@@ -317,6 +378,7 @@ def settle(
             reason=reason,
             broken=[name for name, holds in INVARIANTS.items() if not holds(case)],
             claimant=claimant,
+            plan=digest,
         )
 
         def superseded(held: dict[str, Any]) -> Superseded | None:
@@ -353,12 +415,18 @@ def resume(case: Case, round: Round) -> Callable[[], Effect[Ended | Uncontinued]
         terms = yield from read_ledger(claim_of(case, round))
         endings = yield from _endings(case, round)
         match terms, endings:
-            case {"credit": str(credit), "reason": str(reason)}, [
+            case {"credit": str(credit), "reason": str(reason)} as held, [
                 *_,
                 {"ending": "unlanded", "result": result},
             ]:
+                plan = settlement(case, Decimal(credit), reason, round)
+                if (approved := held.get("plan")) != (digest := planned(plan)):
+                    raise Replanned(
+                        f"the round's approval bound plan {approved}, and its settlement now "
+                        f"plans {digest}"
+                    )
                 unlanded, continued = Unlanded.model_validate(result), len(endings)
-                legs = settlement(case, Decimal(credit), reason, round, continued=continued)
+                legs = legs_of(plan, case, round, continued=continued)
                 outcome = yield from resumed(legs, unlanded.landed, unlanded.leg)()
                 yield from claim_ledger(_ended_row(case, round, outcome, continued))
                 return outcome

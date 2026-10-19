@@ -8,6 +8,7 @@ the backend's `concurrent_safe` capability one level down (so nested gather stay
 from datetime import datetime
 from typing import Any
 
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.handlers.durable import _PrefixedCtx
 from effective.keys import Key
@@ -28,6 +29,9 @@ def test_absurd_sdk_still_exposes_the_begin_complete_split():
 class _FakeConcurrentCtx:
     """A minimal concurrent-safe ctx (the capability the SQLite engine / ConcurrentAbsurdCtx
     advertise)."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     concurrent_safe = True
 
@@ -54,6 +58,9 @@ def test_prefixed_ctx_namespaces_step_keys():
     seen: list[Key] = []
 
     class _Recorder:
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name, thunk, /):
             seen.append(name)
             return thunk()

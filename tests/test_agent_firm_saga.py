@@ -33,7 +33,7 @@ from effective.govern import BudgetRefused, Exceeded
 from effective.handlers.durable import DurableHandler
 from effective.keys import Index, Key, Name, Subject, compose_key
 from effective.ops import LedgerRow
-from examples.agent_firm.ar import APPLY, REMIND, TERMS, Round, settle, settlement
+from examples.agent_firm.ar import APPLY, REMIND, TERMS, Round, legs_of, settle, settlement
 from examples.agent_firm.cases import SLA_CAP
 from examples.agent_firm.erp.port import Apply, Erp, Kind
 from examples.agent_firm.erp.scripted import ScriptedOdoo
@@ -299,7 +299,8 @@ def test_a_grant_extends_a_retriable_leg_past_its_attempts(backend, granted):
     grantor, landed = one_more, granted
     answers = iter([{"ok": False, "reason": "AP is closed today"}] * RETRIES + [OK])
     world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), remind=lambda args: next(answers))
-    legs = settlement(SLA_CAP, CREDIT, "r", fresh_round(), grantor=grantor)
+    round = fresh_round()
+    legs = legs_of(settlement(SLA_CAP, CREDIT, "r", round), SLA_CAP, round, grantor=grantor)
     run_id = f"r-{uuid4().hex[:8]}"
     backend.register(run_id, lambda _run_id: saga(legs)(), world.domain(), Fault(None), ())
     snapshot = backend.run_until_result(backend.spawn(run_id, run_id))

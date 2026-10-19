@@ -13,15 +13,18 @@ from _authority import ruled
 
 from effective.api import ask_llm, gather
 from effective.budget import MeasuredBudget
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import (
+    FORMAT_PARAM,
+    NEWEST_FORMAT,
+    MeteredInterpreter,
+    RecordedFormat,
+    Usage,
+    marked,
+)
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.handlers.durable import DurableHandler
-
-# These tests build a ctx directly rather than spawning, so the task id is a FIXTURE.
-# A fixed literal, not `uuid7()`: the id keys every checkpoint row these tests write, and a
-# constant keeps those rows byte-stable run to run. The shape is a real v7 uuid so it parses
-# the way an engine-minted one does.
-_TASK = UUID("019fa000-0000-7000-8000-000000000001")
+from effective.layers import compose_domain
+from effective.ops import CompositionRefused, RecordedValueRejected, UnreadFormat
 
 # Two AskLLM turns with distinct usage, so a mis-fold is visible in the totals.
 USAGES: list[tuple[str, Usage]] = [
@@ -62,9 +65,9 @@ def _gather_ask_wf():
     return {"results": results}
 
 
-def _stored(app: SqliteApp, name: str) -> Any:
+def _stored(app: SqliteApp, task: UUID, name: str) -> Any:
     row = app.conn.execute(
-        "SELECT state FROM checkpoints WHERE task_id=? AND name=?", (_TASK, name)
+        "SELECT state FROM checkpoints WHERE task_id=? AND name=?", (task, name)
     ).fetchone()
     assert row is not None, f"no checkpoint {name!r}"
     return json.loads(row[0])
@@ -79,27 +82,31 @@ def app():
     a.close()
 
 
-def test_v1_envelopes_askllm_and_meters_above_the_checkpoint(app):
+@pytest.fixture
+def task(app):
+    return app.spawn("accrual", {})
+
+
+def test_v1_envelopes_askllm_and_meters_above_the_checkpoint(app, task):
     interp = MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
-    handler = DurableHandler(SqliteTaskContext(app.conn, _TASK), interp, contract=Contract.V1)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task), interp)
 
     out = handler.run(_two_ask_wf)
 
     assert out == {"a": "ans-1", "b": "ans-2"}
     assert handler.meter == BOTH  # both usages folded into the handler-owned meter
-    stored = _stored(app, "step:ask1")
+    stored = _stored(app, task, "step:ask1")
     assert set(stored) == {"result", "usage"}  # enveloped, not a bare result
     assert stored["result"] == "ans-1"  # the workflow still sees the bare result on read
     assert stored["usage"]["cost"] == 0.001
 
 
-def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app):
+def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app, task):
     """The F1 fix, as a poison-stub replay proof: the second run's domain RAISES if
     touched, yet the meter re-derives to the same total from the recorded envelopes."""
     h1 = DurableHandler(
-        SqliteTaskContext(app.conn, _TASK),
+        SqliteTaskContext(app.conn, task),
         MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools),
-        contract=Contract.V1,
     )
     h1.run(_two_ask_wf)
     assert h1.meter == BOTH
@@ -108,9 +115,8 @@ def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app):
         raise AssertionError("replay must not re-run the domain (F1: usage is recorded state)")
 
     h2 = DurableHandler(
-        SqliteTaskContext(app.conn, _TASK),
+        SqliteTaskContext(app.conn, task),
         MeteredInterpreter(llm=_poison, tools=_poison),
-        contract=Contract.V1,
     )
     out = h2.run(_two_ask_wf)
 
@@ -118,71 +124,62 @@ def test_v1_meter_rederives_on_replay_without_rerunning_the_domain(app):
     assert h2.meter == h1.meter  # re-derived from the record, never re-run
 
 
-def test_v1_handler_on_a_v0_checkpoint_fails_loud_not_silent(app):
-    """The migration guard's failure mode (the footgun `Contract.from_params` exists to
-    prevent): if a v1 handler ever reads a v0 (bare) checkpoint — e.g. an operator bumps a
-    task's contract ignoring its params — it must fail LOUD, never silently misread the
-    usage as $0 and mis-derive the trip. The bare result `"ans-1"` has no `["result"]`."""
+def test_a_bare_model_checkpoint_fails_loud_not_silent(app, task):
+    """A model call recorded bare, as a release before the envelope wrote it, fails by name:
+    read as `$0` it would mis-derive the trip."""
     DurableHandler(
-        SqliteTaskContext(app.conn, _TASK),
+        SqliteTaskContext(app.conn, task),
         MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools),
-        contract=Contract.V0,
-    ).run(_two_ask_wf)  # commit bare v0 rows
+    ).run(_two_ask_wf)
+    app.conn.execute(
+        "UPDATE checkpoints SET state = ? WHERE task_id = ? AND name = ?",
+        (json.dumps("ans-1"), task, "step:ask1"),
+    )
 
-    with pytest.raises(TypeError):  # decoding a bare string as an envelope raises, not $0
+    with pytest.raises(RecordedValueRejected, match=r"\{result, usage\}"):
         DurableHandler(
-            SqliteTaskContext(app.conn, _TASK),
+            SqliteTaskContext(app.conn, task),
             MeteredInterpreter(llm=_no_tools, tools=_no_tools),  # poison — never reached
-            contract=Contract.V1,
         ).run(_two_ask_wf)
 
 
-def test_v0_is_byte_identical_bare_result_and_no_handler_accrual(app):
-    interp = MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
-    handler = DurableHandler(SqliteTaskContext(app.conn, _TASK), interp, contract=Contract.V0)
-
-    out = handler.run(_two_ask_wf)
-
-    assert out == {"a": "ans-1", "b": "ans-2"}
-    assert _stored(app, "step:ask1") == "ans-1"  # bare result — identical to the pre-ADR format
-    assert handler.meter == Usage()  # the handler meter is dormant on v0
-    assert interp.meter == BOTH  # the telemetry meter (metered layer) still accrues live
-
-
-def test_v1_gather_folds_branch_subtotals_into_parent_in_index_order(app):
+def test_v1_gather_folds_branch_subtotals_into_parent_in_index_order(app, task):
     """§4 / Lean Model B: each branch accrues into its own subtotal; the barrier folds
     them into the parent in branch-index order. Sequential ctx (no write_lock)."""
     interp = MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
-    handler = DurableHandler(SqliteTaskContext(app.conn, _TASK), interp, contract=Contract.V1)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task), interp)
 
     out = handler.run(_gather_ask_wf)
 
     assert out == {"results": ["ans-1", "ans-2"]}
     assert handler.meter == BOTH  # both branches' subtotals reached the parent meter
-    assert isinstance(_stored(app, "gather:0,0;step:ask0"), dict)  # per-branch envelope, prefixed
+    assert isinstance(
+        _stored(app, task, "gather:0,0;step:ask0"), dict
+    )  # per-branch envelope, prefixed
 
 
-@pytest.mark.parametrize("contract", [Contract.V0, Contract.V1])
-def test_contract_from_params_round_trips(contract):
-    from effective.cost import CONTRACT_PARAM
+@pytest.mark.parametrize("recorded_format", list(RecordedFormat), ids=str)
+def test_contract_from_params_round_trips(recorded_format):
+    from effective.cost import FORMAT_PARAM
 
-    assert Contract.from_params({CONTRACT_PARAM: contract.value}) is contract
-    assert Contract.from_params({}) is Contract.V0  # absent → v0 (in-flight tasks)
+    assert RecordedFormat.from_params({FORMAT_PARAM: recorded_format.value}) is recorded_format
 
 
 @pytest.mark.parametrize(
-    ("contract", "marked"),
-    [(Contract.V0, {"run_id": "r"}), (Contract.V1, {"run_id": "r", "__accrual_contract__": "v1"})],
-    ids=str,
+    "params", [{}, {"__accrual_contract__": "v1"}], ids=["unmarked", "old-key"]
 )
-def test_a_contract_marks_the_params_it_is_read_back_from(contract, marked):
-    params = contract.spawn_params({"run_id": "r"})
-    assert (params, Contract.from_params(params)) == (marked, contract)
+def test_params_without_the_formats_key_are_refused(params):
+    with pytest.raises(UnreadFormat):
+        RecordedFormat.from_params(params)
 
 
-def test_a_param_named_for_the_contract_is_refused():
-    with pytest.raises(ValueError, match="__accrual_contract__"):
-        Contract.V1.spawn_params({"__accrual_contract__": "v0"})
+def test_params_are_marked_once_with_the_newest_format():
+    params = marked({"run_id": "r"})
+    assert (params, RecordedFormat.from_params(params), marked(params)) == (
+        {"run_id": "r", FORMAT_PARAM: NEWEST_FORMAT.value},
+        NEWEST_FORMAT,
+        params,
+    )
 
 
 # ── the measured trip: park-and-ask on the durable engine ───────────────
@@ -210,7 +207,7 @@ def _spawn_measured(app, run_id, *, limit, on_exhaust, max_attempts=3, cost=0.00
     def task(params, ctx):
         interp = MeteredInterpreter(llm=_flat_llm(cost), tools=_no_tools)
         budget = MeasuredBudget(overall=limit, run_id=params["run_id"], on_exhaust=on_exhaust)
-        return DurableHandler(ctx, interp, contract=Contract.V1, budget=budget).run(_three_ask_wf)
+        return DurableHandler(ctx, interp, budget=budget).run(_three_ask_wf)
 
     return app.spawn(run_id, {"run_id": run_id}, max_attempts=max_attempts)
 
@@ -249,20 +246,13 @@ def test_measured_trip_stop_grant_refuses_the_over_budget_ask(app):
     assert "budget exceeded" in str(snap.failure or "").lower()
 
 
-@pytest.mark.parametrize(
-    ("source", "chosen"),
-    [
-        ("DurableHandler(ctx, domain, contract=Contract.V1)", 1),
-        ("DurableHandler(ctx, domain, contract=Contract.V0)", 1),
-        ("DurableHandler(ctx, domain, contract=Contract.from_params(params))", 0),
-        ("DurableHandler(ctx, domain, contract=contract)", 0),
-        ("app.spawn('task', Contract.V1.spawn_params({}))", 0),
-    ],
-    ids=["v1-at-the-handler", "v0-at-the-handler", "from-params", "passed-through", "at-spawn"],
-)
-def test_a_contract_named_at_its_reader_is_found(tmp_path, source, chosen):
-    from effective.lint import check_contract_at_spawn_file
-
-    path = tmp_path / "reader.py"
-    path.write_text(source + "\n")
-    assert len(check_contract_at_spawn_file(path)) == chosen
+def test_a_measured_budget_over_a_domain_that_reports_no_usage_is_refused(app, task):
+    hidden = compose_domain(
+        [], base=MeteredInterpreter(llm=_metering_llm(USAGES), tools=_no_tools)
+    )
+    with pytest.raises(CompositionRefused, match="MeasuredBudget"):
+        DurableHandler(
+            SqliteTaskContext(app.conn, task),
+            hidden,
+            budget=MeasuredBudget(overall=1.0, run_id="r"),
+        )

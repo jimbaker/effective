@@ -115,6 +115,8 @@ _BY_CALL: dict[tuple[Site, Source], dict[Outcome, Label]] = {
     ("DurableHandler._join",          "repark"):      {Outcome.ANSWERED: WAKE_RACE,
                                                        Outcome.PARKED: SUSPENDS,
                                                        Outcome.STORE_RAISED: STORE},
+    ("DurableHandler.__init__",       "recorded_format"): {Outcome.ANSWERED: RECORD,
+                                                           Outcome.STORE_RAISED: STORE},
     ("_attempt_of",                   "attempt"):     {Outcome.ANSWERED: World("elides"),
                                                        Outcome.STORE_RAISED: STORE},
     ("DurableHandler._branch_sleep",  "clock"):       {Outcome.DUE: MONOTONE,

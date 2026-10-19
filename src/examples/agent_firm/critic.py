@@ -7,7 +7,6 @@ claimed; a critic that reads the contract finds its $1,000 cap. `run` performs o
 a replayed review is the recorded one.
 """
 
-import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, assert_never
@@ -15,7 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from effective import Contract, MeteredInterpreter
+from effective import MeteredInterpreter
 from effective.api import Effect
 from effective.channels import Repair
 from effective.checkpoints import read_sqlite_task
@@ -70,11 +69,10 @@ def run(world: World, db: Path) -> Review:
 
     @app.register_task("critique")
     def task(params: dict[str, Any], ctx: Any) -> Any:
-        contract = Contract.from_params(params, absent=Contract.V1)
-        return DurableHandler(ctx, world.domain(), ledger=None, contract=contract).run(critiqued)
+        return DurableHandler(ctx, world.domain(), ledger=None).run(critiqued)
 
     try:
-        done = app.run_until_result(app.spawn("critique", Contract.V1.spawn_params({})))
+        done = app.run_until_result(app.spawn("critique", {}))
         if done is None or done.state != "completed":
             raise RuntimeError(f"the run ended {done}")
         return Review.model_validate(done.result)
@@ -91,13 +89,12 @@ def replay(db: Path) -> Review:
     called."""
     app = SqliteApp(str(db))
     try:
-        ((task_id, params),) = app.conn.execute("SELECT task_id, params FROM tasks").fetchall()
+        ((task_id,),) = app.conn.execute("SELECT task_id FROM tasks").fetchall()
         task_id = UUID(str(task_id))
         tape = {checkpoint.key for checkpoint in read_sqlite_task(db, task_id)}
         ctx = ViewingCtx(SqliteTaskContext(app.conn, task_id, app.write_lock), tape)
         interpreter = MeteredInterpreter(llm=_unasked, tools=_unasked, judge=_unasked)
-        contract = Contract.from_params(json.loads(params), absent=Contract.V1)
-        handler = DurableHandler(ctx, interpreter, ledger=None, contract=contract)
+        handler = DurableHandler(ctx, interpreter, ledger=None)
         return Review.model_validate(handler.run(critiqued))
     finally:
         app.close()

@@ -27,6 +27,8 @@ PROBE = textwrap.dedent(
     sys.meta_path.insert(0, Absent())
     from absurd_sdk import Absurd
 
+    from effective.cost import marked
+
     queue = "speaks_text_" + uuid4().hex[:12]
     app = Absurd(sys.argv[2], queue_name=queue)
     app.create_queue()
@@ -45,7 +47,8 @@ PROBE = textwrap.dedent(
                 domain = MeteredInterpreter(llm=scripted_caller([turn]), tools=tools)
                 return run_subagent_as_task(params, ctx, domain=domain)
 
-            spawned = app.spawn("child", {"task": "answer", DONE_EVENT_PARAM: "probe:parent"})
+            params = {"task": "answer", DONE_EVENT_PARAM: "probe:parent"}
+            spawned = app.spawn("child", marked(params))
         else:
             from effective.api import await_event, call_tool
             from effective.checkpoints import Checkpoint
@@ -68,14 +71,15 @@ PROBE = textwrap.dedent(
                     params, ctx, workflow=workflow, domain=None,
                     hypothetical_ledger=lambda _: Ledger(),
                     read_base=lambda _: [Checkpoint(Key.parse("step;tool:prefix"), 1)],
+                    read_base_params=lambda _: marked({}),
                 )
 
-            spawned = app.spawn("fork", {
+            spawned = app.spawn("fork", marked({
                 "child_run_id": "probe-child", "forked_from": "probe-base",
                 "fork_point": "probe:base", "base_task_id": str(uuid4()),
                 "through": "step;tool:prefix", "forked_at_event": "probe:base",
                 "delta": {"decision": "approve"},
-            })
+            }))
         app.work_batch()
         snapshot = app.fetch_task_result(spawned["task_id"])
         assert snapshot.state == "completed", snapshot.failure

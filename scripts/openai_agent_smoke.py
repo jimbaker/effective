@@ -16,6 +16,7 @@ from pathlib import Path
 
 from openai import OpenAI
 
+from effective.contexts import LocalCtx
 from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter
 from effective.domain import CallTool
 from effective.handlers.durable import DurableHandler
@@ -37,19 +38,6 @@ the tool and `tool.arguments_json` to a JSON object string of its arguments
 (e.g. {"a": 19, "b": 23}) and set `answer` to null. When you have the result,
 set `answer` to the final text and set `tool` to null. Prefer the tool over
 mental arithmetic."""
-
-
-class LocalCtx:
-    """Non-durable Absurd ctx: a step just runs its thunk inline."""
-
-    def step(self, name, thunk):
-        return thunk()
-
-    def await_event(self, name):
-        raise NotImplementedError
-
-    def sleep_until(self, when, /, *, name=None):
-        raise NotImplementedError
 
 
 def tool_runner(op: CallTool) -> ToolResult:

@@ -53,7 +53,7 @@ from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from effective.api import Effect
 from effective.choice import Choice, Ending, Raised, Refusal, Stopped, Unchosen, Won, decide
-from effective.cost import Usage
+from effective.cost import RecordedFormat, Usage
 from effective.domain import SPAWN_TOOL, AskLLM, CallTool, DomainOp, Judge
 from effective.govern import Refused, all_refusals
 from effective.keys import (
@@ -198,6 +198,11 @@ def effect_of(op: WorkflowOp) -> Any:
         return _effect(op)
     except PydanticSerializationError as unencodable:
         raise UnshowableEffect(op) from unencodable
+
+
+def effect_digest(op: WorkflowOp) -> Segment:
+    """The digest of what `op` would do to the world, which a ruling that binds the op names."""
+    return digest_atom(effect_of(op))
 
 
 def _effect(op: WorkflowOp) -> Any:
@@ -1192,6 +1197,11 @@ class TaskContext(Protocol):
     it gave. A ctx without this meets a named refusal (``DurableHandler._await_bounded``) rather
     than a dropped deadline.
     """
+
+    def recorded_format(self) -> RecordedFormat:
+        """The format this run records under. An engine's ctx reads it from its task's stored
+        spawn params; an in-process one answers the format it was built with."""
+        ...
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         """Run ``thunk`` AT MOST ONCE per ``name``; checkpoint its JSON-able

@@ -14,7 +14,7 @@ answer, `Denied`. Every model call is a step, so a resolution resumed after its 
 them all and asks none again.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from decimal import Decimal
 from enum import StrEnum
 from string.templatelib import Template
@@ -32,7 +32,9 @@ from effective.govern import (
     Park,
     Policy,
     Proceed,
+    Refusal,
     Refused,
+    Unbound,
     answers_for,
     fuse_prompt,
     park,
@@ -40,7 +42,9 @@ from effective.govern import (
     ruler_of,
 )
 from effective.govern import Verdict as Gating
+from effective.handlers.base import effect_digest
 from effective.keys import Index, Key, Name, Run, Segment, compose_key
+from effective.keys.frame import split_frames
 from effective.ops import AppendLedgerRow, LedgerRow, WorkflowOp
 
 from .ar import INVARIANTS, TERMS, Round, Settlement, claim_of, settle
@@ -76,9 +80,10 @@ class Stopped(BaseModel):
 
 
 class Denied(BaseModel):
-    """A resolution whose credit the approver refused: it posted nothing and holds no round."""
+    """A resolution whose credit `ruler` refused: it posted nothing and holds no round."""
 
     reason: str
+    ruler: str
 
 
 type Resolved = Settlement | Stopped | Denied
@@ -155,19 +160,25 @@ def resolve(
 def approved(
     settlement: Callable[[], Effect[Settlement]], claim: Key
 ) -> Effect[Settlement | Denied]:
-    """`settlement`, or `Denied` when the approval refuses its `claim` of the round, so a denial
-    is one case's answer and its siblings settle. Any other refusal is raised: a refused spend,
-    since every later metered op is refused the same way, and another policy's refusal."""
+    """`settlement`, or `Denied` when the approval alone refuses its `claim` of the round on a
+    ruling, so a denial is one case's answer and its siblings settle. Any other refusal is raised:
+
+    | the refusal                | why it is raised                               |
+    |----------------------------|------------------------------------------------|
+    | a refused spend            | every later metered op is refused the same way |
+    | a ruling on another effect | the claim changed under the ruling             |
+    | another policy's refusal   | only the approver denies                       |
+    """
     try:
         return (yield from settlement())
-    except BudgetRefused:
+    except BudgetRefused, Unbound:
         raise
     except Refused as refused:
-        match refused.op:
-            case AppendLedgerRow(row=row) if (
-                row.event_id == claim and str(refused) == NOT_APPROVED
-            ):
-                return Denied(reason=str(refused))
+        match refused.refusals, refused.op:
+            case [Refusal(policy=policy, reason=reason, by=str(ruler))], AppendLedgerRow(
+                row=row
+            ) if policy == APPROVAL and row.event_id == claim:
+                return Denied(reason=reason, ruler=ruler)
             case _:
                 raise
 
@@ -214,16 +225,17 @@ def approval(proposer: Segment) -> Policy:
     def approve(op: WorkflowOp, state: GateState) -> Gating:
         if (terms := terms_of(op)) is None:
             return Proceed()
+        binds = effect_digest(op)
         match answers_for(state, APPROVAL), ruler_of(state, APPROVAL):
             case [], _:
-                return park(Ask(APPROVAL, "approve this settlement?", terms))
+                return park(Ask(APPROVAL, "approve this settlement?", terms, binds))
             case _, ruler if ruler == proposer:
                 prompt = "approve this settlement? its proposer's approval does not count"
-                return park(Ask(APPROVAL, prompt, terms | {"proposer": proposer}))
+                return park(Ask(APPROVAL, prompt, terms | {"proposer": proposer}, binds))
             case [*_, {"decision": "approve"}], _:
                 return Proceed()
-            case _:
-                return refuse(NOT_APPROVED)
+            case _, ruler:
+                return refuse(NOT_APPROVED, policy=APPROVAL, by=ruler)
 
     return approve
 
@@ -250,9 +262,9 @@ def _approval(row: Literal["asked", "ruled"], state: GateState) -> Key:
 
 
 def announced(parked: Park, state: GateState) -> WorkflowOp:
-    """The park's ask as a ledger row, written before the run parks: the prompt, and each ask's
-    detail, so whoever answers reads the terms, the invoice, the credit and the deduction, before
-    ruling on them.
+    """The park's ask as a ledger row, written before the run parks: the prompt, each ask's
+    detail and the effect it binds, so whoever answers reads the terms, the invoice, the credit
+    and the deduction, before ruling on them; and the park, by its name and its frames.
 
     A ledger's ids are unique across runs, so the row is named by the gate, the run, its
     generation and the pass, and by where the gated op runs: two resolutions gathered in one run
@@ -263,8 +275,24 @@ def announced(parked: Park, state: GateState) -> WorkflowOp:
             kind=ASKED,
             ask=fuse_prompt(parked),
             detail=[dict(ask.detail) for ask in parked.asks],
+            binds={ask.policy: ask.binds for ask in parked.asks if ask.binds is not None},
+            park=state.park_name.stored(),
+            frames=[] if state.placement is None else split_frames(state.placement.stored())[0],
         )
     )
+
+
+def bindings(rows: Iterable[Mapping[str, Any]], wake_event: str) -> Mapping[str, Segment]:
+    """The digest each ask binds at the park registered as `wake_event`, by policy, read from the
+    ask rows of its run: the latest row naming that park under the same frames."""
+    parked = split_frames(wake_event)
+
+    def here(row: Mapping[str, Any]) -> bool:
+        frames, identity = split_frames(row["park"])
+        return parked == ((*row["frames"], *frames), identity)
+
+    (*_, row) = [row for row in rows if row["kind"] == ASKED and here(row)]
+    return {policy: Segment(digest) for policy, digest in row["binds"].items()}
 
 
 def ruled(parked: Park, state: GateState, by: Segment | None, answer: Any) -> WorkflowOp:

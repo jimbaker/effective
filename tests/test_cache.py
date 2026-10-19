@@ -8,7 +8,6 @@ from collections import namedtuple
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any
-from uuid import UUID
 
 import pytest
 from pydantic import BaseModel, ConfigDict, create_model, field_validator
@@ -17,7 +16,7 @@ from effective import call_tool
 from effective.api import ask_llm
 from effective.cache import Cache, FileStore, op_digest
 from effective.channels import Message
-from effective.cost import Contract, MeteredInterpreter, Usage, serve
+from effective.cost import MeteredInterpreter, Usage, serve
 from effective.domain import AskLLM, CallTool, Judge, WireNoul
 from effective.engines.sqlite import SqliteTaskContext
 from effective.handlers.durable import DurableHandler
@@ -25,8 +24,6 @@ from effective.keys import Key
 from effective.layers import compose_domain, domain_layer
 from effective.telemetry import Span, traced
 
-FIRST = UUID("019fa000-0000-7000-8000-00000000c001")
-SECOND = UUID("019fa000-0000-7000-8000-00000000c002")
 SPENT = Usage(prompt_tokens=10, completion_tokens=5, cost=0.001)
 
 
@@ -66,38 +63,39 @@ def _workflow(urls: tuple[str, ...]):
     return run
 
 
-def _run(app, task: UUID, answerer: Answerer, store: FileStore, urls: tuple[str, ...], sink=None):
+def _run(app, answerer: Answerer, store: FileStore, urls: tuple[str, ...], sink=None):
+    task = app.spawn("cached", {})
     layers = [traced(sink, session_id=str(task))] if sink is not None else []
     cache = Cache(store, {AskLLM: "model-a", CallTool: "model-a"})
     interpreter = MeteredInterpreter(
         answerer.llm, answerer.tools, domain_layers=layers, cache=cache
     )
-    handler = DurableHandler(SqliteTaskContext(app.conn, task), interpreter, contract=Contract.V1)
+    handler = DurableHandler(SqliteTaskContext(app.conn, task), interpreter)
     return handler.run(_workflow(urls)), handler.meter
 
 
 def test_a_second_run_asks_nothing_and_spends_nothing(sqlite_app, tmp_path):
     app, store = sqlite_app(), FileStore(tmp_path / "cache")
     first, second = Answerer(), Answerer()
-    out1, meter1 = _run(app, FIRST, first, store, ("a", "b"))
-    out2, meter2 = _run(app, SECOND, second, store, ("a", "b"))
+    out1, meter1 = _run(app, first, store, ("a", "b"))
+    out2, meter2 = _run(app, second, store, ("a", "b"))
     assert (out1, first.asked, meter1) == (out2, ["llm", "a", "b"], SPENT)
     assert (second.asked, meter2) == ([], Usage())
 
 
 def test_a_changed_argument_asks_only_that_op(sqlite_app, tmp_path):
     app, store = sqlite_app(), FileStore(tmp_path / "cache")
-    _run(app, FIRST, Answerer(), store, ("a", "b"))
+    _run(app, Answerer(), store, ("a", "b"))
     second = Answerer()
-    _run(app, SECOND, second, store, ("a", "c"))
+    _run(app, second, store, ("a", "c"))
     assert second.asked == ["c"]
 
 
 def test_a_hit_is_marked_on_its_span_and_a_miss_is_not(sqlite_app, tmp_path):
     app, store = sqlite_app(), FileStore(tmp_path / "cache")
     spans: list[Span] = []
-    _run(app, FIRST, Answerer(), store, ("a",), sink=spans.append)
-    _run(app, SECOND, Answerer(), store, ("a", "b"), sink=spans.append)
+    _run(app, Answerer(), store, ("a",), sink=spans.append)
+    _run(app, Answerer(), store, ("a", "b"), sink=spans.append)
     assert [s.fields.get("effective.reused", False) for s in spans] == [
         False,
         False,
@@ -110,8 +108,8 @@ def test_a_hit_is_marked_on_its_span_and_a_miss_is_not(sqlite_app, tmp_path):
 def test_a_reused_answer_carries_what_it_cost_when_asked(sqlite_app, tmp_path):
     app, store = sqlite_app(), FileStore(tmp_path / "cache")
     spans: list[Span] = []
-    _run(app, FIRST, Answerer(), store, (), sink=spans.append)
-    _run(app, SECOND, Answerer(), store, (), sink=spans.append)
+    _run(app, Answerer(), store, (), sink=spans.append)
+    _run(app, Answerer(), store, (), sink=spans.append)
     first, reused = spans
     assert "effective.reused.cost" not in first.fields
     assert (
@@ -129,7 +127,7 @@ def test_an_unreadable_entry_is_a_miss_and_is_written_again(sqlite_app, tmp_path
     digest = op_digest(op, "model-a")
     store.write(digest, b"not json")
     answerer = Answerer()
-    _run(app, FIRST, answerer, store, ("a",))
+    _run(app, answerer, store, ("a",))
     assert answerer.asked == ["llm", "a"]
     assert json.loads(store.read(digest) or b"")["result"] == {"url": "a", "status": 200}
 

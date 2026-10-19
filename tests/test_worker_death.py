@@ -24,6 +24,7 @@ from _durable import DSN, pg_ready
 from _schedules import Turnstile, ledger_path
 
 from effective.checkpoints import keys, read_sqlite_conn
+from effective.cost import marked
 
 TESTS = Path(__file__).parent
 
@@ -124,7 +125,7 @@ def absurd_death(_tmp_path: Path, scenario: str) -> Death:
             return live.run(lambda: program(params["run_id"]))
 
         spawned = app.spawn(
-            task, {"run_id": run_id}, max_attempts=3, retry_strategy=IMMEDIATE_RETRY
+            task, marked({"run_id": run_id}), max_attempts=3, retry_strategy=IMMEDIATE_RETRY
         )
         task_id = spawned["task_id"]
         die("postgres", queue, task, scenario)

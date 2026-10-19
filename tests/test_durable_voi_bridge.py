@@ -13,7 +13,7 @@ from _authority import ruled
 from effective.api import step
 from effective.bridge_sqlite import export_measured_prefix, park_name
 from effective.budget import Grant, MeasuredBudget
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
 from effective.engines.sqlite import SqliteApp
 from effective.fork import measured_drive
@@ -88,7 +88,7 @@ def _spawn(app, run_id, program, *, limit, max_attempts=3, domain=_domain):
     @app.register_task(run_id)
     def task(params, ctx):
         budget = MeasuredBudget(overall=limit, run_id=params["run_id"], on_exhaust="park")
-        return DurableHandler(ctx, domain(), contract=Contract.V1, budget=budget).run(program)
+        return DurableHandler(ctx, domain(), budget=budget).run(program)
 
     return app.spawn(run_id, {"run_id": run_id}, max_attempts=max_attempts)
 

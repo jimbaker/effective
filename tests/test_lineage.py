@@ -287,8 +287,8 @@ def test_a_read_is_scoped_to_one_task(tmp_path, sqlite_app):
     db, ids = _two_lineages_in_one_store(tmp_path, sqlite_app)
     one = read_sqlite_task(db, ids["r-one"])
     two = read_sqlite_task(db, ids["r-two"])
-    assert [c.state for c in one] == [{"from": 11}]
-    assert [c.state for c in two] == [{"from": 22}]
+    assert [c.state["result"] for c in one] == [{"from": 11}]
+    assert [c.state["result"] for c in two] == [{"from": 22}]
 
 
 def test_a_mixed_lineage_read_is_unrepresentable(tmp_path, sqlite_app):
@@ -306,4 +306,4 @@ def test_fork_seed_over_a_task_scoped_read_takes_the_intended_lineage(tmp_path, 
 
     db, ids = _two_lineages_in_one_store(tmp_path, sqlite_app)
     seed = fork_seed(read_sqlite_task(db, ids["r-two"]), through="step:extract")
-    assert seed[Key.parse("step:extract")] == {"from": 22}
+    assert seed[Key.parse("step:extract")]["result"] == {"from": 22}

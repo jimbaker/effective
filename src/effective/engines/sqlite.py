@@ -45,6 +45,7 @@ from uuid import UUID, uuid7
 
 from pydantic_core import to_jsonable_python
 
+from effective.cost import RecordedFormat, marked
 from effective.engines import Failure, TaskSnapshot, TaskState, drain
 from effective.handlers.base import Attempt, EngineSignal, failing_leaf
 from effective.keys import Key
@@ -379,6 +380,14 @@ def _is_pre_uuid7_store(conn: sqlite3.Connection) -> bool:
     return bool(columns) and "idempotency_key" not in columns
 
 
+def read_sqlite_params(conn: sqlite3.Connection, task_id: UUID) -> dict[str, Any]:
+    """The params `task_id` was spawned with, as the store holds them."""
+    row = conn.execute(*bind(t"SELECT params FROM tasks WHERE task_id={task_id}")).fetchone()
+    if row is None:
+        raise LookupError(f"no task {task_id} in this store to read params from")
+    return json.loads(row[0])
+
+
 def _deliver(conn: sqlite3.Connection, name: str, payload: Any) -> None:
     """Write an event and wake EVERY task parked on it — the one place delivery is spelled.
 
@@ -475,14 +484,15 @@ class SqliteTaskContext:
         *,
         claimed_as: int | None = None,
     ) -> None:
-        self.conn = conn
-        self.task_id = task_id
+        self._conn = conn
+        self._task_id = task_id
         self.claimed_as = claimed_as
         self._guard: AbstractContextManager[Any] = write_lock or nullcontext()
         self.concurrent_safe = write_lock is not None
         # Wakes this execution has already spent, in memory and per claim: a wake belongs to the
         # attempt it woke, and the claim is what ends one. See `_clock_woke_us`.
         self._spent_wakes: set[str] = set()
+        self._recorded_format: RecordedFormat | None = None
 
     @property
     def attempt(self) -> Attempt:
@@ -495,6 +505,25 @@ class SqliteTaskContext:
         if row is None:
             raise LookupError(f"no task {task_id} in this store to read an attempt from")
         return Attempt(number=row[0] if self.claimed_as is None else self.claimed_as, limit=row[1])
+
+    @property
+    def task_id(self) -> UUID:
+        """The task this ctx runs, fixed at construction with the format it reads."""
+        return self._task_id
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """The store this ctx reads, fixed at construction with the format it reads."""
+        return self._conn
+
+    def recorded_format(self) -> RecordedFormat:
+        """The format this task was spawned under, read from the store once: spawn params are
+        immutable, so every handler over this ctx, a gather branch's included, reads the same."""
+        if self._recorded_format is None:
+            with self._guard:
+                params = read_sqlite_params(self.conn, self.task_id)
+            self._recorded_format = RecordedFormat.from_params(params)
+        return self._recorded_format
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         with self._guard:
@@ -945,7 +974,7 @@ class SqliteApp:
                 "but it cannot be spawned into: the two shapes cannot be migrated between (see "
                 "`_is_pre_uuid7_store`). Spawn into a fresh file."
             )
-        params_json = json.dumps(to_jsonable_python(params))
+        params_json = json.dumps(to_jsonable_python(marked(params)))
         task_id = uuid7()
         limit = (
             self._max_attempts.get(name, self.default_max_attempts)

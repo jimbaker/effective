@@ -26,7 +26,7 @@ from string import ascii_lowercase
 from typing import Any
 from uuid import uuid4
 
-from effective import Contract, Usage
+from effective import Usage
 from effective.budget import MeasuredBudget
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.govern import govern
@@ -42,7 +42,7 @@ from .erp.odoo import OdooErp, XmlRpc, seed
 from .erp.port import Erp
 from .knowledge import Pinned
 from .manifest import Manifest, head
-from .resolve import APPROVAL, ASKED, admitted, announced, approval, ruled
+from .resolve import APPROVAL, ASKED, admitted, announced, approval, bindings, ruled
 from .world import World, scripted
 
 PROPOSER, CONTROLLER = Segment("ar-clerk"), Segment("controller")
@@ -106,22 +106,24 @@ def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Pat
             world.domain(),
             ledger=ledger,
             op_layers=(gate,),
-            contract=Contract.from_params(params),
             budget=budget,
         )
         return handler.run(admitted(admission))
 
     try:
         run_id = str(uuid4())
-        params = Contract.V1.spawn_params({"run_id": run_id} | manifest.params())
+        params = {"run_id": run_id} | manifest.params()
         task_id = app.spawn("resolve", params)
         done = app.run_until_result(task_id)
         while parked := [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == task_id]:
-            asked = [row for row in sqlite_payloads(app.conn, run_id) if row["kind"] == ASKED]
+            rows = sqlite_payloads(app.conn, run_id)
+            asked = [row for row in rows if row["kind"] == ASKED]
             print("asked:    ", asked[-1]["ask"], *asked[-1]["detail"])
             for park in parked:
-                print("approved: ", park.wake_event, "by", CONTROLLER)
-                answer(app, park, {"answers": {APPROVAL: {"decision": "approve"}}}, by=CONTROLLER)
+                effect = bindings(rows, park.wake_event)[APPROVAL]
+                print("approved: ", park.wake_event, effect, "by", CONTROLLER)
+                ruling = {"decision": "approve", "effect": effect}
+                answer(app, park, {"answers": {APPROVAL: ruling}}, by=CONTROLLER)
             done = app.run_until_result(task_id)
         if done is None or done.state != "completed":
             raise RuntimeError(f"the run ended {done}")

@@ -18,6 +18,7 @@ from _shapes import run
 
 from effective.api import Effect, await_until, call_tool, gather
 from effective.api import sleep_until as api_sleep_until
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.domain import DomainOp
 from effective.engines.sqlite import SqliteApp
 from effective.handlers.durable import DurableHandler
@@ -229,6 +230,9 @@ def test_a_ctx_that_waits_on_an_event_alone_refuses_by_name() -> None:
     class _EventOnly:
         """A minimal ctx: the two required members, and no clock."""
 
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name: Key, thunk: Any, /) -> Any:
             return thunk()
 
@@ -320,6 +324,9 @@ def test_the_capability_probe_reads_past_every_ctx_wrapper() -> None:
     class _EventOnly:
         """The two required members and no clock — `TaskContext`'s floor."""
 
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name: Key, thunk: Any, /) -> Any:
             return thunk()
 
@@ -349,6 +356,9 @@ def test_a_fork_childs_bounded_wait_parks_in_its_own_event_world() -> None:
     asked: list[Key] = []
 
     class _Recording:
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name: Key, thunk: Any, /) -> Any:
             return thunk()
 
@@ -443,6 +453,9 @@ def test_a_viewer_reads_a_settled_wait_and_reports_an_open_one() -> None:
 
     class _Store:
         """A ctx holding one settled wait, plus `TaskContext`'s required members."""
+
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
 
         def __init__(self, settled: Any) -> None:
             self._settled = settled
@@ -540,6 +553,9 @@ def test_a_durable_forks_tail_refuses_a_wait_that_names_a_deadline() -> None:
     from effective.handlers.durable import Live, SeedingCtx
 
     class _Engine:
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
+
         def step(self, name: Key, thunk: Any, /) -> Any:
             return thunk()
 

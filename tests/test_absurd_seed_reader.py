@@ -29,7 +29,7 @@ from effective.bridge_absurd import (
     read_absurd_task,
 )
 from effective.checkpoints import keys
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage, marked
 from effective.domain import AskLLM
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import fork_seed
@@ -80,12 +80,14 @@ def _run(app, run_id: str) -> UUID:
         ledger = PostgresLedger(DSN, workflow_run_id=rid)
         try:
             return DurableHandler(
-                ConcurrentAbsurdCtx(ctx), _domain(), ledger=ledger, contract=Contract.V1
+                ConcurrentAbsurdCtx(ctx),
+                _domain(),
+                ledger=ledger,
             ).run(lambda: _decision_wf(rid))
         finally:
             ledger.close()
 
-    task_id = app.spawn(name, Contract.V1.spawn_params({"run_id": run_id}))
+    task_id = app.spawn(name, marked({"run_id": run_id}))
     # A generous drain budget on purpose: the Absurd `default` queue is SHARED across the durable
     # test lane, so `work_batch` may claim another test's task before ours (the justfile's
     # one-queue note). Budget for that rather than assume an empty queue.

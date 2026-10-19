@@ -32,7 +32,7 @@ from effective.bridge_absurd import read_absurd_task
 from effective.budget import BUDGET_DEPTH_PARAM
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, SpawnArgs, SpawnResult
-from effective.engines.absurd import ConcurrentAbsurdCtx
+from effective.engines.absurd import ConcurrentAbsurdCtx, read_absurd_params
 from effective.fork import ForkOutcome, join_fork, marginal_sweep, run_fork_as_task, spawn_fork
 from effective.govern import Refused
 from effective.handlers.base import op_key
@@ -116,6 +116,7 @@ def test_a_sweep_returns_one_marginal_per_delta_on_the_deployed_engine(conn):
                     DSN, workflow_run_id=rid, hypothetical=True
                 ),
                 read_base=lambda tid: read_absurd_task(conn, tid),
+                read_base_params=lambda tid: read_absurd_params(conn, tid, "default"),
             )
         )
 
@@ -335,6 +336,7 @@ def test_a_refused_child_answers_its_parent_on_the_DEPLOYED_engine(conn):
                     DSN, workflow_run_id=rid, hypothetical=True
                 ),
                 read_base=lambda tid: read_absurd_task(conn, tid),
+                read_base_params=lambda tid: read_absurd_params(conn, tid, "default"),
             )
         )
 
@@ -445,6 +447,7 @@ def test_a_fork_of_a_base_whose_spawn_was_refused_replays_the_refusal_on_the_dep
                     DSN, workflow_run_id=run, hypothetical=True
                 ),
                 read_base=lambda task: read_absurd_task(conn, task),
+                read_base_params=lambda task: read_absurd_params(conn, task, "default"),
             )
         )
 

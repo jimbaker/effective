@@ -61,6 +61,7 @@ import pytest
 
 from effective.api import GatherBranch, qualified_event_name
 from effective.code import _action_key, _segment_key
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.domain import CallTool
 from effective.govern import GateState
 from effective.handlers.base import op_key, step_key
@@ -810,6 +811,9 @@ def test_an_author_cannot_forge_a_frame_on_the_await_axis():
 
     class Sink:
         """A `TaskContext` that only records the await names it is handed."""
+
+        def recorded_format(self) -> RecordedFormat:
+            return NEWEST_FORMAT
 
         def __init__(self) -> None:
             self.seen: list[str] = []

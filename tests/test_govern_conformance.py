@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from effective.govern import Ask, Park, Proceed, Refuse, combine
+from effective.govern import Ask, Park, Proceed, Refuse, combine, refuse
 
 _VECTORS_PATH = Path(__file__).resolve().parents[1] / "formal" / "govern_vectors.json"
 VECTORS: list[dict[str, Any]] = json.loads(_VECTORS_PATH.read_text())
@@ -43,8 +43,10 @@ def _verdict(spec: dict[str, Any]):
             return Proceed()
         case {"kind": "park", "asks": asks}:
             return Park(tuple(_ask(t) for t in asks))
+        case {"kind": "refuse", "reasons": []}:
+            return Refuse(())
         case {"kind": "refuse", "reasons": reasons}:
-            return Refuse(tuple(f"reason-{t}" for t in reasons))
+            return combine([refuse(f"reason-{t}", policy=f"p{t}") for t in reasons])
     raise AssertionError(f"unknown verdict in the vector file: {spec}")
 
 

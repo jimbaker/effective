@@ -23,6 +23,7 @@ from uuid import UUID
 
 from pydantic_core import to_jsonable_python
 
+from effective.cost import RecordedFormat, marked
 from effective.engines import Failure, TaskFn, TaskSnapshot, TaskState, drain
 from effective.handlers.base import Attempt
 from effective.keys import Key
@@ -308,6 +309,7 @@ class SdkCtx:
     def __init__(self, ctx: Any) -> None:
         self._ctx = ctx
         self._steps = ClaimSteps.of(ctx)
+        self._recorded_format: RecordedFormat | None = None
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         handle = self._steps.begin(self._ctx, name)
@@ -339,6 +341,12 @@ class SdkCtx:
     @property
     def attempt(self) -> Attempt:
         return sdk_attempt(self._ctx)
+
+    def recorded_format(self) -> RecordedFormat:
+        """Read once, as `SqliteTaskContext.recorded_format` is."""
+        if self._recorded_format is None:
+            self._recorded_format = sdk_recorded_format(self._ctx)
+        return self._recorded_format
 
     def emit_event(self, name: Key, payload: Any, /) -> None:
         return self._ctx.emit_event(name.stored(), wire_payload(name.stored(), payload))
@@ -422,6 +430,26 @@ def sdk_claim(ctx: Any) -> SdkClaim:
         conn=ctx._conn,
         queue=ctx._queue_name,
     )
+
+
+def read_absurd_params(conn: Any, task_id: Any, queue: str) -> dict[str, Any]:
+    """The params `task_id` was spawned with, as the queue's tasks table holds them."""
+    tasks = queue_table("t", queue)
+    row = (
+        conn.cursor()
+        .execute(t"SELECT params FROM absurd.{tasks:i} WHERE task_id = {task_id}")
+        .fetchone()
+    )
+    if row is None:
+        raise LookupError(f"no task {task_id} in queue {queue} to read params from")
+    return row[0]
+
+
+def sdk_recorded_format(sdk: Any) -> RecordedFormat:
+    """The format an SDK ctx's task was spawned under, read from the store: the claim's own
+    params are the dict handed to the task body, which the body can change."""
+    claim = sdk_claim(sdk)
+    return RecordedFormat.from_params(read_absurd_params(claim.conn, claim.task_id, claim.queue))
 
 
 def sdk_signals() -> tuple[type[Exception], ...]:
@@ -520,6 +548,7 @@ class ConcurrentAbsurdCtx:
         self.write_lock = write_lock or threading.Lock()
         self.concurrent_safe = True
         self._steps = ClaimSteps.of(ctx)
+        self._recorded_format: RecordedFormat | None = None
 
     def step(self, name: Key, thunk: Callable[[], Any], /) -> Any:
         with self.write_lock:
@@ -586,6 +615,13 @@ class ConcurrentAbsurdCtx:
     @property
     def attempt(self) -> Attempt:
         return sdk_attempt(self._ctx)
+
+    def recorded_format(self) -> RecordedFormat:
+        """Read once, as `SqliteTaskContext.recorded_format` is."""
+        with self.write_lock:
+            if self._recorded_format is None:
+                self._recorded_format = sdk_recorded_format(self._ctx)
+            return self._recorded_format
 
     def emit_event(self, name: Key, payload: Any, /) -> None:
         """Emit an event from inside a running task, under the write lock like every other
@@ -690,7 +726,7 @@ class AbsurdEngine:
             raise ValueError(f"a task runs at least once; max_attempts was {max_attempts}")
         spawned = self.app.spawn(
             name,
-            to_jsonable_python(params),
+            to_jsonable_python(marked(params)),
             max_attempts=max_attempts,
             idempotency_key=idempotency_key,
             queue=self.queue,

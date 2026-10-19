@@ -1,7 +1,7 @@
 """A `govern` policy reads who ruled the answer it asked for, on both engines.
 
 The ruler is the principal `parked.answer` names, carried from the stored ruling to the policy.
-A policy that refuses an approval by the op's proposer is the segregation of duties the ruler
+A policy that refuses an approval by the op's proposer is the separation of duties the ruler
 makes possible.
 """
 
@@ -58,7 +58,7 @@ def separated(op: WorkflowOp, state: GateState) -> Any:
         case None:
             return park(GateAsk(POLICY, "approve the charge?"))
         case ruler if ruler == PROPOSER:
-            return refuse("the proposer may not approve its own charge")
+            return refuse("the proposer may not approve its own charge", policy=POLICY)
         case _:
             return Proceed()
 
@@ -139,7 +139,7 @@ def approved_once_for_the_run(op: WorkflowOp, state: GateState) -> Any:
     if not (isinstance(op, Step) and op.name.startswith("charge")):
         return Proceed()
     if op.name == "charge-2" and PROPOSER in run_rulers_for(state, POLICY):
-        return refuse("the proposer may not approve the run's charges")
+        return refuse("the proposer may not approve the run's charges", policy=POLICY)
     if run_answers_for(state, POLICY):
         return Proceed()
     return park(GateAsk(POLICY, "approve the run's charges?"))
@@ -176,3 +176,10 @@ def test_a_ruling_schema_on_a_plain_name_is_refused():
 )
 def test_a_delivered_answer_splits_into_its_ruler_and_answer(delivered, split):
     assert split_ruling(delivered) == split
+
+
+def test_a_ruling_reads_an_optional_field_it_does_not_know():
+    name = "approve:charge"
+    stored = {"__ruling__": {"by": "reviewer", "answer": {"ok": True}, "note": "later field"}}
+    loaded = load_answer(name, ruling_schema(dict), stored, lambda _schema, raw: raw)
+    assert loaded == ruled({"ok": True}, by="reviewer")

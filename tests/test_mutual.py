@@ -42,7 +42,7 @@ from effective.combinators import (
     mutual,
 )
 from effective.domain import CallTool, DomainOp
-from effective.govern import Exceeded, GateState, Policy, Proceed, Refuse, Verdict
+from effective.govern import Exceeded, GateState, Policy, Proceed, Verdict, refuse
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Index, Key, Name, Run, compose_key
@@ -328,7 +328,9 @@ def refusing_the_tick_of(role: str) -> Callable[[str], Policy]:
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(op=CallTool(name="tick", args={"role": str(asker)})) if asker == role:
-                return Refuse((f"{role} refused",), Exceeded(spent=1.0, ceiling=1.0))
+                return refuse(
+                    f"{role} refused", policy="budget", exceeded=Exceeded(spent=1.0, ceiling=1.0)
+                )
             case _:
                 return Proceed()
 

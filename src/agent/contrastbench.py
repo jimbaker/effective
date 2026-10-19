@@ -889,17 +889,19 @@ def replay_structured(
         # checkpoints and read as a generic replay failure. A malformed db (not
         # exactly one task) is a bench bug and raises loudly, distinct from a
         # genuine replay failure (which returns None).
-        task_ids = [r[0] for r in app.conn.execute("SELECT task_id FROM tasks").fetchall()]
+        stored = app.conn.execute("SELECT task_id, params FROM tasks").fetchall()
+        task_ids = [task_id for task_id, _params in stored]
         if len(task_ids) != 1:
             raise RuntimeError(
                 f"replay_structured expects one task in {db_path}, found {task_ids}"
             )
         try:
             ctx = SqliteTaskContext(app.conn, task_ids[0], app.write_lock)
+            params = json.loads(stored[0][1])
             interp = MeteredInterpreter(llm=explode_llm, tools=explode_tool)
             traj = Trajectory.model_validate(
                 to_jsonable_python(
-                    DurableHandler(ctx, interp).run(
+                    DurableHandler(ctx, interp, params=params).run(
                         # The SAME wrap the record path used — replay re-derives the keys by
                         # re-execution, so a missing frame here reads as a replay failure.
                         lambda: scoped(
@@ -1154,15 +1156,17 @@ def replay_combinator(
 
     app = SqliteApp(str(db_path))
     try:
-        task_ids = [r[0] for r in app.conn.execute("SELECT task_id FROM tasks").fetchall()]
+        stored = app.conn.execute("SELECT task_id, params FROM tasks").fetchall()
+        task_ids = [task_id for task_id, _params in stored]
         if len(task_ids) != 1:
             raise RuntimeError(
                 f"replay_combinator expects one task in {db_path}, found {task_ids}"
             )
         try:
             ctx = SqliteTaskContext(app.conn, task_ids[0], app.write_lock)
+            params = json.loads(stored[0][1])
             interp = MeteredInterpreter(llm=explode_llm, tools=explode_tool)
-            answer = DurableHandler(ctx, interp).run(
+            answer = DurableHandler(ctx, interp, params=params).run(
                 lambda: scoped(
                     task_scope(task.task_id),
                     lambda: combinator_wf(task.question, rows),

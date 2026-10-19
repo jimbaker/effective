@@ -28,7 +28,7 @@ Park names aliasing across generations, the other half of the same question, is 
 from uuid import uuid4
 
 import pytest
-from _conformance import Contract, Fault, MeteringDomain, metered_trip_wf
+from _conformance import Fault, MeteringDomain, metered_trip_wf
 
 from effective.keys import Segment, compose_key
 from effective.layers import layer_run_state, run_scope
@@ -54,7 +54,7 @@ def _run_one_generation(backend, run_id: str, generation: int):
         budget_limit=CEILING,
         on_exhaust="fail",
     )
-    task_id = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id, max_attempts=1)
     return backend.run_until_result(task_id), domain
 
 
@@ -115,7 +115,7 @@ def test_a_fresh_task_starts_with_an_empty_checkpoint_history(backend):
     domain = MeteringDomain(cost=PER_ASK)
     name = f"fresh-{run_id}"
     backend.register(name, metered_trip_wf, domain, Fault(), (), budget_limit=1.0)
-    task_id = backend.spawn(name, run_id, max_attempts=1, contract=Contract.V1)
+    task_id = backend.spawn(name, run_id, max_attempts=1)
     snap = backend.run_until_result(task_id)
 
     assert snap is not None

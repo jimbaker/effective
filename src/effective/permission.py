@@ -28,7 +28,17 @@ from typing import Any, Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from effective.govern import Ask, GateState, Policy, Proceed, Refused, answers_for, park, refuse
+from effective.govern import (
+    Ask,
+    GateState,
+    Policy,
+    Proceed,
+    Refused,
+    answers_for,
+    park,
+    refuse,
+    ruler_of,
+)
 from effective.handlers.base import effect_of, placed_key
 from effective.keys import AuthorityTag, Index, Key, Name, Scope, compose_key
 from effective.keys.grammar import KeySyntaxError, parse
@@ -408,7 +418,8 @@ def as_policy(
             answer = history[-1]
             if _approved(answer):
                 return Proceed()
-            return refuse(_rationale(answer) or "denied by reviewer")
+            reason = _rationale(answer) or "denied by reviewer"
+            return refuse(reason, policy=name, by=ruler_of(state, name))
         verdicts = [_verdict_of(tier, op) for tier in tiers]
         if on_escalate == "park" and not any(map(decisive, verdicts)):
             detail = {"op_key": placed_key(op).stored(), "effect": effect_of(op)}
@@ -417,7 +428,7 @@ def as_policy(
             case Allow():
                 return Proceed()
             case Deny(reason=reason):
-                return refuse(reason)
+                return refuse(reason, policy=name)
             case unreachable:
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 

@@ -40,7 +40,7 @@ from effective.api import (
 from effective.bridge_absurd import read_absurd_task
 from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, Done, Turn, respawn
-from effective.cost import MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage, marked
 from effective.domain import SPAWN_TOOL, CallTool
 from effective.engines import TaskState
 from effective.engines.absurd import (
@@ -404,7 +404,7 @@ def test_a_store_error_raising_an_instance_a_thunk_raised_before_is_a_store_read
 def test_the_handler_leaves_a_refusals_attributes_as_it_found_them(engine):
     """A refusal is the error a workflow can catch, and a race witnesses one by its attributes, so
     counting it adds none."""
-    caught: list[BaseException] = []
+    caught: list[Refused] = []
 
     def calls():
         try:
@@ -415,7 +415,8 @@ def test_the_handler_leaves_a_refusals_attributes_as_it_found_them(engine):
 
     snapshot, _ = executions(engine, calls, Tools({"t": refused}))
     assert snapshot.state is TaskState.COMPLETED
-    assert [sorted(vars(raised)) for raised in caught] == [["op", "reason"]]
+    (raised,) = caught
+    assert sorted(vars(raised)) == sorted(vars(Refused(raised.op, raised.reason)))
 
 
 @op_layer
@@ -705,7 +706,7 @@ def test_an_absurd_code_error_fails_when_it_repeats_unless_its_retry_waits(
 
     engine.register_task("case")(body)
     spawned = engine.app.spawn(
-        "case", {}, max_attempts=5, retry_strategy=strategy, queue=engine.queue
+        "case", marked({}), max_attempts=5, retry_strategy=strategy, queue=engine.queue
     )
     snapshot = engine.run_until_result(UUID(str(spawned["task_id"])))
     assert snapshot is not None

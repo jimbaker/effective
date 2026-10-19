@@ -20,7 +20,7 @@ import threading
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, assert_never, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, assert_never, runtime_checkable
 
 from effective.domain import AskLLM, AsksModel, CallTool, DomainOp, Judge
 
@@ -34,51 +34,60 @@ from effective.layers import (
     domain_layer,
     drive_through,
 )
+from effective.ops import FORMAT_PARAM, UnreadFormat
 
 type Dollars = float
 
 
-# --- the measured-accrual replay contract ---------------------------------------------
-# Enveloping the AskLLM `Step` checkpoint as `{result, usage}` is a checkpoint-schema
-# change, so the read/write path is versioned explicitly rather than sniffed: an
-# un-versioned "is this a dict with result+usage keys?" collides with a legitimate
-# workflow result of that shape. The contract is **fixed at spawn** and carried in the
-# task's immutable spawn params: absent → v0 (bare results), present `"v1"` → the
-# enveloped path. A v1 worker resuming an in-flight v0 task reads no param and stays v0:
-# it keeps *writing* bare rows, so the task never hits mixed-mode. `CONTRACT_PARAM` is
-# reserved (like `BUDGET_DEPTH_PARAM`); no author param key may collide with it.
-CONTRACT_PARAM = "__accrual_contract__"
+# --- the recorded format ---------------------------------------------------------------
+# A model call's `Step` checkpoint is `{result, usage}`, and a reader knows it from the run's
+# format rather than by sniffing for those keys, which a workflow result may also hold. The
+# format is marked at spawn in the task's immutable params under `FORMAT_PARAM`, so a task
+# never holds rows of two formats.
 
 
-class Contract(StrEnum):
-    """The version of a run's recorded format, fixed at spawn in its params.
+class RecordedFormat(StrEnum):
+    """The version of a run's recorded format, marked at spawn in its params.
 
-    | version | an `AskLLM` step records | enables                                          |
-    |---------|--------------------------|--------------------------------------------------|
-    | `V0`    | the bare result          | replay of a task spawned before the envelope     |
-    | `V1`    | `{result, usage}`        | the meter on replay, a `MeasuredBudget`, a spend |
+    | version | a model call's step records | an authority answer | enables                      |
+    |---------|-----------------------------|---------------------|------------------------------|
+    | `V1`    | `{result, usage}`           | a ruling            | the meter on replay, a spend |
     """
 
-    V0 = "v0"
     V1 = "v1"
 
-    def spawn_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
-        """`params` marked with this contract. `V0` adds no key, so a task spawned before the
-        envelope existed reads as `V0`."""
-        if CONTRACT_PARAM in params:
-            raise ValueError(f"{CONTRACT_PARAM!r} is the contract's own param")
-        return dict(params) | ({} if self is Contract.V0 else {CONTRACT_PARAM: self.value})
-
     @classmethod
-    def from_params(cls, params: Mapping[str, Any], *, absent: Contract | None = None) -> Contract:
-        """The contract a task runs under, read from its immutable spawn params. A task whose
-        params carry none was spawned before its writer marked them, so it runs under `absent`,
-        what that writer recorded: `V0` unless the task's family says otherwise."""
-        match params.get(CONTRACT_PARAM):
+    def from_params(cls, params: Mapping[str, Any]) -> RecordedFormat:
+        """The format a task records under, read from its immutable spawn params. Params that mark
+        none, or a format this release does not read, are `UnreadFormat`."""
+        match params.get(FORMAT_PARAM):
             case None:
-                return absent or cls.V0
+                raise UnreadFormat(
+                    f"a run whose params mark no {FORMAT_PARAM!r}, which this release does not "
+                    "read; finish it under the release that spawned it"
+                )
             case raw:
-                return cls(raw)
+                try:
+                    return cls(raw)
+                except ValueError as unread:
+                    raise UnreadFormat(
+                        f"a run spawned under recorded format {raw!r}, which this release does "
+                        "not read; finish it under the release that spawned it"
+                    ) from unread
+
+
+# The format a new run records under.
+NEWEST_FORMAT = list(RecordedFormat)[-1]
+
+
+def marked(params: Mapping[str, Any]) -> dict[str, Any]:
+    """`params` marked with the format a new run records under, whatever mark they carry."""
+    return {**params, FORMAT_PARAM: NEWEST_FORMAT.value}
+
+
+def refuse_an_unread_format(params: Mapping[str, Any]) -> None:
+    """Refuse a run whose `params` mark no format this release reads, as `UnreadFormat`."""
+    RecordedFormat.from_params(params)
 
 
 @dataclass(frozen=True)
@@ -306,6 +315,7 @@ class MeteredInterpreter:
         cache: Cache | None = None,
     ) -> None:
         self.meter = Usage()
+        self._budget = budget
         # Guards the meter RMW (`meter = meter + usage`) so concurrent gather branches
         # accruing at once (via `run_metered` or the `metered` layer) don't drop an update
         # (the telemetry counterpart of the CostBudget race).
@@ -334,17 +344,20 @@ class MeteredInterpreter:
 
     def run_metered(self, op: DomainOp[Any]) -> tuple[Any, Usage]:
         """Return `(result, usage)` without `metered`'s unwrap: the usage-in-checkpoint seam
-        the durable handler drives on the v1 contract. Still folds into the telemetry `meter`
-        (so bench cost-totals read the same value), and does not enforce: the handler owns the
-        trip. `traced` composes under here and fires once."""
-        out = self._base_stack.run(op)
+        the durable handler drives. Folds into the telemetry `meter` and charges the `budget`
+        ceiling as `metered` does; the measured trip is the handler's. `traced` composes under
+        here and fires once."""
         match op:
             case AsksModel():
-                result, usage = out
-                self._accrue(usage)  # locked — the same meter RMW the layer's accrue uses
+                if self._budget is not None and self._budget.exceeded():
+                    raise BudgetExceeded(self._budget.spent.cost, self._budget.limit)
+                result, usage = self._base_stack.run(op)
+                self._accrue(usage)  # locked: the same meter RMW the layer's accrue uses
+                if self._budget is not None:
+                    self._budget.add(usage)
                 return result, usage
             case CallTool():
-                return out, Usage()
+                return self._base_stack.run(op), Usage()
             case unreachable:
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
@@ -355,8 +368,8 @@ class MeteredDomain(Protocol):
     structural so callers needn't name a concrete class (mirrors `layers.Interpreter`).
 
     `runtime_checkable` because `metered_call` asks this question AT RUNTIME, once per op, to
-    decide whether the usage envelope applies. `isinstance(domain, MeteredDomain)` is a
-    `getattr` sniff with the role named.
+    decide whether the measured trip applies. `isinstance(domain, MeteredDomain)` is a `getattr`
+    sniff with the role named.
 
     The usual `runtime_checkable` caveat holds and is fine here: it checks member PRESENCE, not
     signature. A domain with a wrong-shaped `run_metered` still passes; `ty` catches the shape,
@@ -376,12 +389,6 @@ type Service = DomainLayer[Any]
 class _ServedDomain:
     services: tuple[Service, ...]
     base: MeteredDomain
-
-    metered_only: ClassVar[bool] = True
-    """Read at handler ASSEMBLY (`DurableHandler.__init__`) so a provably-unreachable domain is
-    rejected before the first checkpointed step, not at it. A marker rather than a probe because
-    the only way to *test* `.run` is to call it, and calling it raises; the `.run` message
-    stays as the legible fallback."""
 
     def run_metered(self, op: DomainOp[Any]) -> tuple[Any, Usage]:
         # First come, first served: leftmost service is outermost. drive_through pumps the
@@ -403,16 +410,15 @@ class _ServedDomain:
 
     def run(self, op: DomainOp[Any]) -> Any:
         # A serve(...) stack is METERED-ONLY (run_metered, no plain run). DurableHandler calls
-        # domain.run(op) for a CallTool or a default-contract (V0) AskLLM (absurd.py); a serve
-        # stack cannot serve those. Fail LEGIBLY here, before a mid-checkpoint AttributeError.
+        # domain.run(op) for a CallTool; a serve stack cannot serve one. Fail LEGIBLY here,
+        # before a mid-checkpoint AttributeError.
         # Defining `.run` means a serve stack satisfies `layers.Interpreter` structurally while
         # it always raises, so a code path is chosen by `run_metered`, as `metered_call` does,
         # and never by the presence of `.run`.
         raise TypeError(
-            "a serve(...) stack is metered-only: it backs the v1 measured path (run_metered) and "
-            "cannot run a CallTool or a default-contract (V0) model call. Spawn with "
-            "`Contract.V1.spawn_params`, or put serve inside the metered domain, not around the "
-            "whole handler."
+            "a serve(...) stack is metered-only: it backs the measured path (run_metered) and "
+            "cannot run a CallTool. Put serve inside the metered domain, not around the whole "
+            "handler."
         )
 
 

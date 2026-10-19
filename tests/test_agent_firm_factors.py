@@ -16,7 +16,6 @@ from _conformance import Fault, FaultPosition
 from _firm import CONTROLLER, FOUNDING, PROPOSER, briefed, manifest, resolved
 from _odoo import fresh_round
 
-from effective.cost import Contract
 from effective.graphview import bare_name
 from examples.agent_firm.ar import Superseded
 from examples.agent_firm.cases import SLA_CAP
@@ -35,15 +34,12 @@ def _factors(backend, run):
     return factors(run.params, rows, backend.checkpoint_states(run.task_id))
 
 
-@pytest.mark.parametrize(
-    ("contract", "spend"), [(Contract.V0, None), (Contract.V1, Decimal("0.01"))], ids=str
-)
-def test_an_uncrashed_runs_model_calls_are_the_worlds(backend, contract, spend):
+def test_an_uncrashed_runs_model_calls_are_the_worlds(backend):
     firm = briefed()
-    run = resolved(backend, firm, manifest(FOUNDING, fresh_round()), contract=contract)
+    run = resolved(backend, firm, manifest(FOUNDING, fresh_round()))
     recorded = _factors(backend, run)
     assert (recorded.model_calls, _called(firm)) == (2, 2)
-    assert (recorded.asks, recorded.rulers, recorded.spend) == (1, (CONTROLLER,), spend)
+    assert (recorded.asks, recorded.rulers, recorded.spend) == (1, (CONTROLLER,), Decimal("0.01"))
 
 
 @pytest.mark.adversarial

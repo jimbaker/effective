@@ -33,9 +33,9 @@ from effective.govern import (
     GateState,
     Policy,
     Proceed,
-    Refuse,
     park,
     policies_of,
+    refuse,
     run_answers_for,
 )
 from effective.keys import AuthorityTag, Index, Key, Run, Scope, compose_key
@@ -579,7 +579,7 @@ class BudgetPolicy:
                     )
                 )
             case Exceeded() as exceeded:
-                return Refuse((exceeded.reason,), exceeded)
+                return refuse(exceeded.reason, policy=name, exceeded=exceeded)
             case unreachable:
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
 
@@ -616,6 +616,16 @@ def refuse_an_unmetered_budget_gate(meters: bool, layers: Sequence[OpLayer[Any]]
         _refuse_unmetered(name)
 
 
+def refuse_an_unmetered_measured_budget(meters: bool, budget: MeasuredBudget | None) -> None:
+    """Refuse a `MeasuredBudget` on a handler whose domain reports no usage, before any op runs:
+    its meter would read zero and the ceiling would never trip."""
+    if budget is not None and not meters:
+        raise CompositionRefused(
+            "a MeasuredBudget needs a domain that reports usage (`run_metered`); this handler's "
+            "domain reports none, so its meter would read zero and the ceiling never trip"
+        )
+
+
 def _budget_policies(layers: Sequence[OpLayer[Any]]) -> Iterator[str]:
     """The name of each budget policy a gate in `layers` was handed. A budget policy wrapped
     inside another callable is not among them."""
@@ -631,7 +641,7 @@ def _budget_policies(layers: Sequence[OpLayer[Any]]) -> Iterator[str]:
 def _refuse_unmetered(name: str) -> Never:
     raise CompositionRefused(
         f"budget policy {name!r} gates a run that does not meter. Run it on a durable handler "
-        "under `Contract.V1` with a `MeteredDomain`."
+        "over a `MeteredDomain`."
     )
 
 

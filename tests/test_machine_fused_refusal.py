@@ -15,7 +15,7 @@ import pytest
 from _conformance import Fault, FaultPosition
 
 from effective.api import Effect, append_ledger, ask_llm, call_tool
-from effective.cost import Contract, MeteredInterpreter, Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
 from effective.govern import ChildRefused
 from effective.handlers.recording import RecordingHandler
@@ -160,7 +160,7 @@ def registered(backend, body, domain: Any, fault: Fault | None = None, **budget:
     run_id = f"f{uuid4().hex}"
     name = compose_key(t"fused-refusal:{Run(run_id)}").stored()
     backend.register(name, body, domain, fault or Fault(), [], **budget)
-    task = backend.spawn(name, run_id, max_attempts=3, contract=Contract.V1)
+    task = backend.spawn(name, run_id, max_attempts=3)
     return run_id, task, backend.run_until_result(task)
 
 

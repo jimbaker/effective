@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from effective import Effect, append_ledger, call_tool, scoped, step, store_artifact
+from effective.cost import RecordedFormat, marked
 from effective.domain import CallTool
 from effective.keys import Key, Segment, compose_key
 from effective.keys.grammar import KeySyntaxError, parse, split_occurrence
@@ -139,6 +140,9 @@ def test_a_stack_of_wrappers_is_STILL_adapted() -> None:
             self.seen: list[object] = []
 
     class _Wrapper:
+        def recorded_format(self) -> RecordedFormat:
+            return self._ctx.recorded_format()
+
         def __init__(self, inner) -> None:
             self._ctx = inner
 
@@ -214,6 +218,9 @@ def test_absurd_writes_only_names_that_are_in_the_language_THROUGH_A_WRAPPER_STA
         REJECTED by `ty` and would therefore not reproduce the real hazard.
         """
 
+        def recorded_format(self) -> RecordedFormat:
+            return self._ctx.recorded_format()
+
         def __init__(self, inner) -> None:
             self._ctx = inner
 
@@ -235,7 +242,7 @@ def test_absurd_writes_only_names_that_are_in_the_language_THROUGH_A_WRAPPER_STA
     def _names(params, ctx):
         return DurableHandler(_Wrapper(_Wrapper(ctx)), _CannedDomain()).run(_repeats_a_step_name)
 
-    task_id = app.spawn("name-conformance", {})["task_id"]
+    task_id = app.spawn("name-conformance", marked({}))["task_id"]
     for _ in range(8):
         app.work_batch()
 
@@ -270,6 +277,9 @@ class _CapturingCtx:
     trace positionally and never names an occurrence. Using it as the expected value would
     quietly assert that the engines must NOT disambiguate, the opposite of the rule.
     """
+
+    def recorded_format(self) -> RecordedFormat:
+        return self._ctx.recorded_format()
 
     def __init__(self, inner) -> None:
         self._ctx = inner
@@ -362,7 +372,7 @@ def test_absurd_stores_EXACTLY_the_names_the_substrate_handed_down() -> None:
         captured["ctx"] = _CapturingCtx(ctx)
         return DurableHandler(captured["ctx"], _CannedDomain()).run(_shape_space)
 
-    task_id = app.spawn("shape-fidelity", {})["task_id"]
+    task_id = app.spawn("shape-fidelity", marked({}))["task_id"]
     for _ in range(8):
         app.work_batch()
 

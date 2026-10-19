@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from effective import Contract, MeteredInterpreter, Usage
+from effective import MeteredInterpreter, Usage
 from effective.api import Effect
 from effective.checkpoints import keys, read_sqlite_task
 from effective.domain import AskLLM, CallTool, Judge
@@ -92,11 +92,10 @@ def _run(
     def task(params: dict[str, Any], ctx: Any) -> Any:
         nonlocal attempts
         attempts += 1
-        contract = Contract.from_params(params, absent=Contract.V1)
-        return DurableHandler(ctx, world.domain(), ledger=None, contract=contract).run(program)
+        return DurableHandler(ctx, world.domain(), ledger=None).run(program)
 
     try:
-        spawned = app.spawn("startup", Contract.V1.spawn_params({}))
+        spawned = app.spawn("startup", {})
         while (done := app.run_until_result(spawned)) is not None and done.state not in ENDED:
             parked = [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == spawned]
             if not parked:

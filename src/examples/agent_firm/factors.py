@@ -19,7 +19,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from effective import Contract
 from effective.graphview import bare_name
 from effective.handlers.base import step_key
 from effective.keys import Key
@@ -44,9 +43,8 @@ class Factors(BaseModel):
     asks: int
     rulers: tuple[str | None, ...]
     model_calls: int
-    spend: Decimal | None
-    """Dollars the committed model calls recorded; `None` for a run under the v0 contract, whose
-    tape records no usage."""
+    spend: Decimal
+    """Dollars the committed model calls recorded."""
 
 
 def factors(
@@ -55,12 +53,7 @@ def factors(
     """The factors of the run admitted with `params`, from its ledger `rows` and its `tape`."""
     manifest = Manifest.admitted(params)
     calls = [state for key, state in tape.items() if bare_name(key.stored()) in MODEL_STEPS]
-    metered = Contract.from_params(params) is Contract.V1
-    spend = (
-        sum((Decimal(str(state["usage"]["cost"])) for state in calls), Decimal(0))
-        if metered
-        else None
-    )
+    spend = sum((Decimal(str(state["usage"]["cost"])) for state in calls), Decimal(0))
     return Factors(
         run_id=params["run_id"],
         arm=manifest.arm,

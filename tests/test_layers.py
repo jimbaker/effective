@@ -24,6 +24,7 @@ from effective import (
     retry,
 )
 from effective.api import ask_llm, await_event, call_tool
+from effective.cost import NEWEST_FORMAT, RecordedFormat
 from effective.domain import AskLLM, CallTool
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
@@ -191,6 +192,9 @@ def test_compose_domain_threads_through_a_domain_layer():
 class _LocalCtx:
     """A non-durable Absurd ctx: a step just runs its thunk inline."""
 
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
+
     def step(self, name, thunk):
         return thunk()
 
@@ -243,6 +247,9 @@ def test_compose_ops_configures_the_handler_op_layers():
 class _InlineAwaitCtx:
     """A durable ctx whose await returns inline (no real park) — enough to route an AwaitEvent
     through the op-layer stack, which is the L3 point (a real park needs the engine)."""
+
+    def recorded_format(self) -> RecordedFormat:
+        return NEWEST_FORMAT
 
     def step(self, name, thunk):
         return thunk()

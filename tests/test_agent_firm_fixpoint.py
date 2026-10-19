@@ -37,7 +37,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault, FaultPosition, at_every_op
-from _firm import CAPPED, CONTROLLER, Run, gate, replayed
+from _firm import CAPPED, CONTROLLER, Run, gate, replayed, ruling
 from _turns import Turns, gather_branches, schedules
 
 from effective.api import Effect, claim_ledger, gather
@@ -53,7 +53,6 @@ from examples.agent_firm.engage import REPAIRS, CritiqueWire, Proposal
 from examples.agent_firm.erp.port import Apply
 from examples.agent_firm.erp.scripted import ScriptedOdoo
 from examples.agent_firm.firm import Books, Closed, Last, Open, advance, firm
-from examples.agent_firm.resolve import APPROVAL
 from examples.agent_firm.saga import RETRIES
 from examples.agent_firm.world import World
 
@@ -140,8 +139,7 @@ def _driven(
     while parked := backend.parked(task_id):
         for park in parked:
             decided = decision if isinstance(decision, str) else decision(parks)
-            ruling = {"answers": {APPROVAL: {"decision": decided}}}
-            answer(backend.engine, park, ruling, by=CONTROLLER)
+            answer(backend.engine, park, ruling(backend, run_id, park, decided), by=CONTROLLER)
             parks += 1
         snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot

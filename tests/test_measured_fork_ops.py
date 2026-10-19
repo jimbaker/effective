@@ -147,12 +147,12 @@ def test_prefix_is_step_indexed_like_the_bridge_exports_it():
 
     Here: a one-entry prefix must line up with the FIRST STEP, even though a `StoreArtifact`
     is yielded before the second one."""
-    from effective.fork import MeteredEntry
+    from effective.fork import Driven
 
     domain = RefundDomain()
     request = _request()
     prefix = [
-        MeteredEntry(
+        Driven(
             key=Key.parse("step;tool:fetch_request"),
             op=None,
             result=request,
@@ -195,7 +195,7 @@ def test_a_prefix_sleep_diverges_between_fork_at_and_measured_drive():
     from datetime import UTC, datetime
 
     from effective.api import ask_llm, await_event, sleep_until
-    from effective.fork import MeteredEntry, OpIndex, fork_at
+    from effective.fork import Driven, OpIndex, fork_at
     from effective.handlers.recording import RecordingHandler, Suspended
     from effective.sandbox import ForkedSleep
 
@@ -220,22 +220,17 @@ def test_a_prefix_sleep_diverges_between_fork_at_and_measured_drive():
     assert tail.result == "reviewed"
 
     # measured_drive, given the Step-only prefix, refuses the same run:
-    prefix = [MeteredEntry(key=Key.parse("step:first"), result="a1", usage=Usage())]
+    prefix = [Driven(key=Key.parse("step:first"), result="a1", usage=Usage())]
     with pytest.raises(ForkedSleep):
         measured_drive(prog, _budget(), dom, {}, recorded=prefix)
 
 
-def test_the_trip_and_the_decode_agree_on_which_op_is_metered():
-    """6.4. `decode_checkpoint` asked the shared `metered_call`; `trip_at` re-derived
-    `isinstance(op.op, AskLLM)`. So the driver honored the placement when DECODING a prefix
-    entry and a different one when TRIPPING on it — the F-2 defect one layer down from the one
-    `trip_at` was extracted to fix.
-
-    The reachable case is a meter carrying spend the CURRENT domain did not produce: fork a
-    metered recording under a plain domain, and the old form tripped where the durable handler
-    (which gates on `metered_call`) would not."""
+def test_the_trip_and_the_handler_agree_on_which_op_is_metered():
+    """`trip_at` asks `metered_call`, the predicate the durable handler trips on, so the driver
+    and the handler trip at the same op. The case that tells them apart is a meter carrying spend
+    the current domain did not produce: a metered recording forked under a plain domain."""
     from effective.budget import MeasuredBudget
-    from effective.cost import Contract, Usage
+    from effective.cost import Usage
     from effective.domain import AskLLM
     from effective.fork import trip_at
     from effective.govern import BudgetRefused
@@ -251,7 +246,7 @@ def test_the_trip_and_the_decode_agree_on_which_op_is_metered():
             return "x"
 
     plain = Plain()
-    assert not metered_call(ask.op, Contract.V1, plain), "the shared predicate says: not metered"
+    assert not metered_call(ask.op, domain=plain), "the shared predicate says: not metered"
     assert trip_at(ask, spent, budget, 0.0, 0, {}, plain) == (0.0, 0), "so the trip must not fire"
 
     # And it still fires for a domain the predicate DOES accept — the arm order matters.
@@ -263,6 +258,6 @@ def test_the_trip_and_the_decode_agree_on_which_op_is_metered():
             return "x", Usage(cost=0.5)
 
     metered = Metered()
-    assert metered_call(ask.op, Contract.V1, metered)
+    assert metered_call(ask.op, domain=metered)
     with pytest.raises(BudgetRefused):
         trip_at(ask, spent, budget, 0.0, 0, {}, metered)

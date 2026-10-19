@@ -5,7 +5,7 @@
 | crash-safe settlement            | one memo and one payment post, wherever a crash lands       |
 | evidence doesn't move money      | any order of any notes and tickets commits the same effects |
 | a review acts through its answer | a critique acts at `engage` and nowhere before              |
-| segregation of duties            | the credit posts only on an approval not its proposer's     |
+| separation of duties             | the credit posts only on an approval not its proposer's     |
 | approved as proposed             | resumed, it replays the proposal and review, asks no model  |
 | no duplicate settlement          | a case resolved twice settles once, in turn or gathered     |
 | admitted case                    | every attempt and replay reads the case admitted            |
@@ -24,14 +24,24 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault, FaultPosition, at_every_op, branched
-from _firm import CAPPED, CONTROLLER, FOUNDING, PROPOSER, Run, manifest, replayed, resolved
+from _firm import (
+    CAPPED,
+    CONTROLLER,
+    FOUNDING,
+    PROPOSER,
+    Run,
+    manifest,
+    replayed,
+    resolved,
+    ruling,
+)
 from _odoo import ERPS, another_invoice, books, fresh_round
 from _schedules import Turnstile, branch_of
 from _turns import Turns, gather_branches, schedules
 from pydantic import ValidationError
 
 from effective.api import gather
-from effective.cost import Contract, Usage
+from effective.cost import FORMAT_PARAM, Usage
 from effective.govern import (
     Ask,
     GateState,
@@ -63,6 +73,7 @@ from examples.agent_firm.resolve import (
     Stopped,
     announced,
     approval,
+    bindings,
     resolve,
     terms_of,
 )
@@ -166,12 +177,7 @@ def test_a_gather_of_two_settlements_asks_for_each_settlement_on_the_ledger(back
     snapshot = backend.run_until_result(task_id)
     while parked := backend.parked(task_id):
         for waiting in parked:
-            answer(
-                backend.engine,
-                waiting,
-                {"answers": {APPROVAL: {"decision": "approve"}}},
-                by=CONTROLLER,
-            )
+            answer(backend.engine, waiting, ruling(backend, run_id, waiting), by=CONTROLLER)
         snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
     asked = [row["detail"] for row in backend.ledger_payloads(run_id) if row["kind"] == ASKED]
@@ -195,9 +201,11 @@ def test_a_park_the_approval_did_not_ask_for_is_announced_too(backend):
     backend.register(f"two-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
     task_id = backend.spawn(f"two-{run_id}", run_id)
     snapshot = backend.run_until_result(task_id)
-    answers = {APPROVAL: {"decision": "approve"}, "notice": {"decision": "send"}}
     while parked := backend.parked(task_id):
         for waiting in parked:
+            answers: dict[str, Any] = {"notice": {"decision": "send"}}
+            if APPROVAL in bindings(backend.ledger_payloads(run_id), waiting.wake_event):
+                answers |= ruling(backend, run_id, waiting)["answers"]
             answer(backend.engine, waiting, {"answers": answers}, by=CONTROLLER)
         snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
@@ -278,7 +286,7 @@ def test_an_unanswered_credit_holds_no_round_and_is_superseded_once_approved(bac
     assert backend.parked(waiting.task_id)
     assert "notify" in Completed.model_validate(_resolved(backend, firm).result).landed
     (park,) = backend.parked(waiting.task_id)
-    answer(backend.engine, park, {"answers": {APPROVAL: {"decision": "approve"}}}, by=CONTROLLER)
+    answer(backend.engine, park, ruling(backend, waiting.run_id, park), by=CONTROLLER)
     late = backend.run_until_result(waiting.task_id)
     assert Superseded.model_validate(late.result) == Superseded(
         credit=Decimal(3000), held=Decimal(1000)
@@ -299,7 +307,11 @@ def _rejects_first(name: str, firm: Firm, times: int):
 
 def _closed_for_maintenance(op: WorkflowOp, state: GateState) -> Verdict:
     """A policy beside the approval, refusing every claim of a round."""
-    return Proceed() if terms_of(op) is None else refuse("the books are closed for maintenance")
+    return (
+        Proceed()
+        if terms_of(op) is None
+        else refuse("the books are closed for maintenance", policy="maintenance")
+    )
 
 
 @pytest.mark.adversarial
@@ -534,8 +546,7 @@ def test_two_resolutions_of_one_case_gathered_settle_once_and_ask_twice(backend)
     snapshot = backend.run_until_result(task_id)
     while parked := backend.parked(task_id):
         for waiting in parked:
-            approved = {"answers": {APPROVAL: {"decision": "approve"}}}
-            answer(backend.engine, waiting, approved, by=CONTROLLER)
+            answer(backend.engine, waiting, ruling(backend, run_id, waiting), by=CONTROLLER)
         snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
     terms = _terms(SLA_CAP, "1000.00", "3000.00")
@@ -548,7 +559,7 @@ APPROVERS: dict[str, list[tuple[int, ...]]] = {"one-at-a-time": [(0,), (1,)], "t
 park wakes on its lowest branch's ask alone, so ruling the other first only defers the resume."""
 
 
-def _ruled(backend, task_id, batches: list[tuple[int, ...]]) -> None:
+def _ruled(backend, task_id, run_id: str, batches: list[tuple[int, ...]]) -> None:
     """Rule on the asks a batch at a time, resuming the run after each, until it parks no more.
 
     A gathered park exposes one wake, the lowest parked branch's, so an ask of another branch is
@@ -561,8 +572,9 @@ def _ruled(backend, task_id, batches: list[tuple[int, ...]]) -> None:
         assert batch is not None, f"still parked after {batches}"
         for branch in batch:
             wake = branched(0, branch, gated).stored()
-            approved = {"answers": {APPROVAL: {"decision": "approve"}}}
-            answer(backend.engine, replace(park, wake_event=wake), approved, by=CONTROLLER)
+            branch_park = replace(park, wake_event=wake)
+            approved = ruling(backend, run_id, branch_park)
+            answer(backend.engine, branch_park, approved, by=CONTROLLER)
         backend.run_until_result(task_id)
 
 
@@ -585,7 +597,7 @@ def test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule(back
         )
         task_id = backend.spawn(f"two-{run_id}", run_id)
         backend.run_until_result(task_id)
-        _ruled(backend, task_id, APPROVERS[approver])
+        _ruled(backend, task_id, run_id, APPROVERS[approver])
         snapshot = backend.run_until_result(task_id)
         turns.settle()
         assert snapshot.state == "completed", (snapshot, turns.choices)
@@ -611,8 +623,7 @@ def test_two_announcing_gates_on_one_op_write_a_row_each(backend):
     snapshot = backend.run_until_result(task_id)
     while parked := backend.parked(task_id):
         for waiting in parked:
-            approved = {"answers": {APPROVAL: {"decision": "approve"}}}
-            answer(backend.engine, waiting, approved, by=CONTROLLER)
+            answer(backend.engine, waiting, ruling(backend, run_id, waiting), by=CONTROLLER)
         snapshot = backend.run_until_result(task_id)
     assert snapshot.state == "completed", snapshot
     terms = _terms(SLA_CAP, "1000.00", "3000.00")
@@ -773,7 +784,7 @@ def test_the_customer_hears_and_owes_in_dollars_and_cents(backend):
 def test_a_denied_settlement_is_the_resolutions_answer_and_posts_nothing(backend):
     firm = _firm()
     run = _resolved(backend, firm, decision="deny")
-    assert Denied.model_validate(run.result) == Denied(reason="the settlement was not approved")
+    assert Denied.model_validate(run.result).reason == "the settlement was not approved"
     assert _entries(firm) == []
 
 
@@ -975,15 +986,14 @@ def test_a_run_reads_the_case_its_manifest_admitted(backend):
     firm = _firm()
     run = _resolved(backend, firm, case)
     assert Manifest.admitted(run.params).case == case
-    assert run.params.keys() == {"run_id", MANIFEST}
+    assert run.params.keys() == {"run_id", MANIFEST, FORMAT_PARAM}
     (brief,) = firm.briefs
     assert ("not to exceed $100 " in brief, "not to exceed $1,000" in brief) == (True, False)
 
 
-@pytest.mark.parametrize("contract", list(Contract), ids=str)
-def test_a_replay_reads_the_admitted_case_after_the_module_changed(backend, monkeypatch, contract):
+def test_a_replay_reads_the_admitted_case_after_the_module_changed(backend, monkeypatch):
     """The replay is driven from the task's params, with every interpreter raising if called."""
-    run = _resolved(backend, _firm(), contract=contract)
+    run = _resolved(backend, _firm())
     monkeypatch.setattr(SLA_CAP, "documents", (CAPPED_AT_100, *SLA_CAP.documents[1:]))
     assert "not to exceed $1,000" in Manifest.admitted(run.params).case.documents[0].text
     assert replayed(backend, run) == run.result

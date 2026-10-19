@@ -32,6 +32,7 @@ from effective.api import await_event, call_tool, gather, sleep_until
 from effective.bridge_absurd import read_absurd_task
 from effective.budget import budget_grant_name
 from effective.checkpoints import keys
+from effective.cost import marked
 from effective.domain import CallTool, DomainOp
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.engines.sqlite import SqliteApp, SqliteLedger
@@ -119,7 +120,7 @@ def _sqlite_run(app: SqliteApp, name: str, factory, run_id: str) -> UUID:
         ledger = SqliteLedger(app.conn, rid, app.write_lock)
         return DurableHandler(ctx, _Tools(), ledger=ledger).run(factory(rid))
 
-    task_id = app.spawn(name, {"run_id": run_id})
+    task_id = app.spawn(name, marked({"run_id": run_id}))
     app.run_until_result(task_id)
     return task_id
 
@@ -135,7 +136,7 @@ def test_sqlite_reader_finds_the_park_and_reports_the_registration_verbatim():
         task_id=task_id,
         task_name="gated",
         wake_event="approve;ledger;processed:m1",
-        params={"run_id": "r1"},
+        params=marked({"run_id": "r1"}),
         state=PARKED,  # normalized; this engine's own word is 'waiting'
         parked_since=None,  # ...and this engine records none at all
     )
@@ -271,7 +272,7 @@ def _absurd_run(app, conn, name: str, factory, run_id: str) -> UUID:
     # No `str(...)`: the SDK returns `row["task_id"]` off a `uuid` column, so psycopg has
     # already handed back a `UUID` — the annotation on its `SpawnResult` TypedDict says `str`
     # and validates nothing. Stringifying here was throwing away the type the driver produced.
-    task_id = app.spawn(name, {"run_id": run_id})
+    task_id = app.spawn(name, marked({"run_id": run_id}))
     _drain_until_sleeping(app, conn, task_id)
     return task_id
 
@@ -296,7 +297,7 @@ def test_absurd_reader_reports_a_park_timestamp_and_a_uuid_task_id(conn):
     assert isinstance(park.task_id, UUID)  # the column is a uuid, and the record keeps it one
     assert park.task_name == f"parked-{run_id}"
     assert park.wake_event == f"approve;{run_id}"
-    assert park.params == {"run_id": run_id}
+    assert park.params == marked({"run_id": run_id})
     assert park.state == PARKED  # normalized; the row below still says 'sleeping'
     assert conn.execute(
         t"SELECT r.state FROM absurd.r_default r "

@@ -761,7 +761,7 @@ one op, and the answers fold:
 $$
 \mathsf{combine}(\vec{v}) =
 \begin{cases}
-\mathsf{Refuse}(\textstyle\bigcup \mathsf{reasons}) & \exists v_i = \mathsf{Refuse} \\
+\mathsf{Refuse}(\textstyle\bigcup \mathsf{refusals}) & \exists v_i = \mathsf{Refuse} \\
 \mathsf{Park}(\textstyle\bigcup \mathsf{asks}) & \text{else if } \exists v_i = \mathsf{Park} \\
 \mathsf{Proceed} & \text{otherwise}
 \end{cases}
@@ -1238,8 +1238,8 @@ moves the rows' payloads with the schedule. So the read and write sets have to c
 layer and interpreter component, with an unknown `DomainOp` conflicting universally. Nothing
 consumes such a footprint today, which is why it is priced here rather than carried as work.
 
-**The V1 meter sits on the proved side of that pair, and the arrangement is the reason. The V0
-path does not, and it is what ships today.** `Budget.lean` carries two models: Model B accrues a
+**The V1 meter sits on the proved side of that pair, and the arrangement is the reason. A
+`CostBudget` does not.** `Budget.lean` carries two models: Model B accrues a
 subtotal per branch and folds at the barrier, Model S reads one shared meter mid-fold.
 `executedB_perm_invariant` and `operational_confluent` prove Model B's aggregate is a function of
 the branch multiset, while `shared_gate_order_dependent` is a statement about Model S. V1's
@@ -1258,14 +1258,15 @@ test asserts that profile as $[0,1,2,3]$ rather than intending it. Under the rev
 `leaf-0a`'s gate reads last, with three siblings spent, and reads \$1. So Model S is refuted for
 **the V1 meter** by a schedule rather than only avoided by an argument.
 
-**V0 is Model S, and V0 is still constructible.** The measured-spend design makes the handler the
-enforcement bookkeeper and leaves `MeteredInterpreter.meter` as telemetry, which means
-constructing it with `budget=None`: otherwise its pre-forward `exceeded()` refusal is a second
-enforcement point racing the handler-owned trip. A worker that constructs it with a `CostBudget`
-ships that second enforcement point, and `cost.py:262` is the refusal. Measured on both
+**A `CostBudget` is Model S, and it is still constructible.** The measured-spend design makes the
+handler the enforcement bookkeeper and leaves `MeteredInterpreter.meter` as telemetry, which means
+constructing it with `budget=None`: otherwise its pre-forward `exceeded()` refusal, on the metered
+path and the plain one alike, is a second enforcement point racing the handler-owned trip. A worker
+that constructs it with a `CostBudget` ships that second enforcement point, and `metered` and
+`MeteredInterpreter.run_metered` are the refusal. Measured on both
 engines, three asks at \$6 under a \$10 ceiling: the schedule decides which two execute before the
 refusal, `[a0,a1]` under one order and `[a0,b0]` under the other. `CostBudget`'s own docstring calls
-itself a telemetry accumulator (`cost.py:148`) and says a lock cures the *total*, which is the
+itself a telemetry accumulator and says a lock cures the *total*, which is the
 distinction `shared_lock_insufficient` draws, one clause short of the finding. A workflow that does not
 gather never meets it; a gather added to one would make the refusal schedule-dependent, with no
 gate and no test going red.
