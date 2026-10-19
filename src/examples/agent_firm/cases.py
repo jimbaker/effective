@@ -11,12 +11,15 @@ explain a difference.
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 from effective.keys.grammar import NAME
 
 type Id = Annotated[str, StringConstraints(pattern=NAME.pattern)]
 """A document's id as a name in the key grammar, since the firm's keys name the documents."""
+
+type Dollars = Annotated[Decimal, Field(decimal_places=2, allow_inf_nan=False)]
+"""An amount in whole cents, as the books keep it."""
 
 
 class Document(BaseModel):
@@ -30,7 +33,7 @@ class Document(BaseModel):
 class Invoice(BaseModel):
     id: Id
     customer: str
-    amount: Decimal
+    amount: Dollars
     issued: str
     period: str
 
@@ -38,9 +41,17 @@ class Invoice(BaseModel):
 class Payment(BaseModel):
     id: Id
     customer: str
-    amount: Decimal
+    amount: Dollars
     received: str
     memo: str
+
+
+WITHIN = "a credit in whole cents from $0 to the payment's shortfall"
+"""The credits a case absorbs, as the refusal of one outside them states it."""
+
+
+def in_cents(amount: Decimal) -> bool:
+    return amount == amount.quantize(Decimal("0.01"))
 
 
 class Case(BaseModel):
@@ -54,6 +65,12 @@ class Case(BaseModel):
     @property
     def gap(self) -> Decimal:
         return self.invoice.amount - self.payment.amount
+
+    def absorbs(self, credit: Decimal) -> bool:
+        """Whether `credit` is `WITHIN` a shortfall in whole cents, so a memo for it closes no
+        more than the shortfall. A validated case's shortfall is always in whole cents; the clause
+        refuses a case built past validation, by `model_copy`."""
+        return in_cents(self.gap) and in_cents(credit) and 0 <= credit <= self.gap
 
     def cited(self, id: str) -> bool:
         return any(document.id == id for document in self.documents)

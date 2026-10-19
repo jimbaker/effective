@@ -1,30 +1,34 @@
 """The AR firm's resolution on the scripted world, approved through a park, on both engines.
 
-| question | the pin                                                                           |
-|----------|-----------------------------------------------------------------------------------|
-| R1       | a resolution posts one credit memo and one payment, however a crash lands         |
-| R2       | every ordering of every subset of the notes and tickets commits the same effects  |
-| R3       | a critique present, absent or uncited parts the run at `engage` and nowhere before |
-| R5       | the credit posts only on an approval, and never on one its proposer gave          |
-| spine    | the attempt resumed after the approval asks no model                              |
-| twice    | a case resolved twice settles once, in sequence or gathered, and asks each time   |
-| admitted | a run reads the case its manifest admitted, on every attempt and every replay     |
+| control                          | what holds                                                  |
+|----------------------------------|-------------------------------------------------------------|
+| crash-safe settlement            | one memo and one payment post, wherever a crash lands       |
+| evidence doesn't move money      | any order of any notes and tickets commits the same effects |
+| a review acts through its answer | a critique acts at `engage` and nowhere before              |
+| segregation of duties            | the credit posts only on an approval not its proposer's     |
+| approved as proposed             | resumed, it replays the proposal and review, asks no model  |
+| no duplicate settlement          | a case resolved twice settles once, in turn or gathered     |
+| admitted case                    | every attempt and replay reads the case admitted            |
 
-The R-numbers are the questions in `wiki/concepts/agent-firm.md`.
+Each control is a row of the table in `wiki/concepts/agent-firm.md`.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from decimal import Decimal, Inexact
+from decimal import Decimal
+from functools import partial
 from itertools import combinations, permutations
 from typing import Any
 from uuid import uuid4
 
 import pytest
-from _conformance import Fault, FaultPosition, at_every_op
-from _firm import CAPPED, CONTROLLER, GENESIS, PROPOSER, Run, manifest, replayed, resolved
+from _conformance import Fault, FaultPosition, at_every_op, branched
+from _firm import CAPPED, CONTROLLER, FOUNDING, PROPOSER, Run, manifest, replayed, resolved
 from _odoo import ERPS, another_invoice, books, fresh_round
 from _schedules import Turnstile, branch_of
+from _turns import Turns, gather_branches, schedules
+from pydantic import ValidationError
 
 from effective.api import gather
 from effective.cost import Contract, Usage
@@ -39,13 +43,14 @@ from effective.govern import (
 )
 from effective.handlers.base import step_key
 from effective.keys import Index, Key, Name, Tag, compose_key
+from effective.keys.frame import past_frames
 from effective.layers import current_placement
 from effective.lineage import canonical, compare
 from effective.ops import AppendLedgerRow, LedgerRow, ReadLedgerRow, Step, WorkflowOp
 from effective.parked import answer
-from examples.agent_firm.ar import TERMS, Round, Superseded, settle, settlement
+from examples.agent_firm.ar import REMIND, TERMS, Round, Superseded, Unabsorbed, settle, settlement
 from examples.agent_firm.cases import CLEAN, DISCOUNT, SLA_CAP, Case, Document, Payment
-from examples.agent_firm.critic import CLAIMED
+from examples.agent_firm.critic import AS_CLAIMED
 from examples.agent_firm.engage import REPAIRS, WITHIN, CritiqueWire
 from examples.agent_firm.erp.port import Apply, Erp, Kind, Unapply
 from examples.agent_firm.manifest import MANIFEST, Manifest
@@ -79,7 +84,7 @@ class Firm:
 
 
 def _firm(
-    critique: dict[str, Any] | None = CAPPED, proposal=CLAIMED, erp: Erp | None = None
+    critique: dict[str, Any] | None = CAPPED, proposal=AS_CLAIMED, erp: Erp | None = None
 ) -> Firm:
     def critic(op: Any) -> tuple[Any, Usage]:
         firm.briefs.append(str(op.messages))
@@ -97,7 +102,7 @@ def _firm(
         llm=lambda op: proposal,
         critic=critic,
         critiques=frozenset({CritiqueWire}),
-        tools={"notify": tool("notify"), "collect": tool("collect")},
+        tools={"notify": tool("notify"), REMIND: tool(REMIND)},
     )
     firm = Firm(world)
     return firm
@@ -107,7 +112,7 @@ def _resolved(
     backend, firm: Firm, case: Case = SLA_CAP, *, critic=True, round: Round | None = None, **driven
 ) -> Run:
     """Resolve `case` in `firm`'s round, or in `round`, through the shared driver."""
-    admission = manifest(GENESIS, round or firm.round, critic=critic, case=case)
+    admission = manifest(FOUNDING, round or firm.round, critic=critic, case=case)
     return resolved(backend, firm, admission, **driven)
 
 
@@ -130,7 +135,7 @@ def _pairs(backend, run_id: str) -> list[tuple[str, str]]:
     ]
 
 
-def test_r5_each_ruling_pairs_with_its_ask_across_a_re_park(backend):
+def test_each_ruling_pairs_with_its_ask_across_a_re_park(backend):
     run = _resolved(backend, _firm(), approvers=(PROPOSER, CONTROLLER))
     assert _rulers(backend, run.run_id) == [PROPOSER, CONTROLLER]
     pairs = _pairs(backend, run.run_id)
@@ -210,7 +215,7 @@ def _settled_once(firm: Firm) -> None:
     erp, invoice, payment = firm.world.erp, SLA_CAP.invoice.id, SLA_CAP.payment.id
     assert (_memos(firm), erp.keyed(invoice)) == ([Decimal(1000)], 1)
     assert (erp.residual(payment), erp.residual(invoice)) == (0, 2000)
-    assert sorted(name for name, _ in firm.told) == ["collect", "notify"]
+    assert sorted(name for name, _ in firm.told) == sorted(["notify", REMIND])
 
 
 @pytest.mark.adversarial
@@ -242,8 +247,8 @@ def test_a_second_resolution_with_another_credit_is_superseded_and_does_nothing(
     held = Superseded.model_validate(second.result)
     assert held.held == Decimal(1000) != held.credit
     assert (second.parks, _asked(backend, second.run_id)) == (0, [])
-    assert {kind: firm.world.calls[kind] for kind in ("erp", "notify", "collect")} == {
-        kind: calls.get(kind, 0) for kind in ("erp", "notify", "collect")
+    assert {kind: firm.world.calls[kind] for kind in ("erp", "notify", REMIND)} == {
+        kind: calls.get(kind, 0) for kind in ("erp", "notify", REMIND)
     }
     _settled_once(firm)
 
@@ -291,7 +296,7 @@ def _rejects_first(name: str, firm: Firm, times: int):
 
 
 @pytest.mark.adversarial
-@pytest.mark.parametrize(("leg", "times"), [("notify", 1), ("collect", RETRIES)])
+@pytest.mark.parametrize(("leg", "times"), [("notify", 1), (REMIND, RETRIES)])
 def test_a_case_reopened_after_an_unfinished_settlement_settles_in_its_next_round(
     backend, leg, times
 ):
@@ -376,6 +381,81 @@ def test_two_settlements_of_one_round_gathered_leave_the_round_to_the_first_clai
         assert all(erp.residual(entry.id) == 0 for entry in erp.entries(invoice)[2:])
 
 
+def _two_settled(
+    backend, turns: Turns, notice: str, fault: Fault, k: int | None = None
+) -> tuple[int, Firm]:
+    """Two settlements of one round gathered under `turns` and `fault`: the branch that owns the
+    round, once the other ended `Superseded` at the same credit, and the firm."""
+    firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
+    if notice == "bounces":
+        bounced = {"ok": False, "reason": "the address bounced"}
+        firm.world.tools = {**firm.world.tools, "notify": lambda args: bounced}
+    settlements = [settle(SLA_CAP, Decimal(1000), "r", firm.round) for _ in range(2)]
+    program, domain = partial(gather, turns.gathered(settlements)), firm.world.domain()
+    layers, fresh = (turns.layer(),), turns.claiming(domain)
+    backend.register(f"two-{run_id}", lambda _: program(), domain, fault, layers, fresh=fresh)
+    snapshot = backend.run_until_result(backend.spawn(f"two-{run_id}", run_id))
+    turns.settle()
+    cell = (turns.prefix, k, fault.position)
+    assert snapshot.state == "completed", (snapshot, cell)
+    superseded = [i for i, r in enumerate(snapshot.result) if "held" in r]
+    assert len(superseded) == 1, ("one owner of the round", cell)
+    held = Superseded.model_validate(snapshot.result[other := superseded[0]])
+    assert held == Superseded(credit=Decimal(1000), held=Decimal(1000)), cell
+    erp, invoice, payment = firm.world.erp, SLA_CAP.invoice.id, SLA_CAP.payment.id
+    posted = {"lands": 1, "bounces": 2}[notice]
+    assert (_memos(firm), erp.keyed(invoice)) == ([Decimal(1000)], posted), ("one memo", cell)
+    owner = snapshot.result[1 - other]
+    match notice:
+        case "lands":
+            assert "notify" in Completed.model_validate(owner).landed, cell
+            owed = (erp.residual(payment), erp.residual(invoice))
+            assert owed == (0, 2000), ("each apply once", cell)
+        case _:
+            undone = Compensated.model_validate(owner).undone
+            assert undone == ["apply-memo", "apply-payment", "credit-memo"], cell
+            owed = (erp.residual(payment), erp.residual(invoice))
+            assert owed == (97000, 100000), ("the rejection unwinds", cell)
+            reversed_ = [erp.residual(entry.id) for entry in erp.entries(invoice)[2:]]
+            assert reversed_ == [0, 0], ("the memo reversed", cell)
+    return 1 - other, firm
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("notice", ERP_CALLS)
+def test_two_settlements_of_one_round_gathered_leave_it_to_one_owner_in_every_schedule(
+    backend, notice
+):
+    """Every schedule of the two settlements' ops within two switches: one owns the round, the
+    other ends `Superseded` at the same credit and makes no ERP call, and each branch owns it in
+    some schedule."""
+    owners = set()
+    for turns in schedules(gather_branches(2), switches=2):
+        owner, firm = _two_settled(backend, turns, notice, Fault())
+        assert firm.world.calls["erp"] == ERP_CALLS[notice], turns.choices
+        if notice == "lands":
+            _settled_once(firm)
+        owners.add(owner)
+    assert owners == {0, 1}
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("position", list(FaultPosition))
+@pytest.mark.parametrize("notice", ERP_CALLS)
+def test_two_settlements_of_one_round_gathered_hold_in_every_schedule_a_crash_interrupts(
+    backend, notice, position
+):
+    """Every schedule within one switch, each crashed once at every op it reaches, the choices
+    going on in the claim that resumes it: one owner, one memo, and a rejection unwound."""
+    for explored in schedules(gather_branches(2), switches=1):
+        unarmed = Fault(None, position=position)
+        _two_settled(backend, explored, notice, unarmed)
+        for k in range(1, unarmed.count + 1):
+            fault = Fault(k, position=position)
+            _two_settled(backend, Turns(explored.names, explored.prefix), notice, fault, k)
+            assert fault.fired or fault.count < k, ("the fault fired", k)
+
+
 @pytest.mark.adversarial
 @pytest.mark.parametrize("position", list(FaultPosition))
 def test_two_credits_of_one_round_gathered_settle_one_whatever_a_crash_interrupts(
@@ -434,6 +514,62 @@ def test_two_resolutions_of_one_case_gathered_settle_once_and_ask_twice(backend)
     _settled_once(firm)
 
 
+APPROVERS: dict[str, list[tuple[int, ...]]] = {"one-at-a-time": [(0,), (1,)], "together": [(0, 1)]}
+"""How an approver rules on the two asks, a batch at a time, each batch before a resume. A gathered
+park wakes on its lowest branch's ask alone, so ruling the other first only defers the resume."""
+
+
+def _ruled(backend, task_id, batches: list[tuple[int, ...]]) -> None:
+    """Rule on the asks a batch at a time, resuming the run after each, until it parks no more.
+
+    A gathered park exposes one wake, the lowest parked branch's, so an ask of another branch is
+    reached by its frame."""
+    pending = iter(batches)
+    while parked := backend.parked(task_id):
+        (park,) = parked
+        gated = Key.parse(past_frames(park.wake_event, drop=("gather",)))
+        batch = next(pending, None)
+        assert batch is not None, f"still parked after {batches}"
+        for branch in batch:
+            wake = branched(0, branch, gated).stored()
+            approved = {"answers": {APPROVAL: {"decision": "approve"}}}
+            answer(backend.engine, replace(park, wake_event=wake), approved, by=CONTROLLER)
+        backend.run_until_result(task_id)
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("approver", APPROVERS)
+def test_two_resolutions_of_one_case_gathered_settle_once_in_every_schedule(backend, approver):
+    """Every schedule within two switches, across the approval park both resolutions take: each
+    asks once and the case settles once. Ruled one at a time, the first branch owns the round,
+    since the second is still parked when the first claims; ruled together, each owns it in
+    some schedule."""
+    owners = set()
+    for turns in schedules(gather_branches(2), switches=2):
+        firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
+        resolutions = [resolve(SLA_CAP, critic=True, round=firm.round) for _ in range(2)]
+        program, domain = partial(gather, turns.gathered(resolutions)), firm.world.domain()
+        gate = govern(approval(PROPOSER), gate="credit", run_id=run_id, announce=announced)
+        layers, fresh = (turns.layer(), gate), turns.claiming(domain)
+        backend.register(
+            f"two-{run_id}", lambda _, run=program: run(), domain, Fault(), layers, fresh=fresh
+        )
+        task_id = backend.spawn(f"two-{run_id}", run_id)
+        backend.run_until_result(task_id)
+        _ruled(backend, task_id, APPROVERS[approver])
+        snapshot = backend.run_until_result(task_id)
+        turns.settle()
+        assert snapshot.state == "completed", (snapshot, turns.choices)
+        terms = _terms(SLA_CAP, "1000.00", "3000.00")
+        assert _asked(backend, run_id) == [[terms], [terms]], turns.choices
+        _settled_once(firm)
+        superseded = [i for i, r in enumerate(snapshot.result) if "held" in r]
+        assert len(superseded) == 1, ("one owner of the round", turns.choices)
+        owners.add(1 - superseded[0])
+    first = APPROVERS[approver][0]
+    assert owners == ({0, 1} if len(first) == 2 else set(first))
+
+
 def test_two_announcing_gates_on_one_op_write_a_row_each(backend):
     firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
     gates = tuple(
@@ -462,11 +598,12 @@ def test_a_case_resolved_again_after_its_memo_was_reversed_lands_on_no_reversed_
     by the first and performs nothing, so the books still hold no credit."""
     erp, other = another_invoice(arm, Decimal(97000))
     payment, invoice = SLA_CAP.payment.id, SLA_CAP.invoice.id
-    erp.perform(Apply(entry=payment, invoice=other), uuid4().hex)
+    elsewhere = uuid4().hex
+    erp.perform(Apply(entry=payment, invoice=other), elsewhere)
     firm = _firm(erp=erp)
     first = _resolved(backend, firm)
     assert Compensated.model_validate(first.result).undone == ["credit-memo"]
-    erp.perform(Unapply(entry=payment, invoice=other), uuid4().hex)
+    erp.perform(Unapply(entry=payment, invoice=other, undoes=elsewhere), uuid4().hex)
     second = _resolved(backend, firm)
     held = Superseded(credit=Decimal(1000), held=Decimal(1000))
     assert Superseded.model_validate(second.result) == held
@@ -505,13 +642,13 @@ def _memos(firm: Firm) -> list[Any]:
     ],
     ids=["proposer", "proposer-twice", "then-controller", "controller"],
 )
-def test_r5_an_approval_by_the_proposer_does_not_count(backend, approvers, parks, memos):
+def test_an_approval_by_the_proposer_does_not_count(backend, approvers, parks, memos):
     firm = _firm()
     run = _resolved(backend, firm, approvers=approvers)
     assert _memos(firm) == memos
     assert run.parks == parks
     if memos:
-        assert Completed.model_validate(run.result).landed.keys() >= {"credit-memo", "collect"}
+        assert Completed.model_validate(run.result).landed.keys() >= {"credit-memo", REMIND}
         assert run.passed[-1] == approvers
     else:
         assert backend.parked(run.task_id), "the settlement waits for another approver"
@@ -544,44 +681,63 @@ def test_another_customers_payment_in_full_is_approved_before_it_settles(backend
         memo="",
     )
     case = SLA_CAP.model_copy(update={"payment": stray})
-    firm = _firm(proposal=CLAIMED.model_copy(update={"credit": Decimal(0)}))
+    firm = _firm(proposal=AS_CLAIMED.model_copy(update={"credit": Decimal(0)}))
     run = _resolved(backend, firm, case, critic=False, approvers=())
     assert backend.parked(run.task_id), "the settlement waits for its approval"
     assert _asked(backend, run.run_id) == [[_terms(case, "0.00", "0.00")]]
 
 
-@pytest.mark.parametrize(
-    ("credit", "case"),
-    [
-        (Decimal("1000.005"), SLA_CAP),
-        (
-            Decimal(0),
-            SLA_CAP.model_copy(
-                update={
-                    "payment": SLA_CAP.payment.model_copy(
-                        update={"amount": SLA_CAP.invoice.amount - Decimal("0.004")}
-                    )
-                }
-            ),
-        ),
-    ],
-    ids=["credit", "deduction"],
+FINER = SLA_CAP.model_copy(
+    update={
+        "payment": SLA_CAP.payment.model_copy(
+            update={"amount": SLA_CAP.invoice.amount - Decimal("0.004")}
+        )
+    }
 )
-def test_a_settlement_refuses_an_amount_finer_than_a_cent(credit, case):
-    with pytest.raises(Inexact):
-        settle(case, credit, "r", fresh_round())
+"""A case whose shortfall is finer than a cent, built by `model_copy`, which skips validation."""
+
+OUTSIDE = re.escape(f"is not {WITHIN}")
+
+ABSORBED = [
+    pytest.param(SLA_CAP, Decimal(0), None, id="none"),
+    pytest.param(SLA_CAP, Decimal(1000), None, id="part"),
+    pytest.param(SLA_CAP, Decimal(3000), None, id="the-shortfall"),
+    pytest.param(CLEAN, Decimal(0), None, id="none-on-a-payment-in-full"),
+    pytest.param(SLA_CAP, Decimal("3000.01"), OUTSIDE, id="above-the-shortfall"),
+    pytest.param(SLA_CAP, Decimal("-0.01"), OUTSIDE, id="negative"),
+    pytest.param(SLA_CAP, Decimal("1000.005"), OUTSIDE, id="finer-than-a-cent"),
+    pytest.param(CLEAN, Decimal("0.01"), OUTSIDE, id="on-a-payment-in-full"),
+    pytest.param(
+        FINER, Decimal(0), "the shortfall 0.004 is not in whole cents", id="shortfall-finer"
+    ),
+]
 
 
-def test_a_settlements_legs_refuse_a_credit_finer_than_a_cent_before_any_runs():
-    with pytest.raises(Inexact):
-        settlement(SLA_CAP, Decimal("1000.005"), "r", fresh_round())
+@pytest.mark.parametrize("build", [settle, settlement])
+@pytest.mark.parametrize(("case", "credit", "refusal"), ABSORBED)
+def test_a_settlement_takes_only_a_credit_its_shortfall_absorbs(build, case, credit, refusal):
+    """Refused while the settlement is built, so nothing is claimed, asked or applied, by the rule
+    the firm's proposal is gated with."""
+    assert case.absorbs(credit) is (refusal is None)
+    if refusal is None:
+        build(case, credit, "r", fresh_round())
+    else:
+        with pytest.raises(Unabsorbed, match=refusal):
+            build(case, credit, "r", fresh_round())
+
+
+@pytest.mark.parametrize("document", ["invoice", "payment"])
+def test_a_case_refuses_an_amount_finer_than_a_cent(document):
+    held = getattr(SLA_CAP, document)
+    with pytest.raises(ValidationError):
+        type(held).model_validate(held.model_dump() | {"amount": held.amount + Decimal("0.001")})
 
 
 def test_the_customer_hears_and_owes_in_dollars_and_cents(backend):
     firm = _firm()
     _resolved(backend, firm)
     told = {name: args.get("credit") or args.get("owed") for name, args in firm.told}
-    assert told == {"notify": "1000.00", "collect": "2000.00"}
+    assert told == {"notify": "1000.00", REMIND: "2000.00"}
 
 
 @pytest.mark.adversarial
@@ -595,7 +751,7 @@ def test_a_denied_settlement_ends_the_resolution_and_posts_nothing(backend):
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
 @pytest.mark.parametrize("position", list(FaultPosition))
-def test_r1_a_resolution_posts_once_whatever_a_crash_interrupts(backend, position, arm):
+def test_a_resolution_posts_once_whatever_a_crash_interrupts(backend, position, arm):
     erp_of = books(arm, [SLA_CAP])
     unarmed = Fault(None, position=position)
     _resolved(backend, _firm(erp=erp_of()), fault=unarmed)
@@ -612,7 +768,7 @@ def test_r1_a_resolution_posts_once_whatever_a_crash_interrupts(backend, positio
     assert crashes == {FaultPosition.BEFORE_OP: 21, FaultPosition.AFTER_THUNK: 13}[position]
 
 
-@pytest.mark.adversarial
+@pytest.mark.spine
 def test_the_attempt_resumed_after_the_approval_asks_no_model(backend):
     firm = _firm()
     run = _resolved(backend, firm)
@@ -644,19 +800,19 @@ def test_the_critiques_credit_stands_whatever_its_verdict(backend, critique, mem
     run = _resolved(backend, firm)
     assert _memos(firm) == memos
     assert run.asked_at_park is not None, "every credit on a deduction is approved"
-    collected = [Decimal(args["owed"]) for name, args in firm.told if name == "collect"]
-    assert collected == ([Decimal(owed)] if owed else [])
+    reminded = [Decimal(args["owed"]) for name, args in firm.told if name == REMIND]
+    assert reminded == ([Decimal(owed)] if owed else [])
 
 
 @pytest.mark.adversarial
 @pytest.mark.parametrize(
     ("critique", "proposed", "asked"),
     [
-        (CAPPED | {"credit": "-500"}, CLAIMED, "CritiqueWire"),
-        (CAPPED | {"credit": "3000.01"}, CLAIMED, "CritiqueWire"),
-        (CAPPED | {"credit": "1000.005"}, CLAIMED, "CritiqueWire"),
-        (CAPPED, CLAIMED.model_copy(update={"credit": -1}), "Proposal"),
-        (CAPPED, CLAIMED.model_copy(update={"credit": 4000}), "Proposal"),
+        (CAPPED | {"credit": "-500"}, AS_CLAIMED, "CritiqueWire"),
+        (CAPPED | {"credit": "3000.01"}, AS_CLAIMED, "CritiqueWire"),
+        (CAPPED | {"credit": "1000.005"}, AS_CLAIMED, "CritiqueWire"),
+        (CAPPED, AS_CLAIMED.model_copy(update={"credit": -1}), "Proposal"),
+        (CAPPED, AS_CLAIMED.model_copy(update={"credit": 4000}), "Proposal"),
     ],
     ids=[
         "critic-negative",
@@ -682,7 +838,7 @@ def _keys(backend, run: Run) -> tuple[str, ...]:
 
 
 @pytest.mark.adversarial
-def test_r3_the_critique_parts_the_run_at_engage_and_nowhere_before(backend):
+def test_the_critique_parts_the_run_at_engage_and_nowhere_before(backend):
     absent_firm, present_firm, uncited_firm = _firm(), _firm(CAPPED), _firm(UNCITED)
     books = absent_firm.round.books  # one case's arms read one chain of the firm's knowledge
     present_firm.round, uncited_firm.round = Round(books, 1), Round(books, 2)
@@ -718,8 +874,8 @@ def test_each_repair_and_retry_is_a_level_of_its_own_scope(backend):
     critiques = iter([UNCITED, CAPPED])
     firm.world.critic = lambda op: (CritiqueWire.model_validate(next(critiques)), Usage())
     run = _resolved(backend, firm)
-    looped = [key for key in _keys(backend, run) if "engage" in key or "collect" in key]
-    expected = [("repair", "engage", 0), ("repair", "engage", 1), ("retry", "collect", 0)]
+    looped = [key for key in _keys(backend, run) if "engage" in key or REMIND in key]
+    expected = [("repair", "engage", 0), ("repair", "engage", 1), ("retry", REMIND, 0)]
     assert looped == [_level(*at).stored() for at in expected]
 
 
@@ -752,7 +908,7 @@ def _committed(firm: Firm) -> tuple[Any, ...]:
 
 @pytest.mark.property
 @pytest.mark.adversarial
-def test_r2_the_firms_effects_do_not_read_the_notes_and_tickets(backend):
+def test_the_firms_effects_do_not_read_the_notes_and_tickets(backend):
     baseline = _firm()
     _resolved(backend, baseline)
     assert baseline.told

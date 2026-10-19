@@ -10,25 +10,30 @@ answers them.
 | `load` of a row that does not validate   | refuses, as data, and writes nothing           |
 | `action_post` of a draft                 | posts it, on the first open day if locked      |
 | `action_post` of a reversal              | also matches it against an open original       |
-| `js_assign_outstanding_line`             | matches what both lines have left, then raises |
-| `unlink` of a match                      | removes it                                     |
 | `unlink` of a move                       | removes a draft, and refuses a posted move     |
 | `create` of a key                        | holds it, and refuses a module and name held   |
+| `create` of a server action              | holds its name and code                        |
+| `run` of the fence action                | answers as `FENCE` does, in one transaction    |
+| `run` of an action holding other code    | raises, since only `FENCE`'s semantics run     |
 
-`js_assign_outstanding_line` returns nothing, which XML-RPC cannot answer, so it raises after it
-commits. A move carries one receivable line per installment of its terms, a debit for an invoice
-and a credit for a memo or a payment; a search answers in id order.
+The fence's run is `FENCE`'s semantics written in Python; its text is run by the live Odoo only,
+which the live arm exercises. One lock serializes every call, so a call is one transaction under
+threads, as a database makes it, and a call's arguments marshal as XML-RPC's do. A move carries one
+receivable line per installment of its terms, a debit for an invoice and a credit for a memo or a
+payment; a search answers in id order.
 """
 
+import xmlrpc.client
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from itertools import count
+from threading import Lock
 from typing import Any
 
 from ..cases import Case
-from .odoo import MODULE, OdooErp
+from .odoo import FENCE, MODULE, Claim, OdooErp
 from .port import Unknown
 
 DEBIT = {"out_invoice"}
@@ -109,10 +114,15 @@ class ScriptedOdoo:
     moves: dict[int, _Move] = field(default_factory=dict)
     matches: dict[int, _Match] = field(default_factory=dict)
     keys: dict[str, int] = field(default_factory=dict)
+    claims: dict[tuple[Claim, str], int] = field(default_factory=dict)
+    """The invoice each claim on an apply's key was written for, by what it records and the
+    key's name."""
+    actions: dict[int, dict[str, Any]] = field(default_factory=dict)
     locked: str | None = None
     """The last day of the locked periods."""
     documents: dict[str, int] = field(default_factory=dict)
     ids: count[int] = field(default_factory=lambda: count(1))
+    lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
     @classmethod
     def seeded(cls, cases: Iterable[Case]) -> ScriptedOdoo:
@@ -144,13 +154,54 @@ class ScriptedOdoo:
         return move.id
 
     def call(self, model: str, method: str, *args: Any, **kwargs: Any) -> Any:
-        match model, method, args:
-            case _, "search" | "search_read" | "search_count" | "read", _:
-                if set(kwargs) - {"order"} or kwargs.get("order", "id") != "id":
-                    raise Unknown(f"the scripted Odoo answers in id order only, not {kwargs}")
-                return self._query(model, method, args)
-            case _:
-                return self._write(model, method, args)
+        xmlrpc.client.dumps((list(args), kwargs), allow_none=True)
+        with self.lock:
+            match model, method, args:
+                case "ir.actions.server", "run", ([int(action)],):
+                    return self._run(action, kwargs.get("context", {}))
+                case _, "search" | "search_read" | "search_count" | "read", _:
+                    if set(kwargs) - {"order"} or kwargs.get("order", "id") != "id":
+                        raise Unknown(f"the scripted Odoo answers in id order only, not {kwargs}")
+                    return self._query(model, method, args)
+                case _:
+                    return self._write(model, method, args)
+
+    def _run(self, action: int, ask: Mapping[str, Any]) -> dict[str, str]:
+        if self.actions.get(action, {}).get("code") != FENCE:
+            raise Unknown(
+                f"the scripted Odoo runs no code but FENCE, and action {action} holds other"
+            )
+        name, invoice, line = ask["name"], ask["invoice"], ask["line"]
+        owed = self.moves[invoice].receivables
+        joins = [m.id for m in self.matches.values() if line in (m.debit, m.credit)]
+        joins = [
+            id for id in joins if {self.matches[id].debit, self.matches[id].credit} & set(owed)
+        ]
+        held = [claim for claim in Claim if (claim, name) in self.claims]
+        mine: Claim = Claim.APPLIED
+        found: str
+        if Claim.UNDONE in held:
+            found = Claim.UNDONE
+        elif held and ask["op"] == "apply":
+            found = held[0]
+        elif ask["op"] == "unapply":
+            mine, found = Claim.UNDONE, "created"
+            for id in joins:
+                del self.matches[id]
+        elif joins:
+            found = Claim.APPLIED
+        elif self._owes(invoice) and self._residual(line):
+            for receivable in owed:
+                self._assign(receivable, line)
+            found = "created"
+        else:
+            mine = found = Claim.REFUSED
+        if found not in held:
+            self.claims[mine, name] = invoice
+        return {"found": str(found)}
+
+    def _owes(self, invoice: int) -> Decimal:
+        return sum((self._residual(line) for line in self.moves[invoice].receivables), Decimal(0))
 
     def _write(self, model: str, method: str, args: Sequence[Any]) -> Any:
         match model, method, args:
@@ -158,18 +209,16 @@ class ScriptedOdoo:
                 return self._unlink(moves)
             case "ir.model.data", "create", ({"name": str(name), "res_id": int(move)},):
                 return self._claim(name, move)
+            case "ir.actions.server", "create", ({"name": str(), "code": str()} as action,):
+                id = next(self.ids)
+                self.actions[id] = {"id": id, **action}
+                return id
             case "account.move", "load", (fields, [row]):
                 return self._load(dict(zip(fields, row, strict=True)))
             case "account.move", "action_post", ([*moves],):
                 for move in moves:
                     self._post(self.moves[move])
                 return False
-            case "account.move", "js_assign_outstanding_line", ([invoice], int(line)):
-                for owed in self.moves[invoice].receivables:
-                    self._assign(owed, line)
-                raise Unknown("cannot marshal None unless allow_none is enabled")
-            case "account.partial.reconcile", "unlink", ([*ids],):
-                return self._unmatch(ids)
             case _:
                 raise Unknown(f"the scripted Odoo does not answer {model}.{method}")
 
@@ -180,13 +229,6 @@ class ScriptedOdoo:
             raise Unknown("You cannot delete an entry which has been posted once.")
         for move in moves:
             del self.moves[move]
-        return True
-
-    def _unmatch(self, ids: Sequence[int]) -> bool:
-        if missing := [id for id in ids if id not in self.matches]:
-            raise Unknown(f"Record does not exist or has been deleted: {missing}")
-        for id in ids:
-            del self.matches[id]
         return True
 
     def _claim(self, name: str, move: int) -> int:
@@ -232,11 +274,17 @@ class ScriptedOdoo:
                     for match in self.matches.values()
                 ]
             case "ir.model.data":
+                held = [(MODULE, name, move) for name, move in self.keys.items()]
+                held += [(str(kind), name, move) for (kind, name), move in self.claims.items()]
                 return [
-                    {"id": move, "module": MODULE, "name": name, "model": "account.move"}
+                    {"id": i, "module": module, "name": name, "model": "account.move"}
                     | {"res_id": move}
-                    for name, move in self.keys.items()
+                    for i, (module, name, move) in enumerate(held, 1)
                 ]
+            case "ir.model":
+                return [{"id": 1, "model": "account.move"}]
+            case "ir.actions.server":
+                return list(self.actions.values())
             case _:
                 raise Unknown(f"the scripted Odoo has no model {model}")
 

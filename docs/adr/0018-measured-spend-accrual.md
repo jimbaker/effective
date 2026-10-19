@@ -199,8 +199,10 @@ below them; a Lean boundary law waits until the crossing has more than one site.
 - The measured park and ask is available: a run that crosses its ceiling waits durably for a
   grant, resumable from recorded state, with per-seam spend attribution, and a fork can re-run the
   free recorded prefix and probe both grant arms before the grant is decided.
-- Enabling it is a spawn-side choice: set `CONTRACT_PARAM` to `"v1"` and pass a `MeasuredBudget`.
-  Tasks spawned without the param replay on v0.
+- Enabling it is a spawn-side choice: spawn with `Contract.V1.spawn_params(params)`, build the
+  handler with `Contract.from_params(params)`, and pass a `MeasuredBudget`. Tasks spawned without
+  the param replay on v0, and a budget handed to their handler is never checked: the handler
+  cannot tell such a task from one in flight before the envelope existed.
 - `CallTool` cost is out of scope until a tool reports usage; only model-call `Usage` is
   enveloped. Tokens ride the same `Usage`.
 - Bench cost totals read the handler-owned meter or a ledger projection; `MeteredInterpreter.meter`

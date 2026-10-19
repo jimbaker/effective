@@ -1,0 +1,14 @@
+{
+  "finds_the_cap": true,
+  "critique": {
+    "verdict": "revise",
+    "credit": "1000",
+    "cites": [
+      "MSA-NW-2025",
+      "TCK-881",
+      "CRM-2207"
+    ],
+    "reason": "The proposed $3,000 is wrong on three counts. (1) Section 4.2 credits only downtime beyond the 99.9% monthly commitment. September has 30 days (720 hours), so the allowance is 0.72 hours. TCK-881 records 6h15m of unavailability (02:10 to 08:25 UTC), leaving about 5.53 hours beyond the commitment. Only full hours count, so that is 5 full hours, not 6. (2) The credit is 0.5% of the $100,000 monthly fee per hour, so 5 hours yields $2,500. (3) Section 4.2 caps credits at $1,000 per calendar month, so the credit is $1,000. The customer's six-hour, $3,000 claim ignores both the commitment threshold and the cap. Section 7.4 bars set-off except a 4.2 credit, so the customer's $2,000 deduction beyond the $1,000 credit is not a permitted withhold. The customer's claim was timely: CRM-2207 (2026-09-26) is within 30 days of the 2026-09-14 incident, and the request was in writing. Net result: credit memo $1,000; invoice INV-1001 is $100,000 less $1,000 = $99,000 due, of which $97,000 was paid, leaving $2,000 past due (Net 30 from 2026-09-01 ran to 2026-10-01), which accrues 1% per month under 3.2. Assumption: the 30-day month and the hour-counting reading of 4.2 are the most natural ones; if the contract intends a different availability basis, the credit could change, but it cannot exceed $1,000."
+  },
+  "refused": null
+}

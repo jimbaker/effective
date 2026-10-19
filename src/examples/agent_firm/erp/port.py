@@ -8,13 +8,20 @@
 | `Unapply`  | remove that match                                              | `Unapplied` |
 
 A post or a reversal lands once per idempotency key: the key names the one entry it made, and a
-replay answers that entry with `found` set to `EXISTING`. An apply or an unapply is read from the
-match it makes or removes, so a replay answers `EXISTING` when the match is already as asked; its
-key names nothing in the ERP. An op whose key names an entry it does not describe, or one since
-reversed, is `Refused`: two resolutions of one case may disagree on what the key names, and the
-first may have been undone. A key the ERP holds for a record that is no entry raises `Diverged`.
-An adapter answers only what it read, and raises `Unknown` when it could not read whether a call
-landed. A refusal is an answer, `Refused`, and the state is as it was.
+replay answers that entry with `found` set to `EXISTING`. An apply lands once per key and an
+unapply once per apply it `undoes`: each claims the apply's key, committed with the match it makes
+or removes, and an op that finds its claim answers from it and moves nothing. An apply refused
+because the entry has nothing left or the invoice owes nothing claims the key as refused, so it is
+refused again whatever moved since. An apply whose undo's claim is held is `Refused`, so an apply
+an expired attempt sent lands nothing after the compensation that undid it. An apply that finds the
+entry already matched to the invoice claims its key without making the match, so an undo naming the
+key that did make it removes the match from under it; whether a round may start while an earlier
+round compensates is for round advance to decide. An op whose key names an entry it does not
+describe, or one since reversed, is `Refused`: two resolutions of one case may disagree on what the
+key names, and the first resolution may have been undone. A key the ERP holds for a record that is
+no entry raises `Diverged`. An adapter answers only what it read, and raises `Unknown` when it
+could not read whether a call landed. A refusal is an answer, `Refused`, and the books are as they
+were.
 
 An entry is named by the id its adapter gives it, or by the id of a document the world holds, such
 as an invoice or a payment.
@@ -56,6 +63,8 @@ class Unapply(BaseModel):
     op: Literal["unapply"] = "unapply"
     entry: str
     invoice: str
+    undoes: str
+    """The key of the apply this removes."""
 
 
 type ErpOp = Annotated[PostMemo | Reverse | Apply | Unapply, Field(discriminator="op")]

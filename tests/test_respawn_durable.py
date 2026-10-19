@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from effective.api import append_ledger, ask_llm, call_tool, gather, scoped
 from effective.budget import Budget, MeasuredBudget
 from effective.combinators import Again, Chain, Done, Turn, respawn
-from effective.cost import CONTRACT_PARAM, Contract, Usage
+from effective.cost import Contract, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
@@ -281,7 +281,7 @@ def test_the_measured_accrual_CROSSES_a_generation_boundary(tmp_path, sqlite_app
             ctx, domain, ledger=None, budget=budget, params=params, contract=Contract.V1
         ).run(lambda: respawn(spend_batch, chain, budget=Budget(generations=3)))
 
-    app.spawn("spend", {"run_id": "r1", CONTRACT_PARAM: Contract.V1.value})
+    app.spawn("spend", Contract.V1.spawn_params({"run_id": "r1"}))
     _drain(app)
 
     tasks = _tasks(app)
@@ -335,7 +335,7 @@ def test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED(tmp_path, sqlite_app):
             ctx, domain, ledger=None, budget=budget, params=params, contract=Contract.V1
         ).run(lambda: respawn(spend_twice, chain, budget=Budget(generations=1)))
 
-    app.spawn("pergen", {"run_id": "r1", CONTRACT_PARAM: Contract.V1.value})
+    app.spawn("pergen", Contract.V1.spawn_params({"run_id": "r1"}))
     _drain(app)
 
     state = _tasks(app)[0][1]
@@ -365,7 +365,7 @@ def test_a_per_generation_ceiling_is_ACTUALLY_ENFORCED(tmp_path, sqlite_app):
             ctx, domain2, ledger=None, budget=budget, params=params, contract=Contract.V1
         ).run(lambda: respawn(spend_once, chain, budget=Budget(generations=2)))
 
-    app2.spawn("pergen2", {"run_id": "r1", CONTRACT_PARAM: Contract.V1.value})
+    app2.spawn("pergen2", Contract.V1.spawn_params({"run_id": "r1"}))
     _drain(app2)
     # Each generation spends 0.001 under a 0.0015 per-generation ceiling and must SURVIVE, while
     # the chain total (0.002) already exceeds it.

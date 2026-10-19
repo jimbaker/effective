@@ -29,7 +29,7 @@ from effective.bridge_absurd import (
     read_absurd_task,
 )
 from effective.checkpoints import keys
-from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
+from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import AskLLM
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import fork_seed
@@ -85,7 +85,7 @@ def _run(app, run_id: str) -> UUID:
         finally:
             ledger.close()
 
-    task_id = app.spawn(name, {"run_id": run_id, CONTRACT_PARAM: Contract.V1.value})
+    task_id = app.spawn(name, Contract.V1.spawn_params({"run_id": run_id}))
     # A generous drain budget on purpose: the Absurd `default` queue is SHARED across the durable
     # test lane, so `work_batch` may claim another test's task before ours (the justfile's
     # one-queue note). Budget for that rather than assume an empty queue.

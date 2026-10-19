@@ -161,6 +161,20 @@ seal, which a `Condition` whose `wait` announces itself makes observable. No sle
 and without the seal the loser runs past the saved cut every time
 ([`tests/test_race_publish_seal.py`](../../tests/test_race_publish_seal.py)).
 
+## Every schedule, enumerated
+
+A turnstile forces one named order. `Turns` ([`tests/_turns.py`](../../tests/_turns.py)) enumerates
+them: each op a gather branch runs takes a turn, the turn spans the op and the branch's code up to
+its next op, and `schedules` explores the orders within a switch bound. Its domain differs from the
+turnstile's in three ways a row has to know.
+
+| the shape | `Turns` decides it | because |
+|---|---|---|
+| the order of a gather's ops | yes | each op takes a turn, and its commit falls inside the turn |
+| the order after a park or a crash | yes | one `Turns` spans the run's claims, and its choices go on |
+| which ask an approver rules first | **no** | a gathered park wakes on its lowest branch's ask alone, so the order rulings arrive in is the test's, outside the turns |
+| a stale attempt overlapping its resume | **no** | that is two attempts of one task; [`tests/_attempts.py`](../../tests/_attempts.py) places the stale op's one landing among the resumed attempt's calls |
+
 ## The corollary
 
 [concepts/enforcer-domain](enforcer-domain.md) asks what a gate SCANS. This is its twin one level over: **ask what an

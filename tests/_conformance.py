@@ -42,7 +42,7 @@ from effective.coding.states import (
 from effective.coding.transition import transition
 from effective.coding.verdicts import mechanical_judges
 from effective.combinators import Answered, Deeper, descend, recurse
-from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
+from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
 from effective.engines import TaskSnapshot, open
 from effective.engines.absurd import AbsurdEngine
@@ -143,17 +143,11 @@ def refusals_of(outcome: ForkOutcome) -> list[tuple[str, str]]:
 def _spawn_params(
     run_id: str, contract: Contract, admitted: Mapping[str, Any] | None = None
 ) -> dict:
-    """Build a task's immutable spawn params, where the accrual contract rides beside what the
-    run was `admitted` with.
-
-    v0 carries NO key: an in-flight task spawned before the envelope existed looks exactly
-    like this, so `Contract.from_params` returns v0 and the task stays on the bare path."""
-    params: dict[str, Any] = {"run_id": run_id}
-    if contract is not Contract.V0:
-        params[CONTRACT_PARAM] = contract.value
-    if clash := params.keys() & dict(admitted or {}).keys():
-        raise ValueError(f"admitted params {sorted(clash)} are the harness's own")
-    return params | dict(admitted or {})
+    """A task's immutable spawn params: its run id and what it was `admitted` with, marked with
+    `contract`."""
+    if "run_id" in (admitted := dict(admitted or {})):
+        raise ValueError("the admitted params' run_id is the harness's own")
+    return contract.spawn_params({"run_id": run_id} | admitted)
 
 
 # ── the self-contained workflow + domain ─────────────────────────────────────

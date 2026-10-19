@@ -11,7 +11,7 @@ from functools import partial
 from uuid import uuid4
 
 import pytest
-from _conformance import private
+from _conformance import Fault, FaultPosition, private
 from _schedules import Turnstile, step_name
 
 from effective.api import ask_llm, await_event, call_tool, gather
@@ -154,3 +154,17 @@ def test_the_check_wants_two_branches(backend):
     gathered = Turnstile(["tool:b", "tool:a"], step_name)
     durable(backend, two_tools("a", "b"), gathered)
     gathered.check()
+
+
+@pytest.mark.parametrize("position", list(FaultPosition))
+def test_an_op_crashed_in_its_turn_commits_on_resume(backend, position):
+    """The crash ends the op's turn. The resume re-admits every op the first attempt reached, and
+    each passes through, since its placement has had its turn."""
+    turnstile = Turnstile(["tool:b", "tool:a"], step_name)
+    fault, name = Fault(named="gather:0,0;step;tool:a", position=position), private("crashed")
+    backend.register(name, lambda _: two_tools("a", "b")(), Ones(), fault, (turnstile.layer(),))
+    snap = backend.run_until_result(backend.spawn(name, str(uuid4())))
+    assert snap.state == "completed", snap
+    assert fault.fired
+    assert turnstile.outcomes == [("tool:b", "committed"), ("tool:a", "FaultInjected")]
+    turnstile.check()

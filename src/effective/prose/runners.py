@@ -181,9 +181,9 @@ says a little and the code says what; nothing in the rubric or the gates supplie
 passes over one property cut its caveat down and none noticed the USE was absent, because nobody
 had asked who calls it.
 
-A recorded op rather than something the driver runs beside the machine, for R6's reason: the
-caller list is what the classification was made against, so a replay re-serves it and the tape says
-which evidence judged which region."""
+A recorded op rather than something the driver runs beside the machine, because the record is the
+audit trail: the caller list is what the classification was made against, so a replay re-serves it
+and the tape says which evidence judged which region."""
 
 DESTINATIONS = (
     "shows",

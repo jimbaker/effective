@@ -6,15 +6,16 @@ Deployment infrastructure, exactly like the model caller and the tool registry:
 ``EXECUTE_TOOL`` in its domain interpreter (the ``agents`` slot of
 ``effective.interpreters.tools.make_tool_runner`` fits: it hands over the whole op).
 
-Monty (pydantic-monty, pinned; alpha, API in flux) is capability-based: no
-``import``/``eval``/filesystem/network, and every ambient-looking call, even
-``datetime.now()``, surfaces as a ``FunctionSnapshot`` the host resolves. So
-sandboxed code satisfies the determinism boundary **by construction**:
-deterministic computation between recorded host calls.
+Monty (pydantic-monty, pinned) runs code in a subprocess worker and is
+capability-based: no ``import``/``eval``/filesystem/network, and under `HOST`'s
+policy every ambient-looking call, even ``datetime.now()`` or a draw from
+``random``, surfaces as a ``FunctionSnapshot`` the host resolves. So sandboxed
+code satisfies the determinism boundary **by construction**: deterministic
+computation between recorded host calls.
 
 The engine executes ONE segment per call: it (re-)runs the code from the start,
-re-binding recorded host-call results by call index — functions from
-``fn_log``, actions from ``action_results`` — then runs live past that
+re-binding recorded host-call results by call index (functions from
+``fn_log``, actions from ``action_results``), then runs live past that
 frontier, until the next unresolved *action* call (pause: the workflow yields
 it as a real op) or completion. Every host call is resumed with the
 **checkpoint form** of its result (``to_jsonable_python``), on the live path
@@ -25,15 +26,17 @@ Undeclared-name policy (all deterministic, so re-execution agrees):
 
 - a *declared function* miss in the registry is a deployment bug →
   ``CodeEngineError`` (the step fails loudly);
-- an undeclared **OS-function** call (``open``, ``os.environ``, …) is resumed
-  ``not_handled`` → the sandbox raises ``PermissionError`` (undeclared world
-  access *is* a permission denial — catchable as control flow);
+- an undeclared **OS-function** call is resumed ``not_handled``, so the sandbox
+  raises ``PermissionError`` for a file (``open``) and ``RuntimeError`` for the
+  environment, a clock, a sleep or entropy: undeclared world access is refused,
+  and catchable as control flow;
 - any other undeclared call → ``NameError`` inside the sandbox;
 - a bare undefined *name* (``NameLookupSnapshot``) → ``CodeEngineError`` (plain
   code bug; fail located rather than guess a value).
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
 from hashlib import blake2b
 from typing import Any
 
@@ -45,7 +48,7 @@ from effective.domain import CallTool
 
 
 class CodeEngineError(Exception):
-    """The engine cannot (or will not) execute this program shape — a
+    """The engine cannot (or will not) execute this program shape: a
     deployment/authoring error, distinct from an exception the code raised."""
 
 
@@ -69,8 +72,20 @@ def _resume_value(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {"return_value": entry["return_value"]}
 
 
+HOST: monty.OSPolicy = {"datetime": "call_host", "sleep": "call_host", "random_start": "call_host"}
+"""The sandbox's clocks, sleeps and entropy, each surfaced to the host as an OS call."""
+
+
+@contextmanager
+def _started(code: str, inputs: dict[str, Any], limits: Any | None) -> Generator[Any]:
+    """The sandbox's first event for `code` run with `inputs` bound, under `limits`, in a worker
+    pool of its own that closes with the segment."""
+    with monty.Monty() as pool, pool.checkout(limits=limits, os_policy=HOST) as session:
+        yield session.feed_start(code, inputs=inputs)
+
+
 def _action_call(state: Any) -> ActionCall:
-    """The paused call, in canonical (checkpoint) form — what the workflow
+    """The paused call, in canonical (checkpoint) form: what the workflow
     yields as an op."""
     return ActionCall(
         name=state.function_name,
@@ -94,7 +109,7 @@ class MontyEngine:
     ``functions`` holds the bodies for the *declared* observational calls; a
     workflow's ``functions=("llm_query", ...)`` declaration is the contract,
     this registry is the implementation. Registering an ambient-looking name
-    (e.g. ``"datetime.now"``) makes it a recorded effect — clock-as-effect.
+    (e.g. ``"datetime.now"``) makes it a recorded effect: clock-as-effect.
     ``limits`` applies Monty's ``ResourceLimits`` to every segment.
     """
 
@@ -114,9 +129,21 @@ class MontyEngine:
         actions = frozenset(args.get("actions") or ())
         action_results: list[dict[str, Any]] = list(args.get("action_results") or ())
 
-        program = monty.Monty(code, inputs=sorted(inputs))
-        state: Any = program.start(inputs=inputs, limits=self.limits)
-        log: list[Any] = list(args.get("fn_log") or ())  # re-bound prefix + live appends
+        with _started(code, inputs, self.limits) as state:
+            return self._drive(
+                state, declared, actions, action_results, list(args.get("fn_log") or ())
+            )
+
+    def _drive(
+        self,
+        state: Any,
+        declared: frozenset[str],
+        actions: frozenset[str],
+        action_results: list[dict[str, Any]],
+        log: list[Any],
+    ) -> CodeOutcome:
+        """Run the sandbox from `state` to the next action it pauses on, or to completion. `log`
+        holds the re-bound prefix of host calls, and live calls are appended to it."""
         fn_idx = 0
         act_idx = 0
         while True:
@@ -146,7 +173,7 @@ class MontyEngine:
                     )
                 case monty.NameLookupSnapshot(variable_name=name):
                     raise CodeEngineError(f"undefined name {name!r} in sandboxed code")
-                case _:  # FutureSnapshot etc. — not supported in M0
+                case _:  # an event the engine does not model (FutureSnapshot) fails loudly
                     raise CodeEngineError(f"unsupported sandbox event: {type(state).__name__}")
 
     def _resume_function(self, state: Any, log: list[Any], fn_idx: int) -> tuple[Any, int]:
@@ -154,7 +181,7 @@ class MontyEngine:
         still inside the recorded prefix (replay-by-re-execution), else run the
         registry body live and append its canonical-form result. The re-bind
         verifies the recorded ``(name, args-digest)`` against the actual call
-        site — a mismatch is loud, never a silent misbinding."""
+        site, so a mismatch is loud, never a silent misbinding."""
         fname: str = state.function_name
         digest = _args_digest(state)
         if fn_idx < len(log):
@@ -163,7 +190,7 @@ class MontyEngine:
                 raise CodeEngineError(
                     f"re-bind mismatch at host call #{fn_idx}: recorded "
                     f"{entry.get('name')!r}@{entry.get('args')}, re-executed "
-                    f"{fname!r}@{digest} — nondeterministic sandbox path, serde "
+                    f"{fname!r}@{digest}: nondeterministic sandbox path, serde "
                     "divergence, or the code changed mid-flight"
                 )
             return state.resume({"return_value": entry["value"]}), fn_idx + 1

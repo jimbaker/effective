@@ -49,8 +49,10 @@ def _question(wire: WireQuestion) -> jev.Choice | jev.Noul | jev.Score:
         case WireChoice(criteria=criteria):
             return jev.Choice(criteria=dict(criteria), instructions=instructions)
         case WireNoul(criteria=criteria):
-            sides = jev.NoulCriteria(**criteria) if criteria else None
-            return jev.Noul(instructions=instructions, criteria=sides)
+            sides = jev.NoulCriteria()
+            for side, text in criteria.items():
+                sides[side] = text
+            return jev.Noul(instructions=instructions, criteria=sides or None)
         case WireScore(criteria=criteria):
             return jev.Score(criteria=list(criteria), instructions=instructions)
         case unreachable:

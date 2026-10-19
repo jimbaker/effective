@@ -67,9 +67,9 @@ ACTIONS = ("refund", "order", "login", "upload", "delete", "export")
 MAX_TURNS = 8
 REPL_TRUNCATE = 500  # their REPLVariable preview cap — the measured sis bug, kept faithfully
 SANDBOX_SECONDS = 5.0
-# Monty's max_duration_secs counts wall time ACROSS host calls,
-# so a semantic segment's budget must cover llm_query network time; the sub-call
-# cap is what actually bounds the trial.
+# A repl cell's subprocess timeout counts wall time across host calls, so a semantic
+# cell's budget must cover llm_query network time; Monty's feed limit counts only the
+# sandbox's own execution, and the sub-call cap is what actually bounds the trial.
 SEM_SANDBOX_SECONDS = 300.0
 MAX_SUBCALLS = 128  # loud at the cap: a measured behavior, not a crash
 # Enough output budget that reasoning + ~150 labels fit; truncation RAISES.
@@ -664,7 +664,7 @@ if llm is not None:
         return content
     functions["llm_query"] = llm_query
     args["functions"] = ["llm_query"]
-engine = MontyEngine(functions=functions, limits={"max_duration_secs": seconds})
+engine = MontyEngine(functions=functions, limits={"max_feed_duration_secs": seconds})
 try:
     outcome = engine.execute(args)
     result = {"output_repr": None if outcome.output is None else repr(outcome.output)}
@@ -682,8 +682,8 @@ def _repl_exec(
     """One repl cell in a subprocess: (observation, errored, subcall counters).
     The observation is the cell's stdout plus the final expression's repr
     (omitted when None — a real REPL doesn't echo None), the dspy-interpreter
-    semantics the arm replicates. Monty's Rust `print`
-    writes to OS fd 1, so capture requires the subprocess boundary. ``llm``
+    semantics the arm replicates. Monty's `print` writes to the host process's
+    stdout, so capture uses the subprocess boundary. ``llm``
     (semantic tasks) registers `llm_query` in the subprocess, which makes its own
     metered calls and reports usage back."""
     src_root = str(Path(__file__).resolve().parent.parent)
@@ -762,7 +762,7 @@ class _StructuredInterp:
         sandbox_seconds: float = SANDBOX_SECONDS,
     ) -> None:
         engine = MontyEngine(
-            functions=dict(functions or {}), limits={"max_duration_secs": sandbox_seconds}
+            functions=dict(functions or {}), limits={"max_feed_duration_secs": sandbox_seconds}
         )
         raw = execute_tool(engine)
         self.sandbox_errors = 0

@@ -26,7 +26,7 @@ from string import ascii_lowercase
 from typing import Any
 from uuid import uuid4
 
-from effective import CONTRACT_PARAM, Contract, Usage
+from effective import Contract, Usage
 from effective.budget import MeasuredBudget
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.govern import govern
@@ -35,7 +35,7 @@ from effective.keys import Segment
 from effective.ledgerread import sqlite_payloads
 from effective.parked import answer, read_sqlite_parked_conn
 
-from .ar import Round
+from .ar import REMIND, Round
 from .cases import CASES, Case
 from .engage import CritiqueWire, Proposal, Verdict
 from .erp.odoo import OdooErp, XmlRpc, seed
@@ -113,8 +113,8 @@ def run(admit: Callable[[Pinned], Manifest], world: World, kept_in: str, db: Pat
 
     try:
         run_id = str(uuid4())
-        marked = {"run_id": run_id, CONTRACT_PARAM: Contract.V1.value}
-        task_id = app.spawn("resolve", marked | manifest.params())
+        params = Contract.V1.spawn_params({"run_id": run_id} | manifest.params())
+        task_id = app.spawn("resolve", params)
         done = app.run_until_result(task_id)
         while parked := [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == task_id]:
             asked = [row for row in sqlite_payloads(app.conn, run_id) if row["kind"] == ASKED]
@@ -138,7 +138,7 @@ def scripted_firm(case: Case, erp: Erp, told: Callable[[Mapping[str, Any]], Any]
         llm=lambda op: deducted(case),
         critic=lambda op: (CRITIQUES[case.name], Usage()),
         critiques=frozenset({CritiqueWire}),
-        tools={"notify": told, "collect": told},
+        tools={"notify": told, REMIND: told},
     )
 
 

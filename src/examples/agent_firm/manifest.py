@@ -13,7 +13,7 @@ from effective.keys import Key
 
 from .ar import Round
 from .cases import Case
-from .knowledge import K0, Mismatched, Pinned, adoption_of
+from .knowledge import NO_RULES, Mismatched, Pinned, adoption_of
 
 MANIFEST = "manifest"
 """The spawn param a run's manifest rides under."""
@@ -58,9 +58,9 @@ class Manifest(BaseModel):
 
 
 def head(read: Callable[[Key], Mapping[str, Any] | None], books: str) -> Pinned:
-    """The last height claimed in `books`, folded up from the genesis `K0` at height 0, each
+    """The last height claimed in `books`, folded up from the founding `NO_RULES` at height 0, each
     height's parent the snapshot below it."""
-    pinned = Pinned(height=0, digest=K0.digest)
+    pinned = Pinned(height=0, digest=NO_RULES.digest)
     while (row := read(adoption_of(books, pinned.height + 1))) is not None:
         if row["parent"] != pinned.digest:
             raise Mismatched(f"height {pinned.height + 1} adopts from {row['parent']}")

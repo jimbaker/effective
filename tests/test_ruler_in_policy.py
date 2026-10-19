@@ -1,7 +1,7 @@
 """A `govern` policy reads who ruled the answer it asked for, on both engines.
 
 The ruler is the principal `parked.answer` names, carried from the stored ruling to the policy.
-A policy that refuses an approval by the op's proposer is the separation of duties the ruler
+A policy that refuses an approval by the op's proposer is the segregation of duties the ruler
 makes possible.
 """
 

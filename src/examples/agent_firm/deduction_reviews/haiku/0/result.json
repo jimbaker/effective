@@ -1,0 +1,14 @@
+{
+  "finds_the_cap": true,
+  "critique": {
+    "verdict": "revise",
+    "credit": "1000",
+    "cites": [
+      "MSA-NW-2025",
+      "TCK-881",
+      "CRM-2207"
+    ],
+    "reason": "The proposed $3,000 credit is not supported by the contract. MSA 4.2 sets the credit at 0.5% of the monthly platform fee ($100,000, per 3.1) for each full hour of unavailability beyond the 99.9% commitment in 4.1, and caps it at $1,000 per calendar month. The ticket (TCK-881) shows 6h15m of unavailability on 2026-09-14, which is 6 full hours. Even after netting out the commitment allowance (0.1% of September's 43,200 minutes, about 43 minutes), at least 5 full hours fall outside it. Any count of 2 or more hours hits the $1,000 cap, so the credit is $1,000. The customer's own calculation (6 hours \u00d7 0.5% = $3,000) ignores the cap. The customer's 30-day written claim (CRM-2207, dated 2026-09-26) is timely, so the $1,000 credit is valid. The customer's $3,000 deduction is not permitted: MSA 7.4 bars withholding or set-off except a 4.2 credit, and 4.2 makes credits the sole remedy. The proposal also cites CRM-2207 and TCK-881 but omits MSA-NW-2025, the governing document. The correct resolution is a $1,000 credit memo against INV-1001 (adjusted balance $99,000). Against the $97,000 received (PAY-5501), $2,000 remains open and past due (Net 30 from 2026-09-01 ran to 2026-10-01, per 3.2), so it should be collected, with the 1% monthly late accrual applied as the contract allows. The account manager's note (CRM-2210) asks for goodwill but does not change the contractual amount, so it is not relied on."
+  },
+  "refused": null
+}

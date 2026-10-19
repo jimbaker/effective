@@ -1304,6 +1304,26 @@ def meters(contract: Contract, domain: object) -> bool:
     return contract is Contract.V1 and isinstance(domain, MeteredDomain)
 
 
+def _contract_of(contract: Contract | None, params: Mapping[str, Any] | None) -> Contract:
+    """The contract a handler runs under: the one its run's `params` carry, `contract` for a run
+    whose params carry none, or `V0`. A `contract` the params contradict is refused."""
+    match contract, params:
+        case None, None:
+            return Contract.V0
+        case None, Mapping():
+            return Contract.from_params(params)
+        case Contract(), None:
+            return contract
+        case Contract(), Mapping() if Contract.from_params(params, absent=contract) is contract:
+            return contract
+        case _:
+            raise ValueError(
+                f"the handler is given contract {contract} and params spawned under "
+                f"{Contract.from_params(params or {})}; a run's contract is the one it was "
+                "spawned with"
+            )
+
+
 def _check_domain_reachable(domain: DomainInterpreter, contract: Contract) -> None:
     """Reject a domain the handler provably cannot drive, at ASSEMBLY rather than mid-checkpoint.
 
@@ -1326,7 +1346,7 @@ def _check_domain_reachable(domain: DomainInterpreter, contract: Contract) -> No
         raise TypeError(
             f"{type(domain).__name__} is metered-only (it implements run_metered; its .run "
             f"raises), but this handler runs under contract={contract.value}, where every "
-            f"AskLLM takes the non-metered arm. Spawn with CONTRACT_PARAM='v1', or put the "
+            f"AskLLM takes the non-metered arm. Spawn with `Contract.V1.spawn_params`, or put the "
             f"serve(...) stack inside the metered domain rather than around the handler. "
             f"See the serve() docstring."
         )
@@ -1340,7 +1360,7 @@ class DurableHandler:
         ledger: LedgerWriter | None = None,
         op_layers: Sequence[OpLayer[Any]] = (),
         in_gather: bool = False,
-        contract: Contract = Contract.V0,
+        contract: Contract | None = None,
         budget: MeasuredBudget | None = None,
         params: Mapping[str, Any] | None = None,
         stop: Stop = NO_RACE,
@@ -1376,6 +1396,7 @@ class DurableHandler:
         self.ledger = ledger
         self.op_layers: tuple[OpLayer[Any], ...] = tuple(op_layers)
         check_seam("op", self.op_layers)  # a domain layer here would see the live pass only
+        contract = _contract_of(contract, params)
         _check_domain_reachable(domain, contract)  # assembly-time, not mid-checkpoint
         refuse_two_drivers(budget, self.op_layers)
         refuse_an_unmetered_budget_gate(meters(contract, domain), self.op_layers)

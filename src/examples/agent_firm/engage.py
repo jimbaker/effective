@@ -22,8 +22,8 @@ from effective.combinators import Converged, Unconverged, fixpoint
 from effective.govern import BudgetRefused
 from effective.keys import Name, compose_key
 
-from .cases import Case
-from .knowledge import K0, Knowledge
+from .cases import WITHIN, Case
+from .knowledge import NO_RULES, Knowledge
 
 REPAIRS = 2
 """Re-prompts after the first critique before a refusal stands."""
@@ -35,7 +35,8 @@ class Verdict(StrEnum):
 
 
 class Proposal(BaseModel):
-    """A resolution someone proposed: post a credit memo of `credit` and collect the rest."""
+    """A resolution someone proposed: post a credit memo of `credit`, and remind the customer of
+    the rest."""
 
     credit: Decimal
     rationale: str
@@ -64,7 +65,7 @@ def evidence(case: Case, knowledge: Knowledge) -> Template:
     return documents
 
 
-def brief(case: Case, proposal: Proposal, knowledge: Knowledge = K0) -> Template:
+def brief(case: Case, proposal: Proposal, knowledge: Knowledge = NO_RULES) -> Template:
     """The critic's brief: the invoice, the payment, every document and rule, and the proposal,
     as data."""
     invoice, payment = case.invoice.model_dump_json(), case.payment.model_dump_json()
@@ -90,17 +91,9 @@ def _held(case: Case, knowledge: Knowledge, cites: list[str]) -> bool:
     return bool(cites) and all(case.cited(id) or knowledge.held(id) for id in cites)
 
 
-WITHIN = "a credit in whole cents from $0 to the payment's shortfall"
-"""What a credit memo's amount satisfies, as the refusal of one that does not states it."""
-
-
 def owed(case: Case) -> Gated[Decimal]:
     """A credit memo amount the payment's shortfall can absorb."""
-    return Gated(Decimal, partial(_within, case), WITHIN)
-
-
-def _within(case: Case, credit: Decimal) -> bool:
-    return 0 <= credit <= case.gap and credit == credit.quantize(Decimal("0.01"))
+    return Gated(Decimal, case.absorbs, WITHIN)
 
 
 NOT_ASKED = Repair("not asked")
@@ -178,5 +171,7 @@ def asked[S: BaseModel](
             assert_never(unreachable)
 
 
-def engage(case: Case, proposal: Proposal, knowledge: Knowledge = K0) -> Effect[Critique | Repair]:
+def engage(
+    case: Case, proposal: Proposal, knowledge: Knowledge = NO_RULES
+) -> Effect[Critique | Repair]:
     return asked("engage", brief(case, proposal, knowledge), Critique, CritiqueWire)

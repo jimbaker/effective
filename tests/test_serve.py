@@ -136,7 +136,7 @@ def test_serve_retry_traced_spans_each_attempt_with_an_id_of_its_own():
 
 
 def test_structured_extract_maps_transient_provider_error_to_transient_error():
-    import httpx
+    import httpx2
     import openai
 
     from effective.interpreters.openai import GPT5_NANO, structured_extract
@@ -144,7 +144,7 @@ def test_structured_extract_maps_transient_provider_error_to_transient_error():
     class _Completions:
         def parse(self, **_):
             raise openai.APIConnectionError(
-                request=httpx.Request("POST", "https://api.openai.com")
+                request=httpx2.Request("POST", "https://api.openai.com")
             )
 
     class _Client:

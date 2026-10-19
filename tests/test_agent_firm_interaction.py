@@ -1,16 +1,18 @@
-"""The 2x2 of knowledge and a critic as an instrument check, on both engines: four runs, each in a
-world and books of its own, with K₁ the snapshot holding the SLA rule and A₁ a critic present.
+"""Knowledge and a critic, two by two, as an instrument check on both engines: four runs, one per
+combination of snapshot (with the SLA rule or without) and critic (present or absent), each in a
+world and books of its own. The interaction is how much more the critic moves the outcome with the
+rule held than without.
 
 The worlds are scripted, so any interaction is what a script put there: these pins test the
 instrument, never complementarity.
 
-| question | the pin                                                                          |
-|----------|----------------------------------------------------------------------------------|
-| F1       | a null world, where no model reads the rule, gives I = 0                         |
-| F2       | an additive world, where the rule and the critic each take $1,000 off, gives I = 0 |
-| F3       | labeling K₀ the treated snapshot flips I's sign                                  |
-| F4       | a dropped, doubled or stray outcome leaves I unmeasured                          |
-| F5       | in an interacting world, I is 0 read off completion and $2,000 read off the books |
+| property                     | what holds                                                    |
+|------------------------------|---------------------------------------------------------------|
+| no interaction               | a null world, where no model reads the rule, measures none    |
+| additive effects             | the rule and the critic each taking $1,000 off measures none  |
+| swapped labels flip the sign | labeling the snapshot without the rule treated flips the sign |
+| a missing outcome is refused | a dropped, doubled or stray outcome is refused, and named     |
+| read off the books           | an interaction reads 0 off completion, $2,000 off the books   |
 """
 
 from collections.abc import Callable
@@ -22,16 +24,19 @@ import pytest
 from _firm import briefed, manifest, resolved
 
 from effective.cost import Usage
-from examples.agent_firm.account import interaction
 from examples.agent_firm.ar import Round
 from examples.agent_firm.cases import SLA_CAP
 from examples.agent_firm.engage import CritiqueWire, Proposal
-from examples.agent_firm.knowledge import K0, K1, Pinned
+from examples.agent_firm.factors import interaction
+from examples.agent_firm.knowledge import NO_RULES, WITH_SLA_RULE, Pinned
 from examples.agent_firm.manifest import Manifest
 from examples.agent_firm.score import scored
 
-KNOWN, RULED = Pinned(height=0, digest=K0.digest), Pinned(height=1, digest=K1.digest)
-"""K₀, the firm's genesis, and K₁, the snapshot holding the SLA rule."""
+KNOWN, RULED = (
+    Pinned(height=0, digest=NO_RULES.digest),
+    Pinned(height=1, digest=WITH_SLA_RULE.digest),
+)
+"""The firm's founding, `NO_RULES`, and the snapshot holding the SLA rule."""
 
 type Credit = Callable[[bool], int]
 """What a model answers, by whether its brief holds the SLA rule."""
@@ -62,8 +67,8 @@ WORLDS: dict[str, tuple[Credit, Credit]] = {
 
 
 def _arms(backend, world: str) -> list[tuple[Manifest, Any, Decimal, bool]]:
-    """Each arm's manifest, its result, Y read off the books as dollars from the gold credit, and
-    Y read off whether its run completed."""
+    """Each arm's manifest, its result, the outcome read off the books as dollars from the gold
+    credit, and the outcome read off whether its run completed."""
     books, arms = f"x-{uuid4().hex[:8]}", []
     for pinned in (KNOWN, RULED):
         for critic in (False, True):
@@ -77,12 +82,12 @@ def _arms(backend, world: str) -> list[tuple[Manifest, Any, Decimal, bool]]:
 
 
 @pytest.mark.parametrize("world", ["null", "additive"])
-def test_f1_f2_a_world_without_interaction_measures_none(backend, world):
+def test_a_world_without_interaction_measures_none(backend, world):
     arms = _arms(backend, world)
     assert interaction([(admission, y) for admission, _, y, _ in arms], KNOWN, RULED) == 0
 
 
-def test_f3_f4_f5_an_interacting_world(backend):
+def test_an_interacting_world(backend):
     arms = _arms(backend, "interacting")
     books = [(admission, y) for admission, _, y, _ in arms]
     completed = [(admission, Decimal(done)) for admission, _, _, done in arms]

@@ -92,10 +92,11 @@ def _run(
     def task(params: dict[str, Any], ctx: Any) -> Any:
         nonlocal attempts
         attempts += 1
-        return DurableHandler(ctx, world.domain(), ledger=None, contract=Contract.V1).run(program)
+        contract = Contract.from_params(params, absent=Contract.V1)
+        return DurableHandler(ctx, world.domain(), ledger=None, contract=contract).run(program)
 
     try:
-        spawned = app.spawn("startup", {})
+        spawned = app.spawn("startup", Contract.V1.spawn_params({}))
         while (done := app.run_until_result(spawned)) is not None and done.state not in ENDED:
             parked = [p for p in read_sqlite_parked_conn(app.conn) if p.task_id == spawned]
             if not parked:

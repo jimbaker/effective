@@ -13,17 +13,17 @@ from effective.handlers.durable import DurableHandler
 from effective.keys import Segment
 from effective.parked import answer
 from effective.viewing import ViewingCtx
-from examples.agent_firm.ar import Round
+from examples.agent_firm.ar import REMIND, Round
 from examples.agent_firm.cases import SLA_CAP, Case
-from examples.agent_firm.critic import CLAIMED
+from examples.agent_firm.critic import AS_CLAIMED
 from examples.agent_firm.engage import CritiqueWire
-from examples.agent_firm.knowledge import K0, Pinned
+from examples.agent_firm.knowledge import NO_RULES, Pinned
 from examples.agent_firm.manifest import Manifest
 from examples.agent_firm.resolve import APPROVAL, admitted, announced, approval, ruled, terms_of
 from examples.agent_firm.world import World
 
 PROPOSER, CONTROLLER = Segment("ar-clerk"), Segment("controller")
-GENESIS = Pinned(height=0, digest=K0.digest)
+FOUNDING = Pinned(height=0, digest=NO_RULES.digest)
 CAPPED = {"verdict": "revise", "credit": "1000", "cites": ["MSA-NW-2025"], "reason": "4.2 caps"}
 
 
@@ -39,7 +39,7 @@ class Briefed:
 def briefed(critique: dict[str, Any] = CAPPED, **world: Any) -> Briefed:
     def proposer(op: Any) -> Any:
         scripted.proposals.append(str(op.messages))
-        return CLAIMED
+        return AS_CLAIMED
 
     def critic(op: Any) -> tuple[Any, Usage]:
         scripted.critiques.append(str(op.messages))
@@ -51,7 +51,7 @@ def briefed(critique: dict[str, Any] = CAPPED, **world: Any) -> Briefed:
             llm=proposer,
             critic=critic,
             critiques=frozenset({CritiqueWire}),
-            tools={"notify": ok, "collect": ok},
+            tools={"notify": ok, REMIND: ok},
             **world,
         )
     )

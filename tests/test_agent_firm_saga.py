@@ -1,16 +1,16 @@
 """The AR firm's settlement saga through the ERP port, crashed at every op, on both engines, on the
 scripted Odoo and on a live one.
 
-| question | the pin                                                                            |
-|----------|------------------------------------------------------------------------------------|
-| R1       | one memo posts, and it and the payment apply once, however a crash lands           |
-| R11      | a rejected notice unapplies the memo and the payment, then reverses the memo       |
-| R12      | a saga that cannot be compensated in order is refused before it runs               |
-| R13      | a reversal whose period locked posts in the open one, matched against the original |
+| control                  | what holds                                                           |
+|--------------------------|----------------------------------------------------------------------|
+| crash-safe settlement    | one memo posts; it and the payment apply once, whatever crashes      |
+| rejection unwinds        | a rejected notice unapplies the memo and payment, reverses the memo  |
+| no step without its undo | a saga that cannot be compensated in order is refused before it runs |
+| period close             | a reversal whose period locked posts in the open one, matched        |
 
 A leg rejected before the pivot undoes only the legs that landed, a retriable leg is asked
 `RETRIES` times before the saga stops with it unlanded, and the customer hears each notice and
-collection once, however a crash lands. The R-numbers are the questions in
+collection once, however a crash lands. Each control is a row of the table in
 `wiki/concepts/agent-firm.md`.
 """
 
@@ -30,7 +30,7 @@ from effective.contexts import RecordingCtx
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Exceeded
 from effective.handlers.durable import DurableHandler
-from examples.agent_firm.ar import APPLY, settle, settlement
+from examples.agent_firm.ar import APPLY, REMIND, settle, settlement
 from examples.agent_firm.cases import SLA_CAP
 from examples.agent_firm.erp.port import Apply, Erp, Kind
 from examples.agent_firm.erp.scripted import ScriptedOdoo
@@ -53,8 +53,8 @@ INVOICE, PAYMENT = SLA_CAP.invoice.id, SLA_CAP.payment.id
 OK = {"ok": True}
 
 
-def _world(erp: Erp, notify=lambda args: OK, collect=lambda args: OK) -> World:
-    return World(erp=erp, tools={"notify": notify, "collect": collect})
+def _world(erp: Erp, notify=lambda args: OK, remind=lambda args: OK) -> World:
+    return World(erp=erp, tools={"notify": notify, REMIND: remind})
 
 
 def _run(backend, world: World, fault: Fault) -> Any:
@@ -97,12 +97,12 @@ def _bounced(args: Mapping[str, Any]) -> dict[str, Any]:
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
 @pytest.mark.parametrize("position", list(FaultPosition))
-def test_r1_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, arm):
+def test_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, arm):
     erp_of = books(arm, [SLA_CAP])
 
     def check(result, erp: Erp, k):
         landed = Completed.model_validate(result).landed
-        assert set(landed) == {"credit-memo", APPLY, "apply-memo", "notify", "collect"}, k
+        assert set(landed) == {"credit-memo", APPLY, "apply-memo", "notify", REMIND}, k
         assert _kinds(erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO], k
         (memo,) = [e for e in erp.entries(INVOICE) if e.kind is Kind.CREDIT_MEMO]
         assert (memo.amount, erp.keyed(INVOICE)) == (CREDIT, 1), k
@@ -118,7 +118,7 @@ def test_r1_a_settlement_posts_once_whatever_a_crash_interrupts(backend, positio
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
 @pytest.mark.parametrize("position", list(FaultPosition))
-def test_r11_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_memo(
+def test_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_memo(
     backend, position, arm
 ):
     erp_of = books(arm, [SLA_CAP])
@@ -166,13 +166,13 @@ def test_a_rejected_leg_undoes_only_the_legs_that_landed(backend, position):
 @pytest.mark.parametrize(("rejections", "landed"), [(RETRIES - 1, True), (RETRIES, False)])
 def test_a_retriable_leg_is_asked_until_it_lands_or_runs_out(backend, rejections, landed):
     answers = iter([{"ok": False, "reason": "AP is closed today"}] * rejections + [OK])
-    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), collect=lambda args: next(answers))
+    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), remind=lambda args: next(answers))
     result = _run(backend, world, Fault(None))
-    assert world.calls["collect"] == min(rejections + 1, RETRIES)
+    assert world.calls[REMIND] == min(rejections + 1, RETRIES)
     if landed:
-        assert "collect" in Completed.model_validate(result).landed
+        assert REMIND in Completed.model_validate(result).landed
     else:
-        assert Unlanded.model_validate(result).leg == "collect"
+        assert Unlanded.model_validate(result).leg == REMIND
         assert _kinds(world.erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO]
 
 
@@ -188,14 +188,14 @@ def test_a_grant_extends_a_retriable_leg_past_its_attempts(backend, granted):
 
     grantor, landed = one_more, granted
     answers = iter([{"ok": False, "reason": "AP is closed today"}] * RETRIES + [OK])
-    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), collect=lambda args: next(answers))
+    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), remind=lambda args: next(answers))
     legs = settlement(SLA_CAP, CREDIT, "r", fresh_round(), grantor=grantor)
     run_id = f"r-{uuid4().hex[:8]}"
     backend.register(run_id, lambda _run_id: saga(legs)(), world.domain(), Fault(None), ())
     snapshot = backend.run_until_result(backend.spawn(run_id, run_id))
     assert snapshot.state == "completed", snapshot
-    assert world.calls["collect"] == RETRIES + landed
-    assert ("collect" in snapshot.result.get("landed", {})) is landed
+    assert world.calls[REMIND] == RETRIES + landed
+    assert (REMIND in snapshot.result.get("landed", {})) is landed
     assert asked == [RETRIES]
 
 
@@ -206,15 +206,15 @@ class _Refusing:
         raise BudgetRefused(op, Exceeded(1, 1))
 
 
-def _collects(attempt: int, _landed: Mapping[str, Any]) -> Effect[Outcome]:
-    yield from step("collect", CallTool(name="collect", args={}, result_schema=dict))
+def _reminds(attempt: int, _landed: Mapping[str, Any]) -> Effect[Outcome]:
+    yield from step("remind", CallTool(name="remind", args={}, result_schema=dict))
     return Landed()
 
 
 def test_a_refused_spend_is_raised_out_of_a_retriable_leg():
     """Every later metered op is refused the same way, so the loop does not read it as a
     rejection to retry."""
-    leg = Leg("collect", LegKind.RETRIABLE, _collects)
+    leg = Leg("remind", LegKind.RETRIABLE, _reminds)
     with pytest.raises(BudgetRefused):
         DurableHandler(RecordingCtx(), _Refusing()).run(saga([leg]))
 
@@ -233,15 +233,15 @@ def test_the_customer_hears_once_whatever_a_crash_interrupts(backend, position):
 
     def world() -> World:
         heard.clear()
-        return _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), tool("notify"), tool("collect"))
+        return _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), tool("notify"), tool(REMIND))
 
     def check(result, erp: Erp, k):
-        assert heard == {"notify": 1, "collect": 1}, k
+        assert heard == {"notify": 1, REMIND: 1}, k
 
     assert _swept(backend, position, world, check) == 8
 
 
-def test_r13_a_reversal_after_its_period_locked_posts_in_the_open_period(backend):
+def test_a_reversal_after_its_period_locked_posts_in_the_open_period(backend):
     odoo = ScriptedOdoo.seeded([SLA_CAP])
 
     def locks_then_bounces(args: Mapping[str, Any]) -> dict[str, Any]:
@@ -265,7 +265,7 @@ def _leg(name: str, kind: LegKind, undo: bool) -> Leg:
 
 COMPENSABLE = _leg("credit", LegKind.COMPENSABLE, undo=True)
 PIVOT = _leg("notify", LegKind.PIVOT, undo=False)
-RETRIABLE = _leg("collect", LegKind.RETRIABLE, undo=False)
+RETRIABLE = _leg("remind", LegKind.RETRIABLE, undo=False)
 
 
 @pytest.mark.parametrize(
@@ -285,7 +285,7 @@ RETRIABLE = _leg("collect", LegKind.RETRIABLE, undo=False)
         "pivot-undo",
     ],
 )
-def test_r12_a_saga_that_cannot_be_compensated_in_order_is_refused(legs):
+def test_a_saga_that_cannot_be_compensated_in_order_is_refused(legs):
     with pytest.raises(SagaOrder):
         saga(legs)
 
@@ -293,11 +293,11 @@ def test_r12_a_saga_that_cannot_be_compensated_in_order_is_refused(legs):
 @pytest.mark.parametrize(
     ("credit", "legs"),
     [
-        (CREDIT, ["credit-memo", APPLY, "apply-memo", "notify", "collect"]),
+        (CREDIT, ["credit-memo", APPLY, "apply-memo", "notify", REMIND]),
         (Decimal(3000), ["credit-memo", APPLY, "apply-memo", "notify"]),
-        (Decimal(0), [APPLY, "notify", "collect"]),
+        (Decimal(0), [APPLY, "notify", REMIND]),
     ],
     ids=["capped", "whole-gap", "no-credit"],
 )
-def test_a_settlement_credits_and_collects_only_what_it_owes(credit, legs):
+def test_a_settlement_credits_and_reminds_only_of_what_is_owed(credit, legs):
     assert _names(credit) == legs

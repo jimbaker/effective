@@ -170,6 +170,21 @@ def test_contract_from_params_round_trips(contract):
     assert Contract.from_params({}) is Contract.V0  # absent → v0 (in-flight tasks)
 
 
+@pytest.mark.parametrize(
+    ("contract", "marked"),
+    [(Contract.V0, {"run_id": "r"}), (Contract.V1, {"run_id": "r", "__accrual_contract__": "v1"})],
+    ids=str,
+)
+def test_a_contract_marks_the_params_it_is_read_back_from(contract, marked):
+    params = contract.spawn_params({"run_id": "r"})
+    assert (params, Contract.from_params(params)) == (marked, contract)
+
+
+def test_a_param_named_for_the_contract_is_refused():
+    with pytest.raises(ValueError, match="__accrual_contract__"):
+        Contract.V1.spawn_params({"__accrual_contract__": "v0"})
+
+
 # ── the measured trip: park-and-ask on the durable engine ───────────────
 def _flat_llm(cost: float = 0.001):
     """A stateless LLMCall — a fixed `(result, usage)` per call, so replay's re-run order
@@ -232,3 +247,22 @@ def test_measured_trip_stop_grant_refuses_the_over_budget_ask(app):
     assert snap is not None
     assert snap.state == "failed"
     assert "budget exceeded" in str(snap.failure or "").lower()
+
+
+@pytest.mark.parametrize(
+    ("source", "chosen"),
+    [
+        ("DurableHandler(ctx, domain, contract=Contract.V1)", 1),
+        ("DurableHandler(ctx, domain, contract=Contract.V0)", 1),
+        ("DurableHandler(ctx, domain, contract=Contract.from_params(params))", 0),
+        ("DurableHandler(ctx, domain, contract=contract)", 0),
+        ("app.spawn('task', Contract.V1.spawn_params({}))", 0),
+    ],
+    ids=["v1-at-the-handler", "v0-at-the-handler", "from-params", "passed-through", "at-spawn"],
+)
+def test_a_contract_named_at_its_reader_is_found(tmp_path, source, chosen):
+    from effective.lint import check_contract_at_spawn_file
+
+    path = tmp_path / "reader.py"
+    path.write_text(source + "\n")
+    assert len(check_contract_at_spawn_file(path)) == chosen

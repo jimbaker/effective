@@ -25,8 +25,8 @@ from examples.agent_firm.__main__ import (
     run,
     scripted_firm,
 )
-from examples.agent_firm.account import account
 from examples.agent_firm.cases import CASES
+from examples.agent_firm.factors import factors
 from examples.agent_firm.world import scripted
 
 pytestmark = pytest.mark.journey
@@ -62,9 +62,10 @@ def test_the_example_resolves_each_case(capsys, monkeypatch, name):
     ("name", "spend", "calls"),
     [("clean", "0", 0), ("discount", "0.01", 2), ("sla-cap", "0.01", 2)],
 )
-def test_the_example_accounts_its_own_runs_spend(tmp_path, name, spend, calls):
+def test_the_examples_own_run_spends_what_its_tape_recorded(tmp_path, name, spend, calls):
     """The proposer's call costs $0.01 and the critic's nothing, and a matched payment asks no
-    model, so the run's account, projected from its own database, spends what its tape recorded."""
+    model, so the spend in the run's factors, projected from its own database, is what its tape
+    recorded."""
     case, db = CASES[name], tmp_path / "firm.db"
     run(
         admits(case, MAIN),
@@ -79,6 +80,6 @@ def test_the_example_accounts_its_own_runs_spend(tmp_path, name, spend, calls):
             checkpoint.key: checkpoint.state
             for checkpoint in read_sqlite_conn(conn, task_id, exclude=())
         }
-        accounted = account(params, sqlite_payloads(conn, params["run_id"]), tape)
+        recorded = factors(params, sqlite_payloads(conn, params["run_id"]), tape)
     marked = Contract.from_params(params)
-    assert (accounted.spend, accounted.model_calls, marked) == (Decimal(spend), calls, Contract.V1)
+    assert (recorded.spend, recorded.model_calls, marked) == (Decimal(spend), calls, Contract.V1)

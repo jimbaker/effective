@@ -1,4 +1,4 @@
-"""The firm's knowledge K: a snapshot of its rules, read at a recorded step and advanced by a
+"""The firm's knowledge: a snapshot of its rules, read at a recorded step and advanced by a
 recorded adoption.
 
 A run reads the snapshot its manifest pins, and the step's recorded result is the snapshot's
@@ -52,12 +52,12 @@ SLA_CAP_RULE = Rule(
     "than the cap, whatever the customer deducted.",
 )
 
-K0 = Knowledge()
-"""The firm's genesis: no rules beyond its contracts. Every chain of adoptions starts from its
-digest, so a change to it unlinks every chain at height 1."""
+NO_RULES = Knowledge()
+"""The snapshot at the firm's founding: no rules beyond its contracts. Every chain of adoptions
+starts from its digest, so a change to it unlinks every chain at height 1."""
 
-K1 = Knowledge(rules=(SLA_CAP_RULE,))
-"""K0 with the SLA rule adopted."""
+WITH_SLA_RULE = Knowledge(rules=(SLA_CAP_RULE,))
+"""`NO_RULES` with the SLA rule adopted."""
 
 
 class Pinned(BaseModel):
@@ -133,9 +133,9 @@ ADOPTING = "adopting"
 
 
 def _held_at(books: str, height: int) -> Effect[str | None]:
-    """The digest of the snapshot `books` hold at `height`: the genesis at 0."""
+    """The digest of the snapshot `books` hold at `height`: the founding at 0."""
     if height == 0:
-        return K0.digest
+        return NO_RULES.digest
     row = yield from read_ledger(adoption_of(books, height))
     return None if row is None else row["child"]
 

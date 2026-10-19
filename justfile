@@ -51,6 +51,7 @@ lint:
     uv run python -m effective.lint --ledger-reads src/effective src/agent scripts
     uv run python -m effective.lint --sql-templates src/effective src/agent src/examples
     uv run python -m effective.lint --ruling-mint src scripts examples
+    uv run python -m effective.lint --contract-at-spawn src scripts examples
     uv run python -m effective.lint --totality src
     uv run python -m effective.lint --ordered-arms src
     uv run python -m effective.lint --totality-escapes src
@@ -300,7 +301,7 @@ odoo-test:
 race-free-threaded runs="3":
     uv venv --quiet --allow-existing --python cpython-3.14.7+freethreaded build/venv-ft
     uv export --quiet --no-hashes --format requirements-txt --no-emit-project --no-emit-workspace -o build/ft-requirements.txt
-    grep -viE '^(psycopg-binary|ast-grep-py|pydantic-monty|httptools)==|^\./' build/ft-requirements.txt > build/ft-requirements-core.txt
+    grep -viE '^(psycopg-binary|ast-grep-py|httptools)==|^\./' build/ft-requirements.txt > build/ft-requirements-core.txt
     uv pip install --quiet --python build/venv-ft/bin/python --no-deps --only-binary :all: -r build/ft-requirements-core.txt
     uv pip install --quiet --python build/venv-ft/bin/python --no-deps ./infra/tdom -e .
     for n in $(seq 1 {{runs}}); do PYTHON_GIL=0 PSYCOPG_IMPL=python EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" build/venv-ft/bin/python scripts/gil_free_pytest.py tests/test_race_admission.py tests/test_race_durable.py tests/test_race.py tests/test_race_deadline.py tests/test_race_shapes.py tests/test_watched_descent.py tests/test_hedge.py tests/test_settle.py tests/test_choice.py tests/test_race_publish_seal.py -q --no-cov -p no:randomly -p no:cacheprovider || exit 1; done

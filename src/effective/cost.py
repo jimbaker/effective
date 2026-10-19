@@ -17,7 +17,7 @@ import), so the core never pulls a provider SDK.
 """
 
 import threading
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, assert_never, runtime_checkable
@@ -51,18 +51,34 @@ CONTRACT_PARAM = "__accrual_contract__"
 
 
 class Contract(StrEnum):
-    """Which checkpoint schema an AskLLM `Step` uses on the durable path."""
+    """The version of a run's recorded format, fixed at spawn in its params.
 
-    V0 = "v0"  # bare result; in-flight tasks replay on this
-    V1 = "v1"  # {result, usage} envelope: usage becomes recorded state
+    | version | an `AskLLM` step records | enables                                          |
+    |---------|--------------------------|--------------------------------------------------|
+    | `V0`    | the bare result          | replay of a task spawned before the envelope     |
+    | `V1`    | `{result, usage}`        | the meter on replay, a `MeasuredBudget`, a spend |
+    """
+
+    V0 = "v0"
+    V1 = "v1"
+
+    def spawn_params(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        """`params` marked with this contract. `V0` adds no key, so a task spawned before the
+        envelope existed reads as `V0`."""
+        if CONTRACT_PARAM in params:
+            raise ValueError(f"{CONTRACT_PARAM!r} is the contract's own param")
+        return dict(params) | ({} if self is Contract.V0 else {CONTRACT_PARAM: self.value})
 
     @classmethod
-    def from_params(cls, params: Any) -> Contract:
-        """The contract a task runs under, read from its immutable spawn params. Absent →
-        V0 (an in-flight task spawned before the envelope existed, or an un-migrated
-        caller): the safe default, since V0 is byte-identical to today."""
-        raw = params.get(CONTRACT_PARAM) if hasattr(params, "get") else None
-        return cls(raw) if raw is not None else cls.V0
+    def from_params(cls, params: Mapping[str, Any], *, absent: Contract | None = None) -> Contract:
+        """The contract a task runs under, read from its immutable spawn params. A task whose
+        params carry none was spawned before its writer marked them, so it runs under `absent`,
+        what that writer recorded: `V0` unless the task's family says otherwise."""
+        match params.get(CONTRACT_PARAM):
+            case None:
+                return absent or cls.V0
+            case raw:
+                return cls(raw)
 
 
 @dataclass(frozen=True)
@@ -395,7 +411,8 @@ class _ServedDomain:
         raise TypeError(
             "a serve(...) stack is metered-only: it backs the v1 measured path (run_metered) and "
             "cannot run a CallTool or a default-contract (V0) model call. Spawn with "
-            "contract=v1, or put serve inside the metered domain, not around the whole handler."
+            "`Contract.V1.spawn_params`, or put serve inside the metered domain, not around the "
+            "whole handler."
         )
 
 

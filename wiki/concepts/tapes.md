@@ -38,7 +38,7 @@ collector without changing anything above, since the join is a key either way.
 | checkpoints ⋈ spans | **built**, conformance-pinned on both engines, and it folds correctly through `fold_cycles`. A left outer join **from the tape**: a node with no span is ordinary, a span addressing no node is a defect and asserts empty |
 | ledger ⋈ spans | **not built**, and the two are governed by opposite disciplines |
 | ledger ⋈ checkpoints | **forbidden as a derivation.** `graphview.ledger_collisions` is a *detector of disagreement* read off the tape alone, which is the shape the invariant leaves available |
-| one projection over all three | **not built.** The AR firm joins two of them, ledger and checkpoints, with the run's spawn params (`src/examples/agent_firm/account.py`); assembling the graph object is open |
+| one projection over all three | **not built.** The AR firm joins two of them, ledger and checkpoints, with the run's spawn params (`src/examples/agent_firm/factors.py`); assembling the graph object is open |
 
 The two read paths are disjoint in code: a domain's projection folds the ledger, and `graphview`
 folds checkpoints with spans.

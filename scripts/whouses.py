@@ -203,9 +203,8 @@ def ast_grep() -> str:
     """The PINNED CLI, resolved, never the bare name, which resolves against PATH.
 
     `ast-grep-cli` is co-versioned with the `ast-grep-py` binding `effective.lint` uses, and the
-    pin's comment names this script as the reason it exists. Shelling to `ast-grep` walked past it
-    to whatever the machine carried: linuxbrew's 0.45.1 here against the project's 0.42.3. The two
-    agree on every rule sent below, which is why it stayed invisible."""
+    pin's comment names this script as the reason it exists: a bare `ast-grep` runs whatever the
+    machine carries."""
     pinned = pathlib.Path(sys.executable).with_name("ast-grep")
     return str(pinned) if pinned.exists() else "ast-grep"
 
@@ -670,11 +669,11 @@ def _report(
     imports: set[tuple[str, int]],
     home: tuple[str, int],
 ) -> None:
-    """**`USES` counts uses**, which took a reviewer to say out loud.
+    """**`USES` counts uses.**
 
-    A bare-name sweep matches the definition's own line and every `import` of it, and both were
-    landing in the same total as the call sites, so `kind_of` read "7 uses" against four calls,
-    while a member sweep's number was calls only. The same heading over two different quantities is
+    A bare-name sweep matches the definition's own line and every `import` of it; counted with
+    the call sites, `kind_of` would read "7 uses" against four calls, while a member sweep's
+    number is calls only. The same heading over two different quantities is
     the defect this file refuses a "dead" column for; the definition drops out and the imports get
     their own line."""
     sites = [

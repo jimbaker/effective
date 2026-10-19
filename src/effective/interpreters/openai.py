@@ -15,8 +15,8 @@ Provider quirks are isolated here, away from the effective core:
   cost layer reports).
 
 The OpenAI client is *injected* (duck-typed on ``client.chat.completions.parse``)
-so unit tests pass a fake and this module imports no SDK. The real client is
-built only in scripts/openai_agent_smoke.py.
+so unit tests pass a fake and this module imports no SDK. A deployment builds
+the real client: the coder example, and the scripts that run against a provider.
 """
 
 import json

@@ -12,7 +12,7 @@ from effective.domain import AskLLM, CallTool, Judge
 from .cases import CASES
 from .erp.port import OPS, Erp
 from .erp.scripted import ScriptedOdoo
-from .knowledge import K0, K1, Knowledge
+from .knowledge import NO_RULES, WITH_SLA_RULE, Knowledge
 
 
 def scripted() -> Erp:
@@ -45,7 +45,9 @@ class World:
         default_factory=lambda: {"llm": 0.01, "judge": 0.002, "tool": 0.0}
     )
     knowledge: Mapping[str, Knowledge] = field(
-        default_factory=lambda: {snapshot.digest: snapshot for snapshot in (K0, K1)}
+        default_factory=lambda: {
+            snapshot.digest: snapshot for snapshot in (NO_RULES, WITH_SLA_RULE)
+        }
     )
     """The snapshots of the firm's knowledge, by digest."""
     calls: Counter[str] = field(default_factory=Counter)

@@ -15,6 +15,7 @@ import ast
 import inspect
 import subprocess
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -218,7 +219,8 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # `_domain_effect` a tool's name and args and a model request's parts.
     # A ledger read's id is read by `effect_of`, `op_key`, the durable handler, the recorder and
     # the sandbox that refuses it.
-    assert reached == 320, f"the corpus this fix was measured on held 320; found {reached}"
+    # `lint._chosen_contract` reads a keyword's name and the class and member it names.
+    assert reached == 324, f"the corpus this fix was measured on held 324; found {reached}"
 
     seen = {
         (str(p), line + 1)
@@ -229,12 +231,9 @@ def test_every_keyword_pattern_is_reachable() -> None:
 
 
 def test_the_pinned_ast_grep_is_the_one_that_runs() -> None:
-    """The CLI was pinned because this script shells to it, and the script still said `ast-grep`.
-
-    A bare name resolves against PATH, so the enumerator ran on whatever the machine had —
-    linuxbrew's 0.45.1 here against the project's 0.42.3 — while the pin's own comment named this
-    file as the reason it exists. The two agree on every rule this tool sends today (6,711
-    attribute identifiers under `src/`, both versions), which is why it was invisible."""
+    """The script runs the pinned CLI, the interpreter's sibling, at the release of the
+    `ast-grep-py` binding the lint runs: a pattern means one thing within one release, and a bare
+    name would run whatever the machine's PATH holds."""
     binary = getattr(wh, "ast_grep", lambda: "ast-grep")()
     assert Path(binary).is_absolute(), f"resolve the pinned CLI, not a PATH name: {binary!r}"
     assert Path(binary).parent == Path(sys.executable).parent, (
@@ -244,7 +243,7 @@ def test_the_pinned_ast_grep_is_the_one_that_runs() -> None:
     expected = subprocess.run(
         [binary, "--version"], capture_output=True, text=True, check=True
     ).stdout.split()[-1]
-    assert expected.startswith("0.42."), f"co-versioned with ast-grep-py 0.42.x; got {expected}"
+    assert expected == version("ast-grep-py"), "the CLI and the binding are one release"
 
 
 def test_reference_search_is_blind_to_keyword_patterns() -> None:

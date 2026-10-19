@@ -23,7 +23,7 @@ from effective.interpreters.jev import AsyncJev, Jev  # noqa: E402
 from effective.spend import TokenBudget, TokenBudgetExhausted  # noqa: E402
 
 JUDGED = Judge(
-    state={"visitor": "Sam Ortiz"},
+    state={"visitor": "Alice Smith"},
     questions={
         "kind": WireChoice(instructions="Which kind?", criteria={"delivery": None, "guest": "x"}),
         "expected": WireNoul(instructions="Expected?", criteria={"true": "expected"}),
@@ -87,6 +87,7 @@ def test_jev_converts_the_wire_both_ways_and_meters_input_tokens(tmp_path, flavo
     answers, usage = _jev(flavor, client, budget)(JUDGED)
     [asked] = client.asked
     assert isinstance(asked["questions"]["expected"], sdk.Noul)
+    assert asked["questions"]["expected"].criteria == {"true": "expected"}
     assert answers.root == {
         "kind": ChoiceAnswer(choice="delivery", confidence=0.8, probabilities={"delivery": 0.8}),
         "expected": NoulAnswer(p=0.1),

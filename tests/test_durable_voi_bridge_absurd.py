@@ -17,7 +17,7 @@ from _durable import DSN, absurd, pg_ready
 from effective.api import append_ledger, scoped, step
 from effective.bridge_absurd import export_measured_prefix, park_name
 from effective.budget import Grant, MeasuredBudget
-from effective.cost import CONTRACT_PARAM, Contract, MeteredInterpreter, Usage
+from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import measured_drive
@@ -118,7 +118,7 @@ def _spawn(app, program, run_id, limit, *, domain=_domain):
         finally:
             ledger.close()
 
-    return app.spawn(name, {"run_id": run_id, CONTRACT_PARAM: Contract.V1.value})
+    return app.spawn(name, Contract.V1.spawn_params({"run_id": run_id}))
 
 
 def _run_until_park(app, conn, tid, expected):

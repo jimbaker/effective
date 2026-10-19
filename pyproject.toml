@@ -8,26 +8,27 @@ license-files = ["LICENSE"]
 authors = [{ name = "Jim Baker", email = "jim.baker@python.org" }]
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.34",
+    "fastapi>=0.142.2",
+    "uvicorn[standard]>=0.54.0",
     "pydantic>=2.10",
     "httpx>=0.28",
     "pyyaml>=6.0",
     # Bounded: `ast-grep-cli` in the dev group must stay on the same series. Bump the two
     # together.
-    "ast-grep-py>=0.42.0,<0.43",
+    "ast-grep-py>=0.45.3,<0.46",
     # The semantic rung above ast-grep: jedi resolves bindings where ast-grep matches shapes.
     "jedi>=0.20.0",
     "absurd-sdk>=0.5.0",
-    # Exact pin: the 0.0.x API is in flux; bump deliberately and re-run the conformance probes.
-    "pydantic-monty==0.0.18",
+    # Exact pin: the code engine's entry path and its clock policy follow this API, so a bump
+    # re-runs the engine's suites and the coverage probe.
+    "pydantic-monty==1.1.0",
     # The markup t-string seam (`effective.graphlayout.svg`). Exact pin: the 0.1.x API is in
     # flux, and the vendored copy at infra/tdom carries one patch.
     "tdom==0.1.17",
-    "sqlmodel>=0.0.22",
+    "sqlmodel>=0.0.47",
     "alembic>=1.14",
     "psycopg[binary]>=3.3",
-    "openai>=2.38.0",
+    "openai>=3.24.0",
     # `effective.cards.render_shiny` lowers a CardSpec into an htmltools tag tree.
     "htmltools>=0.7.0",
 ]
@@ -51,7 +52,7 @@ bridge = [
 ]
 # Typed judgments from TypeSafe's models (Jev), an interpreter that answers an op.
 judge = [
-    "typesafe-sdk==0.5.7",
+    "typesafe-sdk==0.7.2",
 ]
 
 [dependency-groups]
@@ -59,7 +60,7 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.25",
-    "ruff>=0.11",
+    "ruff>=0.16.10",
     "httpx>=0.28",
     "types-pyyaml>=6.0",
     "pyyaml>=6.0.3",
@@ -70,10 +71,10 @@ dev = [
     "effective[tui]",
     "effective[bridge]",
     "effective[judge]",
-    "pytest-randomly>=4.1.0",
+    "pytest-randomly>=5.0.0",
     "pytest-xdist>=3.8.0",
     # Co-versioned with the `ast-grep-py` binding above; `scripts/whouses.py` shells to it.
-    "ast-grep-cli>=0.42.0,<0.43",
+    "ast-grep-cli>=0.45.3,<0.46",
 ]
 
 [tool.ty.environment]

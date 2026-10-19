@@ -31,7 +31,7 @@ Three facts shaped the answer.
 | fact | consequence |
 |---|---|
 | a REPL-style RLM freezes its tool set at construction, and one `exec` is atomic-or-nothing | a world-mutating call inside it can never be exactly-once across a crash: both gaps are op-granularity gaps |
-| Monty's execution model is generator-shaped: `start()` pauses at each host-function call and `resume(value)` continues | with no ambient authority, sandboxed code's only effects are host calls, so it satisfies the determinism boundary by construction |
+| Monty's execution model is generator-shaped: `feed_start()` pauses at each host-function call and `resume(value)` continues | with no ambient authority, sandboxed code's only effects are host calls, so it satisfies the determinism boundary by construction |
 | a skill's `content_hash` is a tree hash over body, references, scripts and assets | the pin identity already covers executable code; skill scripts need no new identity machinery |
 
 ## Decision
@@ -62,8 +62,9 @@ asks a model to write the code is an ordinary channel template; `run_code` is wh
 **Every host-call result, function and action alike, is re-bound from the record on replay; the
 deterministic code between calls re-executes.** A model query is as nondeterministic as a
 world-mutating call, so purity does not decide the split. The sandbox contributes determinism by
-construction: Monty has no `time` or `random` module, and `datetime.now()`, `os.environ` and
-`open()` surface as host calls the engine resolves, so the clock is an effect. Every value
+construction: the engine checks a worker out with its clocks, sleeps and entropy routed to the host,
+so `datetime.now()`, `time.time()`, `random`, `os.environ` and `open()` surface as host calls the
+engine resolves, and the clock is an effect. Every value
 crossing the boundary, live or re-bound, crosses in `canonical()` form (the checkpoint JSON form,
 with sets sorted through `canonical_form`), so first run and re-execution see identical values.
 This is replay-by-re-execution, the Temporal and Absurd model applied inside the op, and it is the
@@ -110,22 +111,27 @@ A **prewarmed interpreter** is a different thing: dumping Monty at a well-known 
 functions registered, a skill prelude evaluated) and starting every run from that image is
 memoized initialization with no mid-computation control state, so it raises no invariant
 tension. It is deferred as an optimization until sandbox init cost shows in the meter, which is
-unlikely at Monty's microsecond cold start.
+unlikely beside the cost of starting a segment's own worker pool.
 
 ### 5. Monty first, behind an engine seam
 
-Monty (`pydantic-monty`, pinned at 0.0.18) is the engine: generator-shaped host-call seam, no
-ambient authority, microsecond startup, resource limits (`max_duration_secs`, `max_memory`,
-`max_allocations`, `max_recursion_depth`) passed through `MontyEngine(limits=...)`. `effective.code`
+Monty (`pydantic-monty`, pinned at 1.1.0) is the engine: generator-shaped host-call seam, no
+ambient authority, resource limits (`max_feed_duration_secs`, `max_memory`, `max_recursion_depth`)
+passed through `MontyEngine(limits=...)`. Code runs in a `monty` subprocess worker. Each segment
+starts a worker pool of its own and closes it with the segment
+and leaves no worker, and no pool state, shared across segments or threads. A worker that dies
+(`MontyCrashedError`) fails its segment's step, and the step's next attempt re-executes the segment from the start,
+as replay always does. `effective.code`
 never imports the engine, so the op contract owns the semantics and the engine owns execution; a
 second engine (a Pyodide subprocess) would join behind the same reserved tool and earn a
 cross-interpreter conformance suite in the shape of [ADR-0009](0009-durable-backend-two-regimes-taskcontext.md)'s cross-backend one. A
 container or microVM tier for hostile code is deferred until untrusted third-party code runs:
-Monty's capability model confines what code can name; it does not isolate a process. Firejail is rejected (a SUID-root
+the worker is an ordinary subprocess with the host's user, filesystem and network: Monty's capability model confines what code can name, and no OS mechanism confines the worker. Firejail is rejected (a SUID-root
 escalation surface).
 
-Monty 0.0.18 parses a subset: `match`, `class` and generator `yield` raise a located
-`NotImplementedError` at parse time, while comprehensions, the walrus and f-strings work. Skill
+Monty 1.1.0 parses a subset: `match` and generator `yield` raise a located
+`NotImplementedError` at parse time, while classes, comprehensions, the walrus and f-strings
+work. Skill
 scripts stay inside the subset, so sandbox scripts are exempt from the repo's `match` preference
 until Monty grows.
 
@@ -177,17 +183,15 @@ The rejected alternative was a scope string interpolated at the call site. It al
 ending in the delimiter, spliced ahead of a model-controlled tool name, composes the same key as
 no scope with a tool name embedding that delimiter, giving two actions one address.
 
-## Deferred, with triggers
+## Not built
 
-| piece | trigger |
-|---|---|
-| a second engine (Pyodide subprocess) and a cross-interpreter conformance suite | a workload Monty's subset cannot run |
-| prewarmed Monty image | sandbox init cost visible in the meter |
-| container or microVM tier | running untrusted third-party code |
-| a measured RLM-versus-structured contrast | the evaluation track |
+- a second engine (Pyodide subprocess) and a cross-interpreter conformance suite
+- a prewarmed Monty image
+- a container or microVM tier
+- a measured RLM-versus-structured contrast
 
-Mid-run snapshot persistence is rejected, revisited only if replay-by-re-execution measurably
-fails a real workload, and then as an explicit invariant discussion.
+Mid-run snapshot persistence is rejected: a run resumes by re-executing its code against the
+recorded results.
 
 ## Consequences
 

@@ -23,15 +23,16 @@ A turnstile's own rules, each pinned in `test_schedules.py`:
 
 | rule                                      | what it prevents                                    |
 |-------------------------------------------|-----------------------------------------------------|
-| a label names one op                      | two branches sharing a turn and running together    |
+| a label names one op, at one placement    | two branches sharing a turn and running together    |
 | a turn ends with its op: commit, raise    | a sibling waiting out its timeout behind an op that |
 | or park                                   | will never commit                                   |
 | the layer sits above what it orders       | an order among ops a gate below has already decided |
 | `check`: the order used up, two siblings  | a schedule that ordered nothing a sibling could     |
 |                                           | reorder                                             |
 
-One turnstile serves one run to its end: a replay, or a resume after a park, re-admits the ops it
-already released."""
+One turnstile serves one run to its end. A resume, after a crash or a park, re-admits every op the
+run reached, and each passes through unordered, since its placement has had its turn: an op that
+crashed inside its turn commits in the resumed run's order."""
 
 import threading
 from collections.abc import Callable, Collection, Generator, Sequence
@@ -82,7 +83,7 @@ class Turnstile:
         self.outcomes: list[tuple[str, str]] = []
         self.placements: dict[str, str | None] = {}
         self.threads: set[int] = set()
-        self._arrived: set[str] = set()
+        self._arrived: dict[str, str | None] = {}
         self._turn = threading.Condition()
 
     def layer(self) -> Any:
@@ -96,12 +97,18 @@ class Turnstile:
                 filled = len(self.ended)
                 return filled < len(self.order) and self.order[filled] == name
 
-            with self._turn:
-                assert name not in self._arrived, f"{name!r} names a second op"
-                self._arrived.add(name)
-                reached = self._turn.wait_for(its_turn, timeout=self.timeout)
-            assert reached, f"{name!r} waited out the gather; ended {self.ended}"
             placement = current_placement()
+            at = None if placement is None else placement.stored()
+            with self._turn:
+                if name in self._arrived:
+                    resumed = at is not None and self._arrived[name] == at and name in self.ended
+                    assert resumed, f"{name!r} names a second op"
+                else:
+                    self._arrived[name], resumed = at, False
+                    reached = self._turn.wait_for(its_turn, timeout=self.timeout)
+            if resumed:
+                return (yield op)
+            assert reached, f"{name!r} waited out the gather; ended {self.ended}"
             outcome = "closed"
             try:
                 result = yield op
@@ -115,7 +122,7 @@ class Turnstile:
             finally:
                 with self._turn:
                     self.threads.add(threading.get_ident())
-                    self.placements[name] = None if placement is None else placement.stored()
+                    self.placements[name] = at
                     self.ended.append(name)
                     self.outcomes.append((name, outcome))
                     self._turn.notify_all()

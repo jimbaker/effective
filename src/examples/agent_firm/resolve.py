@@ -43,7 +43,7 @@ from effective.ops import AppendLedgerRow, LedgerRow, WorkflowOp
 from .ar import INVARIANTS, TERMS, Round, Settlement, settle
 from .cases import Case
 from .engage import Critique, Proposal, asked, engage, evidence, owed
-from .knowledge import K0, Knowledge, load_knowledge
+from .knowledge import NO_RULES, Knowledge, load_knowledge
 from .manifest import Manifest
 from .reconcile import reconcile
 
@@ -112,7 +112,7 @@ def decided(proposal: Proposal | Repair, critique: Critique | Repair | None) -> 
 
 
 def resolve(
-    case: Case, *, critic: bool, round: Round, knowledge: Knowledge = K0
+    case: Case, *, critic: bool, round: Round, knowledge: Knowledge = NO_RULES
 ) -> Callable[[], Effect[Resolved]]:
     """The program that resolves `case` in `round` with the firm's `knowledge`, engaging the
     firm's critic when it has one."""

@@ -1,0 +1,14 @@
+{
+  "finds_the_cap": true,
+  "critique": {
+    "verdict": "revise",
+    "credit": "1000",
+    "cites": [
+      "MSA-NW-2025",
+      "TCK-881",
+      "CRM-2207"
+    ],
+    "reason": "The proposed $3,000 credit does not follow the contract the firm holds (MSA-NW-2025). Section 4.2 credits only apply to unavailability beyond the 99.9% commitment in 4.1. September has 30 days (720 hours), so the allowance is 0.1% \u00d7 720 = 0.72 hours. The incident ran 6h15m (TCK-881), leaving about 5.53 hours beyond the commitment, or 5 full hours. At 0.5% of the $100,000 monthly fee ($500 per hour), that is $2,500. Section 4.2 also caps credits at $1,000 per calendar month, so the credit is $1,000. The cap binds under any reading: even the customer's six-hour count would be $3,000 before the cap, which is still limited to $1,000. The proposal's rationale, which cites only CRM-2207 and the six-hour figure, ignores the 4.1 threshold and the 4.2 cap. Section 7.4 also bars Northwind from setting off any amount except a 4.2 credit, so the $3,000 deduction in PAY-5501 (paid $97,000 against INV-1001's $100,000) is not authorized. After the correct $1,000 credit, the amount owed is $99,000, which leaves $2,000 unpaid. Under the Net 30 term in 3.2, that balance was due 2026-10-01 and is now past due, so it may accrue 1% per month. The firm should issue a $1,000 credit memo, which is the 4.2 credit, and pursue the $2,000 shortfall. The CRM-2207 request was timely: it was sent 12 days after the incident, well within the 30-day window in 4.2. CRM-2210 reflects a relationship concern and does not change the contract amount, so I did not rely on it."
+  },
+  "refused": null
+}

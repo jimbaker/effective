@@ -69,12 +69,14 @@ def investigate(
 
         @app.register_task("research")
         def task(params: dict[str, Any], ctx: Any) -> Any:
-            handler = DurableHandler(ctx, answer, contract=Contract.V1)
+            handler = DurableHandler(
+                ctx, answer, contract=Contract.from_params(params, absent=Contract.V1)
+            )
             return handler.run(
                 lambda: research(params["question"], params["cells"], steps=steps, **policy)
             )
 
-        params = {"question": question, "cells": dict(cells)}
+        params = Contract.V1.spawn_params({"question": question, "cells": dict(cells)})
         spawned = app.spawn(
             "research", params, idempotency_key=run_id or str(uuid4()), max_attempts=1
         )

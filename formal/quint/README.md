@@ -201,6 +201,26 @@ decided before every branch has ended, which stops a `late` branch short of its 
 order and not the other; and a retryable error after the choice kept as an ending. The race's deadline, its flag
 and crashes are v4's.
 
+**v7: `erp_claim.qnt`** (a settlement's apply and its undo at the ERP): two attempts of one task
+send an Apply, decide to keep the match or compensate, and compensating sends an Unapply that
+names the Apply it undoes. The first attempt's lease can expire anywhere; the second replays the
+first's checkpoints. A call already sent lands whenever the network delivers it, whichever attempt
+sent it. The ERP keeps claims on the Apply's key, each in the transaction of the match it
+records: an Apply finding any claim lands nothing, and otherwise claims the key as applied,
+matching unless another key's match already stands; an Unapply finding the key claimed as undone
+lands nothing, and otherwise claims it so and removes the match. The run may start with another
+key's match standing. Assumed, as the engine's
+question: an attempt whose lease expired writes no checkpoint. TLC enumerates the whole graph.
+
+| Invariant | the rule it checks |
+|---|---|
+| `booksAreTheDecision` | once the last attempt is done and nothing is in flight, the match stands exactly when the settlement kept it |
+
+`neverStaleLanded`, `neverCompensated` and `neverForeignUndone` are registered as violations, so the
+invariant is checked over runs where a stale attempt's call reaches the ERP, a compensation removes
+the match, and the match it removes is another key's. The
+teeth toggle drops the claim, and the stale Apply then lands after the Unapply.
+
 ## Run
 
 Toolchain: **pinned per-machine via `just formal-setup`** (idempotent; nothing global) —

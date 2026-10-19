@@ -7,7 +7,7 @@ payment against its invoice.
 | `apply-payment` | `Apply`        | `unapply-payment`, an `Unapply`                |
 | `apply-memo`    | `Apply`        | `unapply-memo`, an `Unapply`                   |
 | `notify`        | `notify`       | nothing: it is the saga's pivot                |
-| `collect`       | `collect`      | nothing: retried until it lands                |
+| `remind`        | `remind`       | nothing: retried until it lands                |
 
 The world already holds the payment; applying it matches it against the invoice, and applying the
 memo matches the credit, so the invoice owes the gap less the credit. Compensation runs latest
@@ -30,10 +30,11 @@ from pydantic import BaseModel
 from effective.api import Effect, claim_ledger, read_ledger, step
 from effective.combinators import Grantor
 from effective.domain import CallTool
+from effective.handlers.durable import named_idempotency_key
 from effective.keys import Index, Key, Name, Subject, compose_key
 from effective.ops import LedgerRow, Minted, Named
 
-from .cases import Case
+from .cases import WITHIN, Case, in_cents
 from .erp.port import (
     RESULTS,
     Applied,
@@ -55,6 +56,10 @@ APPLY, UNAPPLY = "apply-payment", "unapply-payment"
 MEMO, APPLY_MEMO, UNAPPLY_MEMO = "credit-memo", "apply-memo", "unapply-memo"
 """The step names of the memo's post, of its apply, and of the apply's undo."""
 
+REMIND = "remind"
+"""The step, and the tool it calls, that sends the customer a collection notice for what is still
+owed."""
+
 
 TERMS = "settlement-terms"
 """The ledger kind of a round's claimed credit."""
@@ -67,6 +72,10 @@ def _dollars(amount: Decimal) -> str:
     """`amount` in dollars and cents, as the firm writes it down; an amount finer than a cent
     raises `Inexact`."""
     return str(amount.quantize(Decimal("0.01"), context=Context(traps=[Inexact])))
+
+
+class Unabsorbed(ValueError):
+    """A settlement's credit that its case's shortfall does not absorb."""
 
 
 @dataclass(frozen=True)
@@ -104,6 +113,11 @@ def about(case: Case, round: Round, leg: str, attempt: int = 0) -> Named:
     return Named(compose_key(t"leg:{named},attempt={tried:default=0};{settlement:domain=address}"))
 
 
+def key_of(fact: Named) -> str:
+    """The idempotency key a step about `fact` reaches its tool under."""
+    return named_idempotency_key(fact.fact).stored()
+
+
 def performed(name: str, op: ErpOp, fact: Named) -> Effect[Outcome]:
     call = CallTool(name="erp", args=op.model_dump(mode="json"), result_schema=dict)
     result: ErpResult = RESULTS.validate_python(
@@ -138,7 +152,12 @@ def settlement(
 ) -> list[Leg]:
     """Credit `credit`, apply the payment and then the memo, tell the customer, and queue what is
     still owed, with more attempts at the collection as `grantor` grants them. The notice is the
-    settlement's pivot, so a payment in full is told of a $0 credit too."""
+    settlement's pivot, so a payment in full is told of a $0 credit too. A credit the case does not
+    absorb raises `Unabsorbed` before any leg exists."""
+    if not in_cents(case.gap):
+        raise Unabsorbed(f"the shortfall {case.gap} is not in whole cents")
+    if not case.absorbs(credit):
+        raise Unabsorbed(f"{credit} is not {WITHIN}")
     owed = case.gap - credit
     credited, still_owed = _dollars(credit), _dollars(owed)
     invoice, payment = case.invoice.id, case.payment.id
@@ -160,7 +179,11 @@ def settlement(
         lambda _attempt, _landed: performed(
             APPLY, Apply(entry=payment, invoice=invoice), fact(APPLY)
         ),
-        lambda _landed: performed(UNAPPLY, Unapply(entry=payment, invoice=invoice), fact(UNAPPLY)),
+        lambda _landed: performed(
+            UNAPPLY,
+            Unapply(entry=payment, invoice=invoice, undoes=key_of(fact(APPLY))),
+            fact(UNAPPLY),
+        ),
     )
     apply_memo = Leg(
         APPLY_MEMO,
@@ -169,7 +192,9 @@ def settlement(
             APPLY_MEMO, Apply(entry=landed[MEMO], invoice=invoice), fact(APPLY_MEMO)
         ),
         lambda landed: performed(
-            UNAPPLY_MEMO, Unapply(entry=landed[MEMO], invoice=invoice), fact(UNAPPLY_MEMO)
+            UNAPPLY_MEMO,
+            Unapply(entry=landed[MEMO], invoice=invoice, undoes=key_of(fact(APPLY_MEMO))),
+            fact(UNAPPLY_MEMO),
         ),
     )
     notify = Leg(
@@ -179,16 +204,16 @@ def settlement(
             "notify", {"invoice": invoice, "credit": credited}, fact("notify")
         ),
     )
-    collect = Leg(
-        "collect",
+    remind = Leg(
+        REMIND,
         LegKind.RETRIABLE,
         lambda attempt, _landed: _told(
-            "collect", {"invoice": invoice, "owed": still_owed}, fact("collect", attempt)
+            REMIND, {"invoice": invoice, "owed": still_owed}, fact(REMIND, attempt)
         ),
         grantor=grantor,
     )
     credits = [post_memo, apply_payment, apply_memo] if credit else [apply_payment]
-    return [*credits, notify, *([collect] if owed else [])]
+    return [*credits, notify, *([remind] if owed else [])]
 
 
 def settle(

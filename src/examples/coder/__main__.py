@@ -169,7 +169,11 @@ def run_in(
         spend = MeasuredBudget(run_id=params["run_id"], overall=args.budget, on_exhaust="fail")
         gate = govern(budget_policy(spend), gate="spend", run_id=params["run_id"])
         handler = DurableHandler(
-            ctx, interpreter, ledger=ledger, op_layers=(gate,), contract=Contract.V1
+            ctx,
+            interpreter,
+            ledger=ledger,
+            op_layers=(gate,),
+            contract=Contract.from_params(params, absent=Contract.V1),
         )
         return handler.run(
             lambda: hoisted(
@@ -185,7 +189,8 @@ def run_in(
             )
         )
 
-    task_id = app.spawn("coder", {"run_id": run_id, "goal": args.goal, "tree": seed})
+    params = {"run_id": run_id, "goal": args.goal, "tree": seed}
+    task_id = app.spawn("coder", Contract.V1.spawn_params(params))
     snapshot = app.run_until_result(task_id)
     cost = interpreter.meter.cost
     match snapshot:

@@ -1,15 +1,16 @@
-"""The factor account of one resolution: a projection over what the run was admitted with, the
-rows it wrote to the ledger, and its tape, joined by the run.
+"""The factors of one resolution, what went into it: a projection over what the run was admitted
+with, the rows it wrote to the ledger, and its tape, joined by the run.
 
-| factor     | read from                                                              |
-|------------|------------------------------------------------------------------------|
-| assignment | the admission's manifest: the arm, the round, whether a critic runs    |
-| H          | the ledger's ask and ruling rows: how many parks, and who ruled each   |
-| A and C    | the tape's model steps, and their recorded usage under the v1 contract |
-| K          | the snapshot the manifest pins                                         |
+| factor            | read from                                                            |
+|-------------------|----------------------------------------------------------------------|
+| assignment        | the admission's manifest: the arm, the round, whether a critic runs  |
+| human judgment    | the ledger's ask and ruling rows: how many parks, and who ruled each |
+| agent labor       | the tape's model steps                                               |
+| capital, as spend | the model steps' recorded usage under the v1 contract                |
+| knowledge         | the snapshot the manifest pins                                       |
 
-Each factor comes from the bookkeeper that holds it, so the account copies none of them into
-another. Y is not here: the books are scored apart from the firm (`score`).
+Each factor comes from the bookkeeper that holds it, so this record copies none of them into
+another. The outcome is not here: the books are scored apart from the firm (`score`).
 """
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -32,7 +33,7 @@ MODEL_STEPS = frozenset(step_key(name).stored() for name in ("explain", "engage"
 """The steps at which the firm asks a model: its proposer, and its critic."""
 
 
-class Account(BaseModel):
+class Factors(BaseModel):
     run_id: str
     arm: str
     case: str
@@ -48,10 +49,10 @@ class Account(BaseModel):
     tape records no usage."""
 
 
-def account(
+def factors(
     params: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], tape: Mapping[Key, Any]
-) -> Account:
-    """The account of the run admitted with `params`, from its ledger `rows` and its `tape`."""
+) -> Factors:
+    """The factors of the run admitted with `params`, from its ledger `rows` and its `tape`."""
     manifest = Manifest.admitted(params)
     calls = [state for key, state in tape.items() if bare_name(key.stored()) in MODEL_STEPS]
     metered = Contract.from_params(params) is Contract.V1
@@ -60,7 +61,7 @@ def account(
         if metered
         else None
     )
-    return Account(
+    return Factors(
         run_id=params["run_id"],
         arm=manifest.arm,
         case=manifest.case_digest,
@@ -81,9 +82,10 @@ type Cell = tuple[bool, bool]
 def interaction(
     outcomes: Iterable[tuple[Manifest, Decimal]], control: Pinned, treated: Pinned
 ) -> Decimal:
-    """I = Y(K₁,A₁) - Y(K₁,A₀) - Y(K₀,A₁) + Y(K₀,A₀) over one outcome per cell, each run's cell
-    read from its manifest: K₀ where it pins `control` and K₁ where it pins `treated`, A₁ where a
-    critic runs. A run pinning neither, and a cell with no outcome or with two, are refused."""
+    """How much more the critic moves the outcome under the `treated` knowledge than under the
+    `control` knowledge: its effect under `treated` less its effect under `control`, from one
+    outcome per combination of snapshot and critic, each read from the run's manifest. A run
+    pinning neither snapshot, and a combination with no outcome or with two, are refused."""
     cells: dict[Cell, Decimal] = {}
     for manifest, outcome in outcomes:
         if manifest.knowledge not in (control, treated):

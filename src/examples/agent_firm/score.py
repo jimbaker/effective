@@ -1,5 +1,5 @@
-"""Y, scored outside the firm: what the books show after a case's resolutions, against the
-disposition each case's evidence supports.
+"""The outcome, scored outside the firm: what the books show after a case's resolutions, against
+the disposition each case's evidence supports.
 
 An experiment's driver reads it after the runs; the firm's programs read only their own records.
 A resolution's ending says what its run did, and the books say what the case's settlement is, so
@@ -14,7 +14,8 @@ from .cases import Case
 from .erp.port import Erp, Kind
 
 GOLD = {"clean": Decimal(0), "discount": Decimal(400), "sla-cap": Decimal(1000)}
-"""The credit each case's evidence supports."""
+"""The credit each case's evidence supports: the right answer, known before any run, that the
+books are scored against."""
 
 
 class Disposition(BaseModel):

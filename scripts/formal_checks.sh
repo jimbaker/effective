@@ -39,6 +39,8 @@ FORMAL_CHECKS=(
     "verify retry.qnt --invariant=safe --max-steps=30 --backend=tlc"
     # A race's branch errors across task retries, in two orders and both readers.
     "verify race_errors.qnt --invariant=safe --max-steps=40 --backend=tlc"
+    # A settlement's apply and its undo across two attempts: the claim fences a stale call.
+    "verify erp_claim.qnt --invariant=booksAreTheDecision --max-steps=20 --backend=tlc"
 )
 
 # Checks on the UNMODIFIED models that must VIOLATE.
@@ -80,6 +82,9 @@ FORMAL_EXPECT_VIOLATION=(
     # The race's strongest readings: the order can move the answering attempt and a loser's ending.
     "race_errors.qnt|--invariant=sameAnsweringAttempt --max-steps=40 --backend=tlc|the order moves the attempt that answers"
     "race_errors.qnt|--invariant=sameEndings --max-steps=40 --backend=tlc|the order moves a loser's ending"
+    "erp_claim.qnt|--invariant=neverStaleLanded --max-steps=20 --backend=tlc|a stale attempt's call reaches the ERP"
+    "erp_claim.qnt|--invariant=neverCompensated --max-steps=20 --backend=tlc|a compensation removes the match"
+    "erp_claim.qnt|--invariant=neverForeignUndone --max-steps=20 --backend=tlc|a compensation removes another key's match"
 )
 
 # TEETH: flip a model's design toggle to the KNOWN-BUGGY value and assert the checker finds
@@ -131,4 +136,6 @@ FORMAL_TEETH=(
     "race_errors.qnt|impossibleAtOnce: bool = false|impossibleAtOnce: bool = true|--invariant=orderIndependent --max-steps=40 --backend=tlc|impossible before every branch ends must let the order decide whether the task answers"
     "race_errors.qnt|impossibleAtOnce: bool = false|impossibleAtOnce: bool = true|--invariant=impossibleOnlyOnceEveryBranchEnded --max-steps=40 --backend=tlc|impossible at once must save the choice while a branch runs"
     "race_errors.qnt|clearableIsEnding: bool = false|clearableIsEnding: bool = true|--invariant=noClearableErrorIsAnEnding --max-steps=40 --backend=tlc|a clearable error after the choice must become an ending"
+    # An ERP with no claim lets a stale attempt's apply land after the undo.
+    "erp_claim.qnt|buggyNoClaim: bool = false|buggyNoClaim: bool = true|--invariant=booksAreTheDecision --max-steps=20 --backend=tlc|an ERP with no claim must let a stale apply land after its undo"
 )

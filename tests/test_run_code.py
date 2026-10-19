@@ -2,7 +2,7 @@
 
 Infra-free, three layers (the testing-layers discipline):
 
-1. **Engine unit tests**: real Monty in-process (no I/O): live host calls,
+1. **Engine unit tests**: real Monty, a worker subprocess per segment (no I/O): live host calls,
    re-bind-by-index (replay-by-re-execution), action pause, denial injection,
    undeclared-name policy, resource limits, clock-as-effect.
 2. **Combinator on RecordingHandler**: canned ``CodeOutcome`` segments pin the
@@ -16,8 +16,11 @@ Infra-free, three layers (the testing-layers discipline):
 Durable crash-at-every-op / suspend-resume coverage is the pgt suite's job.
 """
 
+from contextlib import contextmanager
+
 import pytest
 
+import effective.monty
 from effective.code import EXECUTE_TOOL, ActionCall, CodeOutcome, run_code
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Exceeded
@@ -197,22 +200,41 @@ def test_engine_undeclared_name_policy():
         engine.execute({**base, "code": "f()", "functions": ["f"]})
 
 
+READS = """import datetime, random, time
+seen = []
+for read in (lambda: datetime.datetime.now(), time.time, time.monotonic, random.random):
+    try:
+        seen.append(read())
+    except RuntimeError:
+        seen.append('refused')
+seen
+"""
+
+
+def test_engine_refuses_an_undeclared_clock_or_entropy():
+    """The sandbox reads no clock and no entropy the host did not answer, so a re-execution sees
+    what the first run saw."""
+    assert MontyEngine().execute({"code": READS, "inputs": {}}).output == ["refused"] * 4
+
+
 def test_engine_unsupported_sandbox_event_is_a_loud_engine_error(monkeypatch):
     # the dispatch's terminal arm: a sandbox event the engine does not model
     # (a future Monty snapshot type) fails loudly, never a silent guess
-    import pydantic_monty as monty
-
     class AlienSnapshot:
         pass
 
-    monkeypatch.setattr(monty.Monty, "start", lambda self, **kwargs: AlienSnapshot())
+    @contextmanager
+    def alien(code, inputs, limits):
+        yield AlienSnapshot()
+
+    monkeypatch.setattr(effective.monty, "_started", alien)
     engine = MontyEngine()
     with pytest.raises(CodeEngineError, match="unsupported sandbox event: AlienSnapshot"):
         engine.execute({"code": "1", "inputs": {}})
 
 
 def test_engine_resource_limits_kill_runaway_code():
-    engine = MontyEngine(limits={"max_duration_secs": 0.2})
+    engine = MontyEngine(limits={"max_feed_duration_secs": 0.2})
     with pytest.raises(Exception, match="time limit exceeded"):
         engine.execute(
             {
