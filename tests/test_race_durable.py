@@ -41,7 +41,7 @@ from effective.cost import MeteredInterpreter, RecordedFormat, Usage
 from effective.domain import CallTool, DomainOp
 from effective.engines.sqlite import SqliteApp, SqliteLedger, SqliteTaskContext
 from effective.govern import Refused
-from effective.handlers.base import Stop
+from effective.handlers.base import Racing, Stop
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
@@ -1212,15 +1212,41 @@ def test_D29_a_crash_before_the_choice_meets_its_deadline_already_gone(
     """The state a restart is really in. The first attempt starts with the deadline an hour ahead
     and dies before saving a choice, so nothing durable says how the race went; the retry starts
     with it an hour behind. The deadline is the workflow's own instant either way, so the retry
-    times out at once and calls no tool, where D28 could have been served a stored choice."""
+    times out at once and calls no tool, where D28 could have been served a stored choice.
+
+    On the concurrent shape `a` moves the clock only once the race has stamped `b`'s ending, which
+    puts that ending before the deadline in every run. So `b` raises:
+
+    | `b`     | `b`'s ending, as stamped | the race decides          | attempt 1 stores |
+    |---------|--------------------------|---------------------------|------------------|
+    | answers | before the deadline      | `b`, in time              | the choice       |
+    | raises  | before the deadline      | nothing; a raise fails it | nothing          |
+    """
     clock = HeldClock(DEADLINE - timedelta(hours=1)).on_races(monkeypatch)
     calls_by_attempt: dict[int, list[str]] = {}
+    b_threads: list[threading.Thread] = []
+    b_stamped = threading.Event()
+    stamp = Racing.stamp
+
+    def stamped(racing: Racing) -> float:
+        at = stamp(racing)
+        if threading.current_thread() in b_threads:
+            b_stamped.set()
+        return at
+
+    monkeypatch.setattr(Racing, "stamp", stamped)
 
     def die() -> object:
+        if shape == "concurrent" and not b_stamped.wait(10):
+            pytest.fail("the race never stamped b's ending")  # a BaseException crosses the branch
         clock.advance_to(DEADLINE + timedelta(hours=1))
         raise ZeroDivisionError("a programming error before any choice")
 
-    tools = _Tools({"a": die})
+    def fail() -> object:
+        b_threads.append(threading.current_thread())
+        raise ZeroDivisionError("a second programming error before any choice")
+
+    tools = _Tools({"a": die, "b": fail})
 
     def program():
         return _described((yield from race([_calls("a"), _calls("b")], deadline=DEADLINE)))

@@ -26,6 +26,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
+from enum import Enum, auto
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, JsonValue
@@ -703,27 +704,30 @@ async def _astreamed(client: Any, kwargs: dict[str, Any], seen: _Seen) -> Any:
         return await stream.get_final_response()
 
 
-def _sever(stream: Any) -> None:
-    """Shut the stream's socket down, then close the stream.
+def _shut_down(stream: Any) -> None:
+    """Shut the stream's socket down while another thread's read is blocked on it.
 
-    A close alone leaves a read blocked in another thread asleep, and on a pooled connection the
-    provider never learns the client left, so it generates the whole reply. A shutdown wakes the
-    read and sends the provider a FIN. The socket is reached through the httpx response the openai
-    stream holds as `_response`; a stream without one is only closed."""
+    | while a read is blocked on the socket | a close                   | a shutdown         |
+    |---------------------------------------|---------------------------|--------------------|
+    | the blocked read                      | stays asleep              | returns            |
+    | the provider, on a pooled socket      | generates the whole reply | receives a FIN     |
+    | the descriptor                        | freed for reuse           | still the reader's |
+
+    The socket is the one `_response.extensions["network_stream"]` holds, a private path of the
+    openai stream; a stream without it is left as it is."""
     response = getattr(stream, "_response", None)
     network = getattr(response, "extensions", {}).get("network_stream")
     sock = None if network is None else network.get_extra_info("socket")
     if sock is not None:
         with suppress(OSError):  # the connection is already gone
             sock.shutdown(socket.SHUT_RDWR)
-    stream.close()
 
 
 class _StreamStopped(Exception):
-    """A cancel closed the stream; `partial` is the answer text that had arrived."""
+    """A cancel stopped the stream; `partial` is the answer text that had arrived."""
 
     def __init__(self, partial: str) -> None:
-        super().__init__("the response stream was closed by a cancel")
+        super().__init__("the response stream was stopped by a cancel")
         self.partial = partial
 
 
@@ -731,14 +735,57 @@ ENDED = frozenset({"response.incomplete", "response.failed"})
 """The events that end a stream without an answer; a stop after one is not what ended it."""
 
 
+class _SocketState(Enum):
+    """The state of a streamed call's socket, read by the stop under the reader's lock.
+
+    | member      | the socket                                                             |
+    |-------------|------------------------------------------------------------------------|
+    | `REQUESTED` | not yet the reader's: the request is in flight, or the stop came first |
+    | `READING`   | the reader's, from entering the stream to its last event               |
+    | `RELEASED`  | httpx's pool's from the pull after the last event, or closed           |
+
+    A stop leaves a `RELEASED` socket alone, so a provider that holds the body open after its last
+    event keeps the reader until the read times out; the op has its answer already.
+    """
+
+    REQUESTED = auto()
+    READING = auto()
+    RELEASED = auto()
+
+
 class _Reader:
-    """One streamed call's reader thread and its stop, which share the stream and what arrived."""
+    """One streamed call: a reader thread, the stop a cancel runs, and the caller waiting on both.
+
+    | resource       | reader thread     | stop                       | caller |
+    |----------------|-------------------|----------------------------|--------|
+    | the stream     | enters and closes |                            |        |
+    | the socket     | reads             | shuts down while `READING` |        |
+    | `socket_state` | sets              | reads                      |        |
+    | what arrived   | writes            |                            | reads  |
+    | `stopped`      | reads             | sets                       | reads  |
+    | `settled`      | sets              | sets                       | waits  |
+
+    What arrived is `arrived`, `response`, `ended` and `error`. `lock` guards every row except
+    `settled`, an event. A thread touching a socket it does not hold reaches whichever connection
+    next takes its descriptor number, since a read or a shutdown takes the number before its
+    syscall:
+
+        reader             stop                next call
+        recv takes fd 6
+                           close frees fd 6
+                                               connect takes fd 6
+        recv reads fd 6, the next call's connection
+
+    So the stop closes nothing, and shuts the socket down under `lock` while `socket_state` is
+    `READING`, which the reader leaves under `lock` too.
+    """
 
     def __init__(self, manager: Any) -> None:
         self.manager = manager
         self.lock = threading.Lock()
         self.arrived: list[str] = []
         self.stream: Any = None
+        self.socket_state = _SocketState.REQUESTED
         self.response: Any = None
         self.ended: str | None = None
         self.error: Exception | None = None
@@ -750,37 +797,45 @@ class _Reader:
                 self.settled.set()
                 return
         try:
-            stream = self.manager.__enter__()
+            with self.manager as stream:
+                try:
+                    self._read(stream)
+                except Exception as raised:
+                    with self.lock:
+                        self.error = raised
+                finally:
+                    with self.lock:
+                        self.socket_state = _SocketState.RELEASED
+        except Exception as raised:  # raised entering or closing the stream; a read's error stands
             with self.lock:
-                self.stream = stream
-                late = self.stopped.is_set()
-            if late:  # the stop came while the request was in flight
-                _sever(stream)
-                return
-            for event in stream:
-                with self.lock:
-                    if event.type == "response.output_text.delta":
-                        self.arrived.append(event.delta)
-                    elif event.type == "response.completed":
-                        self.response = event.response
-                    elif event.type in ENDED:
-                        self.ended = event.type
-            final = stream.get_final_response()
-            with self.lock:
-                self.response = final
-        except Exception as raised:
-            with self.lock:
-                self.error = raised
+                self.error = self.error or raised
         finally:
             self.settled.set()
 
-    def stop(self) -> None:
+    def _read(self, stream: Any) -> None:
         with self.lock:
-            self.stopped.set()
-            stream = self.stream
+            if self.stopped.is_set():  # the stop came while the request was in flight
+                return
+            self.stream, self.socket_state = stream, _SocketState.READING
+        for event in stream:
+            with self.lock:
+                match event.type:
+                    case "response.output_text.delta":
+                        self.arrived.append(event.delta)
+                    case "response.completed":
+                        self.response, self.socket_state = event.response, _SocketState.RELEASED
+                    case kind if kind in ENDED:
+                        self.ended, self.socket_state = kind, _SocketState.RELEASED
+        final = stream.get_final_response()
+        with self.lock:
+            self.response = final
+
+    def stop(self) -> None:
         try:
-            if stream is not None:
-                _sever(stream)
+            with self.lock:
+                self.stopped.set()
+                if self.socket_state is _SocketState.READING:
+                    _shut_down(self.stream)
         finally:
             self.settled.set()
 
@@ -788,13 +843,18 @@ class _Reader:
 def _streamed(
     client: Any, kwargs: dict[str, Any], cancel: CancelToken, typed: bool = False
 ) -> tuple[_WireTurn | _TypedTurn, Any]:
-    """The call streamed on a reader thread, so a cancel returns at once.
+    """The call streamed on a reader thread (`_Reader`), so a cancel returns at once.
 
-    The reader opens the stream too, so a stop reaches the call while it waits for the first
-    byte. The stop severs the connection (`_sever`), which ends the reader and tells the provider
-    the client has gone, and the op answers `Cancelled` without waiting for the reader. A reply
-    whose `response.completed` arrived before the stop is the answer, and one that ended
-    `incomplete` or `failed` raises as it would have without the stop."""
+    | the stop comes                              | the op                                   |
+    |---------------------------------------------|------------------------------------------|
+    | before the request                          | answers `Cancelled`; sends nothing       |
+    | while the request waits for its first byte  | answers `Cancelled`                      |
+    | while the reply streams                     | answers `Cancelled` with the text so far |
+    | after `response.completed`                  | answers the reply                        |
+    | after `response.incomplete` or `failed`     | raises, as it would without the stop     |
+
+    After a stop the op returns at once, and the reader ends on its own thread: at once if the
+    stop shut its socket down, or when the headers arrive if the stop came first."""
     if cancel.cancelled:  # the Esc came first; send nothing
         raise _StreamStopped("")
     reader = _Reader(client.responses.stream(**kwargs))
@@ -806,7 +866,6 @@ def _streamed(
         text = "".join(reader.arrived)
     if response is None and ended is None and reader.stopped.is_set():
         raise _StreamStopped(text)
-    reader.manager.__exit__(None, None, None)
     match response, ended, error:
         case None, str(), _:  # it ended on its own, before or despite a stop
             raise RuntimeError("the response ended without completing", ended)

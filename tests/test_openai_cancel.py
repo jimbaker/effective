@@ -1,4 +1,5 @@
-"""A Responses call given a `CancelToken`: streamed, and closed by a cancel from another thread."""
+"""A Responses call given a `CancelToken`: streamed on a reader thread, which a cancel from another
+thread stops."""
 
 import asyncio
 import concurrent.futures
@@ -19,6 +20,7 @@ from _witness import WatchedSocket
 
 from effective.cancel import Cancelled, CancelToken
 from effective.domain import AskLLM
+from effective.interpreters import openai as openai_interpreter
 from effective.interpreters.aio import LoopThread, Stopped, shared_loop
 from effective.interpreters.openai import (
     GPT56_LUNA,
@@ -94,7 +96,7 @@ def test_a_finished_stream_answers_the_turn():
     assert usage.prompt_tokens == 10
 
 
-def test_a_cancel_closes_the_stream_and_answers_what_arrived():
+def test_a_cancel_answers_what_arrived_and_the_stream_closes():
     stream, token = _Stream(["hel"], hang=True), CancelToken()
 
     def face() -> None:
@@ -108,8 +110,8 @@ def test_a_cancel_closes_the_stream_and_answers_what_arrived():
     pressed.join()
     stream.release.set()
     assert turn == Cancelled(partial="hel")
-    assert held, "the op waited for a read the close cannot wake"
-    assert stream.closed.is_set()
+    assert held, "the op waited for a read the fake stream holds until `release`"
+    assert stream.closed.wait(SAFETY_NET), "nothing closed the stream once its read ended"
     assert usage.prompt_tokens == 0
 
 
@@ -405,10 +407,9 @@ def _caller(flavor: Flavor, client: Any, token: CancelToken) -> ResponsesTurnCal
 def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
     flavor: Flavor, monkeypatch: pytest.MonkeyPatch
 ):
-    """Measured by a review: with the reader blocked in `recv` when the cancel closed the stream,
-    and the next call on the same client, the reader stayed asleep and the provider wrote its
-    whole reply. The face presses Esc once the reader has taken the first delta and, on the
-    threaded caller, entered its next read; the asyncio caller's cancel lands at its next await."""
+    """The face presses Esc once the reader has taken the first delta and, on the threaded
+    caller, entered its next read; the asyncio caller's cancel lands at its next await. The reader
+    ends, the next call on the same client answers, and the provider hears the client leave."""
     provider = _Provider()
     pooled = _client(flavor, provider)
     taken, token = threading.Event(), CancelToken()
@@ -444,6 +445,100 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
     provider.server.shutdown()
 
 
+class _HeldRead:
+    """A client socket that holds one `recv`, the first after `after` is set, between the two
+    steps of CPython's read:
+
+    | step of `socket.recv`      | here                                                  |
+    |----------------------------|-------------------------------------------------------|
+    | take the descriptor number | appends it to `taken`, sets `entered`, waits for `go` |
+    | the syscall                | calls the wrapped socket's `recv`                     |
+
+    `taken`, `entered` and `go` are `held`'s.
+    """
+
+    def __init__(self, sock: socket.socket, after: threading.Event, held: _Held) -> None:
+        self._sock = sock
+        self.after = after
+        self.held = held
+
+    def recv(self, *args: Any) -> bytes:
+        if self.after.is_set() and not self.held.entered.is_set():
+            self.held.taken.append(self._sock.fileno())
+            self.held.entered.set()
+            self.held.go.wait(SAFETY_NET)
+        return self._sock.recv(*args)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sock, name)
+
+
+class _Held:
+    """The held read's events, and each socket the client connected, in order."""
+
+    def __init__(self) -> None:
+        self.entered, self.go = threading.Event(), threading.Event()
+        self.taken: list[int] = []
+        self.sockets: list[socket.socket] = []
+
+
+def test_a_cancel_leaves_the_readers_descriptor_open_until_the_reader_closes_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The reader is held in its read with fd n taken, and the stop runs in that gap:
+
+        reader                       face
+        takes fd n; held
+                                     cancel: shuts fd n down
+                                     sees fd n still open
+        released: reads EOF, closes fd n
+
+    A stop that closed fd n would free it for the next call's connection, and the reader would
+    read that one. The pin then makes the next call, and checks that the reader ended having
+    closed fd n."""
+    provider = _Provider()
+    pooled = _client("sync", provider)
+    taken, held, token = threading.Event(), _Held(), CancelToken()
+    connect = socket.create_connection
+
+    def connected(*args: Any, **kwargs: Any) -> _HeldRead:
+        sock = connect(*args, **kwargs)
+        held.sockets.append(sock)
+        return _HeldRead(sock, taken, held)
+
+    monkeypatch.setattr(socket, "create_connection", connected)
+
+    def stream(**kwargs: Any) -> _Watched:
+        return _Watched(pooled.responses.stream(**kwargs), taken, DELTA)
+
+    client = SimpleNamespace(responses=SimpleNamespace(stream=stream))
+    before = _readers()
+    open_after_stop: list[int] = []
+
+    def face() -> None:
+        if held.entered.wait(SAFETY_NET):
+            token.cancel()
+            open_after_stop.append(held.sockets[0].fileno())
+        held.go.set()
+
+    pressed = threading.Thread(target=face, name="face")
+    pressed.start()
+    try:
+        turn, _ = _caller("sync", client, token)(ASK)
+        pressed.join()
+        assert turn == Cancelled(partial=ANSWER[:5])
+        assert open_after_stop == held.taken, "the stop closed the descriptor the reader held"
+        following, _ = _caller("sync", client, CancelToken())(ASK)
+        assert isinstance(following, AssistantTurn)
+        assert _join(before) == (set(), set()), "the reader outlived the cancel"
+        assert held.sockets[0].fileno() == -1, "the reader left its socket open"
+    finally:
+        held.go.set()
+        provider.resume.set()
+    assert provider.heard(), "the provider never heard the client leave"
+    provider.server.shutdown()
+
+
 class _Watched:
     """The SDK's stream manager, with a signal once the reader has taken an event of one of
     `types`: set when the reader asks for the event after it, so the reader has finished with that
@@ -467,7 +562,7 @@ class _WatchedStream:
         self._completed = completed
         self._types = types
 
-    def __getattr__(self, name: str) -> Any:  # `_sever` reaches `_response` through here
+    def __getattr__(self, name: str) -> Any:  # `_shut_down` reaches `_response` through here
         return getattr(self._stream, name)
 
     def __iter__(self) -> Any:
@@ -563,6 +658,114 @@ def test_a_reply_completed_before_the_cancel_is_the_answer_and_is_metered(
     assert (usage.prompt_tokens, usage.completion_tokens) == (3, 2)
 
 
+class _ShutDowns:
+    """A client socket that records each `shutdown` called on it."""
+
+    def __init__(self, sock: socket.socket, shut: list[int]) -> None:
+        self._sock = sock
+        self.shut = shut
+
+    def shutdown(self, how: int) -> None:
+        self.shut.append(how)
+        self._sock.shutdown(how)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sock, name)
+
+
+def test_a_cancel_after_the_last_event_leaves_the_socket_to_httpxs_pool(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The reader has read `response.completed`, and httpx hands the socket back to its pool on
+    the reader's next pull, where another call on the client may take it. The face presses Esc
+    as the reader makes that pull, and the stop shuts nothing down."""
+    shut: list[int] = []
+    connect = socket.create_connection
+    monkeypatch.setattr(
+        socket, "create_connection", lambda *a, **k: _ShutDowns(connect(*a, **k), shut)
+    )
+    turn, _, _, _ = _cancelled_at_the_stall("sync", "end", monkeypatch)
+    assert isinstance(turn, AssistantTurn)
+    assert shut == [], "the stop shut down a socket its reader had released"
+
+
+class _HeldShutdown:
+    """A client socket whose `shutdown` takes the descriptor number, then waits for `held.go`
+    before its syscall, with `held.entered` set."""
+
+    def __init__(self, sock: socket.socket, held: _Held) -> None:
+        self._sock = sock
+        self.held = held
+
+    def shutdown(self, how: int) -> None:
+        self.held.taken.append(self._sock.fileno())
+        self.held.entered.set()
+        self.held.go.wait(SAFETY_NET)
+        self._sock.shutdown(how)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sock, name)
+
+
+def test_the_stop_shuts_the_socket_down_holding_the_readers_lock(monkeypatch: pytest.MonkeyPatch):
+    """The reader leaves `READING` under its lock, so a shutdown made under that lock reaches a
+    socket the reader still holds. The stop is held in its shutdown with the number taken:
+
+        reader                face (the stop)
+        blocked in recv
+                              takes the lock; shutdown takes fd n; held
+                              sees the lock held, the socket `READING`
+        reads EOF once the shutdown is released
+    """
+    readers: list[openai_interpreter._Reader] = []
+
+    class Seen(openai_interpreter._Reader):
+        def __init__(self, manager: Any) -> None:
+            super().__init__(manager)
+            readers.append(self)
+
+    monkeypatch.setattr(openai_interpreter, "_Reader", Seen)
+    held, connect = _Held(), socket.create_connection
+    monkeypatch.setattr(
+        socket, "create_connection", lambda *a, **k: _HeldShutdown(connect(*a, **k), held)
+    )
+    provider = _Provider()
+    pooled = _client("sync", provider)
+    taken, token = threading.Event(), CancelToken()
+    in_read = _reading(monkeypatch, after=taken)
+
+    def stream(**kwargs: Any) -> _Watched:
+        return _Watched(pooled.responses.stream(**kwargs), taken, DELTA)
+
+    client = SimpleNamespace(responses=SimpleNamespace(stream=stream))
+    before = _readers()
+    under_shutdown: list[tuple[bool, openai_interpreter._SocketState]] = []
+
+    def face() -> None:
+        if in_read.wait(SAFETY_NET):
+            token.cancel()
+
+    def watcher() -> None:
+        if held.entered.wait(SAFETY_NET):
+            under_shutdown.append((readers[0].lock.locked(), readers[0].socket_state))
+        held.go.set()
+
+    threads = [threading.Thread(target=face, name="face"), threading.Thread(target=watcher)]
+    for thread in threads:
+        thread.start()
+    try:
+        turn, _ = _caller("sync", client, token)(ASK)
+        for thread in threads:
+            thread.join()
+        assert turn == Cancelled(partial=ANSWER[:5])
+        assert under_shutdown == [(True, openai_interpreter._SocketState.READING)]
+        assert _join(before) == (set(), set()), "the reader outlived the cancel"
+    finally:
+        held.go.set()
+        provider.resume.set()
+    provider.server.shutdown()
+
+
 class _LateToken(CancelToken):
     """Reads not-cancelled once, as a token does when the Esc lands just after the check."""
 
@@ -585,17 +788,18 @@ def test_an_esc_just_after_the_check_sends_no_request():
     assert not client._stream.closed.is_set()
 
 
-class _Unclosable(_Stream):
-    def close(self) -> None:
-        raise ValueError("the stream would not close")
+class _Unshuttable(_Stream):
+    """A stream whose socket path raises inside the stop's shutdown."""
+
+    _response = SimpleNamespace(extensions=None)
 
 
-def test_a_stop_whose_close_raises_still_releases_the_op():
-    stream, token = _Unclosable(["hel"], hang=True), CancelToken()
+def test_a_stop_whose_shutdown_raises_still_releases_the_op():
+    stream, token = _Unshuttable(["hel"], hang=True), CancelToken()
 
     def face() -> None:
-        stream.reading.wait(10)
-        with pytest.raises(ValueError, match="would not close"):
+        stream.reading.wait(SAFETY_NET)
+        with pytest.raises(AttributeError):
             token.cancel()
 
     pressed = threading.Thread(target=face, name="face")
@@ -605,7 +809,25 @@ def test_a_stop_whose_close_raises_still_releases_the_op():
     pressed.join()
     stream.release.set()
     assert turn == Cancelled(partial="hel")
-    assert held, "the op waited for the read the failed close never ended"
+    assert held, "the op waited for the read the failed shutdown never ended"
+
+
+class _Unclosable(_Stream):
+    def __exit__(self, *_: object) -> None:
+        raise ValueError("the stream would not close")
+
+
+def test_an_answer_stands_though_its_stream_will_not_close():
+    turn, _ = caller(_Client(_Unclosable(["hel", "lo"], hang=False)), CancelToken())(ASK)
+    assert isinstance(turn, AssistantTurn)
+    assert turn.answer == "hello"
+
+
+def test_a_read_error_stands_over_a_failed_close():
+    stream = _Unclosable(["hel"], hang=True)
+    stream.release.set()
+    with pytest.raises(ConnectionError, match="reset"):
+        caller(_Client(stream), CancelToken())(ASK)
 
 
 class _Incomplete(_Stream):
