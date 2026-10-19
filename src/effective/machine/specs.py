@@ -8,8 +8,11 @@ from collections.abc import Callable, Mapping
 from enum import StrEnum
 from functools import partial
 from string.templatelib import Template
-from typing import Any
+from typing import Any, assert_never, overload
 
+from pydantic import BaseModel
+
+from effective.channels import Prompt
 from effective.machine.evidence import CommandRun, Measured
 from effective.machine.spec import (
     Ctx,
@@ -20,7 +23,20 @@ from effective.machine.spec import (
     StateSpec,
     Worker,
 )
-from effective.react import Act, Decide, Tool, ToolLog, Trajectory, run_agent, typed_act
+from effective.react import (
+    REPAIRS,
+    Act,
+    Decide,
+    Ending,
+    Escaped,
+    Exhausted,
+    Tool,
+    Toolbox,
+    ToolLog,
+    Trajectory,
+    run_in,
+    unwrap,
+)
 
 
 def build_specs[S: StrEnum, V: StrEnum, R: Measured = CommandRun](
@@ -92,6 +108,7 @@ def _required[T](value: T | None) -> T:
     return value
 
 
+@overload
 def agent_worker(
     *,
     prompt: Callable[[Ctx], str | Template],
@@ -101,6 +118,33 @@ def agent_worker(
     act: Act | None = None,
     max_iters: int = 6,
     read: Callable[[Trajectory, ToolLog], Evidence] | None = None,
+    bind: Callable[[Ctx, ToolLog], Mapping[str, Any]] | None = None,
+) -> Worker: ...
+@overload
+def agent_worker[M: BaseModel](
+    *,
+    prompt: Callable[[Ctx], str | Template],
+    answer: Callable[..., Prompt[M]],
+    read: Callable[[Trajectory[M], ToolLog], Evidence],
+    repairs: int = REPAIRS,
+    needs: frozenset[str] = frozenset(),
+    decide_for: Callable[[frozenset[str]], Decide] | None = None,
+    tools: Mapping[str, Tool[Any, Any]] | None = None,
+    act: Act | None = None,
+    max_iters: int = 6,
+    bind: Callable[[Ctx, ToolLog], Mapping[str, Any]] | None = None,
+) -> Worker: ...
+def agent_worker(
+    *,
+    prompt: Callable[[Ctx], str | Template],
+    answer: Callable[..., Prompt[Any]] | None = None,
+    repairs: int | None = None,
+    needs: frozenset[str] = frozenset(),
+    decide_for: Callable[[frozenset[str]], Decide] | None = None,
+    tools: Mapping[str, Tool[Any, Any]] | None = None,
+    act: Act | None = None,
+    max_iters: int = 6,
+    read: Callable[[Trajectory[Any], ToolLog], Evidence] | None = None,
     bind: Callable[[Ctx, ToolLog], Mapping[str, Any]] | None = None,
 ) -> Worker:
     """A state's worker as a `run_agent` loop: the two grains composed, as the package
@@ -113,11 +157,11 @@ def agent_worker(
     test plugs in a scripted one, and the substrate never learns a vendor's name.
 
     **`tools` is what makes the loop compose with a real table.** Without it every action is
-    checkpointed as a `ToolResult`, one string field, so a tool returning the
-    resulting workspace fails validation on a durable engine, and a state's edits never reach the
-    commit. With it, `typed_act` yields each tool's declared result schema and records what came
-    back. The masking question is untouched: `tools` says what a name MEANS, `decide_for` says
-    what a turn may name, and the two are different seams on purpose.
+    checkpointed as a `ToolResult`, one string field, so a tool returning the resulting workspace
+    fails validation on a durable engine, and a state's edits never reach the commit. With it,
+    each visit's `Toolbox` yields each tool's declared result schema and records what came back,
+    and `act` takes the names it does not declare. `tools` says what a name means, and
+    `decide_for` what a turn may name.
 
     `read` turns the loop's output into `Evidence`, and it is a parameter because the map is
     domain knowledge: which result carried the workspace, whether one of them was a measurement.
@@ -129,9 +173,16 @@ def agent_worker(
 
     `bind` reads the visit's `Ctx` and the results so far into the arguments `typed_act` merges
     into each tool call, such as the workspace a stateless tool edits. It binds only `tools`, so
-    passing it without them is refused."""
+    passing it without them is refused.
+
+    `answer` and `repairs` type the loop's answer as `run_agent` does, and its evidence binds the
+    visit's tools. A typed answer reaches the machine only through `read`, so a typed worker
+    without one is refused. A visit whose repairs run out raises `RepairsExhausted`, a refusal,
+    and one that escapes raises its cancel."""
     if bind is not None and not tools:
         raise ValueError("`bind` merges arguments into `tools`' calls, and no `tools` were given")
+    if answer is not None and read is None:
+        raise ValueError("a typed answer reaches the machine through `read`, and none was given")
     to_evidence = read or _answer_only
 
     def worker(ctx: Ctx) -> Any:
@@ -142,9 +193,23 @@ def agent_worker(
         # ordinary case rather than an exotic one.
         log = ToolLog()
         bound = partial(bind, ctx, log) if bind is not None else None
-        dispatch = typed_act(tools, log, fallback=act, bind=bound) if tools else act
-        trajectory = yield from run_agent(prompt(ctx), max_iters, decide=decide, act=dispatch)
-        return to_evidence(trajectory, log)
+        toolbox = Toolbox(tools, log, bound, act) if tools else None
+        ending: Ending[Any] = yield from run_in(
+            toolbox,
+            prompt(ctx),
+            max_iters,
+            answer=answer,
+            repairs=repairs,
+            decide=decide,
+            act=act,
+        )
+        match ending:
+            case Trajectory() as trajectory:
+                return to_evidence(trajectory, log)
+            case Escaped() | Exhausted() as stopped:  # a cancel or a refusal, never evidence
+                return unwrap(stopped)
+            case unreachable:
+                assert_never(unreachable)
 
     return worker
 

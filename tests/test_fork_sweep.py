@@ -22,8 +22,9 @@ from _conformance import refusals_of
 from _spawning import sqlite_spawner
 from pydantic import BaseModel
 
-from effective.api import append_ledger, ask_llm, await_event
+from effective.api import append_ledger, ask_llm, await_event, call_tool
 from effective.budget import Grant, depth_grant_name
+from effective.cancel import Cancelled
 from effective.checkpoints import read_sqlite_conn
 from effective.combinators import Again, Chain, respawn
 from effective.cost import MeteredInterpreter, Usage
@@ -374,6 +375,82 @@ def test_a_refused_child_answers_instead_of_hanging_its_parent(tmp_path, sqlite_
 
     # and the refused lineage is NOT sealed, so no consumer reads its marginal
     assert [k for _, k, _ in _rows(app, "fork-bad")] == ["forked"]
+
+
+def _stopping_wf(message_id: str):
+    """`decision_wf`'s prefix, and a tail whose tool is cancelled while it runs on a reject."""
+    yield from append_ledger(
+        LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
+    )
+    approval = yield from await_event(f"review:{message_id}", dict)
+    if approval["decision"] == "reject":
+        yield from call_tool("stop", {}, str)
+    return approval["decision"]
+
+
+def _stopping_domain() -> MeteredInterpreter:
+    return MeteredInterpreter(
+        llm=lambda _op: ("unused", Usage()), tools=lambda _op: Cancelled(partial="half")
+    )
+
+
+def test_a_child_cancelled_in_its_tail_answers_its_parent_as_a_cancel(tmp_path, sqlite_app):
+    app = sqlite_app(str(tmp_path / "cancelled.db"))
+    message_id = new_message_id()
+
+    @app.register_task("base")
+    def base_task(params, ctx):
+        ledger = SqliteLedger(app.conn, params["run_id"], app.write_lock)
+        return DurableHandler(ctx, _stopping_domain(), ledger=ledger).run(
+            lambda: _stopping_wf(message_id)
+        )
+
+    base_id = app.spawn("base", {"run_id": "r-base"})
+    app.run_until_result(base_id)
+    app.emit_event(f"review:{message_id}", {"decision": "approve"})
+    assert app.run_until_result(base_id).state == "completed"
+
+    app.register_task("child")(
+        partial(
+            run_fork_as_task,
+            workflow=lambda _child_run_id: _stopping_wf(message_id),
+            domain=_stopping_domain(),
+            allow=frozenset({"stop"}),
+            hypothetical_ledger=lambda rid: SqliteLedger(
+                app.conn, rid, app.write_lock, hypothetical=True
+            ),
+            read_base=lambda tid: read_sqlite_conn(app.conn, tid),
+            read_base_params=lambda tid: read_sqlite_params(app.conn, tid),
+        )
+    )
+
+    @app.register_task("sweep")
+    def sweep_task(params, ctx):
+        def sweep():
+            handle = yield from spawn_fork(
+                "child",
+                child_run_id="fork-reject",
+                base_task_id=base_id,
+                through=f"ledger;extracted:{message_id}",
+                fork_point=compose_key(t"review:{Segment(message_id)}"),
+                forked_from="r-base",
+                forked_at_event=f"extracted:{message_id}",
+                delta={"decision": "reject"},
+            )
+            return (yield from join_fork(handle))
+
+        domain = MeteredInterpreter(
+            llm=lambda _op: ("unused", Usage()),
+            tools=make_tool_runner({}, agents={SPAWN_TOOL: spawn_tool(sqlite_spawner(app))}),
+        )
+        return DurableHandler(ctx, domain).run(sweep)
+
+    snap = app.run_until_result(app.spawn("sweep", {"run_id": "r-sweep"}), max_batches=256)
+
+    assert snap is not None
+    assert snap.state == "completed", snap
+    assert ForkOutcome.model_validate(snap.result).answer == Cancelled(partial="half")
+    assert [k for _, k, _ in _rows(app, "fork-reject")] == ["forked"]
 
 
 def test_an_unjoined_spawn_is_a_detached_lineage_that_still_runs(tmp_path, sqlite_app):

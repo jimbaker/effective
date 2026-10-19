@@ -94,8 +94,10 @@ def op_digest(op: DomainOp[Any], identity: str) -> str:
     of a type with no encoding raises `TypeError` before anything is asked. `identity` names the
     answerer, a model for one, since no op carries it."""
     match op:
-        case AskLLM(messages=messages, response_schema=schema):
+        case AskLLM(messages=messages, response_schema=schema, answer_schema=None):
             content: Any = _encoded(messages)
+        case AskLLM(messages=messages, response_schema=schema, answer_schema=answer):
+            content = _encoded({"messages": messages, "answer": answer})
         case Judge(state=state, questions=questions, response_schema=schema):
             content = _encoded({"state": state, "questions": questions})
         case CallTool(name=name, args=args, result_schema=schema):

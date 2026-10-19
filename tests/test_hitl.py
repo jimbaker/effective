@@ -21,7 +21,7 @@ def make_decide():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(script)
 

@@ -169,14 +169,15 @@ def delegating(
     """WORK that runs `child` first, then works on its goal with the child's conclusion cited.
 
     `under` is this run's own placement, which the child's extends by the state and visit running
-    it. The child runs under `committing`, so a refused child is committed before its refusal
-    climbs through this visit. The citation's address is the child's outcome row, as the child's
-    run reported it."""
+    it. The child runs under `committing` inside its scope, so a refused or cancelled child is
+    committed before its stop climbs: a cancel crosses no scope, and a `committing` outside it
+    would never see one. The citation's address is the child's outcome row, as the child's run
+    reported it."""
     inner = work_worker(turns, pins)
 
     def worker(ctx: Ctx[Work]) -> Effect[Evidence]:
         placed = running_under(under, ctx)
-        below = yield from committing(lambda: scoped(DEEPER, lambda: child(placed)))
+        below = yield from scoped(DEEPER, lambda: committing(lambda: child(placed)))
         concluded = cite(below["summary"], Key.parse(below["outcome"]))
         return (yield from inner(replace(ctx, goal=t"{ctx.goal}\nbelow: {concluded}")))
 

@@ -15,9 +15,22 @@ from dataclasses import dataclass
 from functools import lru_cache
 from itertools import chain, count, groupby
 from string.templatelib import Interpolation, Template
-from typing import Any, Literal, Never, Protocol, assert_never, cast, get_args, runtime_checkable
+from typing import (
+    Any,
+    Literal,
+    Never,
+    Protocol,
+    assert_never,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+    runtime_checkable,
+)
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, RootModel, TypeAdapter
+
+from effective.ops import CompositionRefused
 
 
 class Output:
@@ -502,9 +515,8 @@ def _walk(
         seg_role, seg_cache = _scoped(directive, role, cache)
         seam_key = item.expression
         # Set by every arm, and read once below: a `:data` hole quarantines a value from outside
-        # the prompt, and composition is the prompt's own structure. Naming it HERE rather than in
-        # a second function is the fix for a drift a review found twice, once by adding a class
-        # pattern and once by adding a guarded capture that a source-reading test could not see.
+        # the prompt, and composition is the prompt's own structure. Naming it HERE keeps a new
+        # class pattern or guarded capture from drifting away from a second function's copy.
         composed: str | None = None
         match item.value:
             case Template() as sub:
@@ -656,24 +668,28 @@ class Message:
 @dataclass(frozen=True)
 class Prompt[S]:
     """The typed result of ``render``: the context (``messages``), the decode
-    spec (``channels``), the ``seams`` surface, and the *declared* output signature
-    ``S``. ``resolve`` recovers ``S`` end-to-end, so a composed prompt stays
-    ty-legible even though the underlying ``Template`` is untyped."""
+    spec (``channels``), the ``seams`` surface, the *declared* output signature
+    ``S``, and the ``form_gates`` it carries. ``resolve`` recovers ``S`` end-to-end, so a
+    composed prompt stays ty-legible even though the underlying ``Template`` is untyped."""
 
     messages: list[Message]
     channels: dict[str, Channel[Any]]
     seams: dict[str, str]
     output: type[S]
+    form_gates: tuple[FormGate, ...] = ()
 
     def resolve(self, response: object, *, form_gates: Sequence[FormGate] = ()) -> S | Repair:
         """Resolve the channels (field + form-gate), then build and validate the
         declared ``output`` model. A field, form-gate, or model-level breach is a
-        ``Repair``, uniformly re-promptable, and so is an answer that is not a mapping."""
+        ``Repair``, uniformly re-promptable, and so is an answer that is not a mapping.
+        The gates the prompt carries run first, then the caller's."""
         # lint: totality(coercion): a model's raw answer is untyped, so anything but a mapping
         # of fields is a Repair to re-prompt with.
         match response:
             case Mapping():
-                values = _resolve_channels(self.channels, response, form_gates)
+                values = _resolve_channels(
+                    self.channels, response, (*self.form_gates, *form_gates)
+                )
             case _:
                 return Repair("the answer is not a mapping of field names to values")
         if isinstance(values, Repair):
@@ -703,13 +719,17 @@ def check_channels(channels: Mapping[str, Channel[Any]], output: type[Any]) -> N
 
 
 def render[S](
-    template: Template, *, output: type[S], registry: SkillResolver | None = None
+    template: Template,
+    *,
+    output: type[S],
+    registry: SkillResolver | None = None,
+    form_gates: Sequence[FormGate] = (),
 ) -> Prompt[S]:
     """The channel processor: a function on ``Template`` (tdom's ``html(t"…")``,
     psycopg3's ``execute(t"…")``), aimed at the context DSL. Walk the strings as
     prose and the interpolations as typed channels / inputs, and produce a typed
-    ``Prompt[S]``. ``registry`` resolves any ``Skill`` nodes (their disclosed
-    bodies splice through the same composition path). It performs no I/O, so a
+    ``Prompt[S]`` carrying ``form_gates``. ``registry`` resolves any ``Skill`` nodes (their
+    disclosed bodies splice through the same composition path). It performs no I/O, so a
     workflow calls it between yields; the determinism boundary holds for values
     whose ``__format__`` renders the same bytes on every run.
 
@@ -732,4 +752,81 @@ def render[S](
                 assert_never(unreachable)  # pragma: no cover - `ty` proves this arm dead
     messages = list(_coalesce(segments))  # raises CacheOrderError before the signature check
     check_channels(channels, output)
-    return Prompt(messages=messages, channels=channels, seams=seams, output=output)
+    return Prompt(
+        messages=messages,
+        channels=channels,
+        seams=seams,
+        output=output,
+        form_gates=tuple(form_gates),
+    )
+
+
+type ContractFault = Literal["unevaluable", "not-a-prompt", "root-model", "aliased", "returned"]
+
+_CONTRACT_FAULTS: dict[ContractFault, str] = {
+    "unevaluable": "has a return annotation that does not evaluate",
+    "not-a-prompt": "must be annotated to return Prompt[M] for a pydantic model M",
+    "root-model": "declares a RootModel, which has no fields for channels to fill",
+    "aliased": "declares a model with a field alias, which channels do not translate",
+    "returned": "returned a Prompt whose output is not the model it declares",
+}
+
+
+class ContractRefused(ChannelError, CompositionRefused):
+    """An answer contract an answer cannot be resolved through. `contract` is the function's
+    qualified name and `declared` what it declared or returned, rendered. A composition refused,
+    so a run that raises it fails on its first attempt."""
+
+    def __init__(self, contract: str, fault: ContractFault, declared: str) -> None:
+        super().__init__(contract, fault, declared)
+        self.contract = contract
+        self.fault: ContractFault = fault
+        self.declared = declared
+
+    def __str__(self) -> str:
+        return (
+            f"the answer contract {self.contract} {_CONTRACT_FAULTS[self.fault]}: {self.declared}"
+        )
+
+
+def answer_model(contract: Callable[..., Prompt[Any]]) -> type[BaseModel]:
+    """The model ``M`` a contract's return annotation declares as ``Prompt[M]``.
+
+    ``M`` is a pydantic model whose fields the channels fill by name, so a ``RootModel`` and a
+    field alias are refused here, before any answer exists to repair."""
+    name = _named(contract)
+    try:
+        declared = get_type_hints(contract).get("return")
+    except NameError as unresolved:
+        raise ContractRefused(name, "unevaluable", str(unresolved)) from unresolved
+    match get_origin(declared), get_args(declared):
+        case (origin, (type() as model,)) if origin is Prompt and issubclass(model, BaseModel):
+            pass
+        case _:
+            raise ContractRefused(name, "not-a-prompt", repr(declared))
+    if issubclass(model, RootModel):
+        raise ContractRefused(name, "root-model", model.__qualname__)
+    if aliased := sorted(
+        field
+        for field, info in model.model_fields.items()
+        if any(
+            alias not in (None, field)
+            for alias in (info.alias, info.validation_alias, info.serialization_alias)
+        )
+    ):
+        raise ContractRefused(name, "aliased", ", ".join(aliased))
+    return model
+
+
+def _named(contract: Callable[..., Any]) -> str:
+    return getattr(contract, "__qualname__", repr(contract))
+
+
+def answering[M](
+    contract: Callable[..., Prompt[Any]], prompt: Prompt[Any], model: type[M]
+) -> Prompt[M]:
+    """``prompt``, the contract's return, checked to declare ``model``, the output its
+    annotation names."""
+    if prompt.output is not model:
+        raise ContractRefused(_named(contract), "returned", repr(prompt.output))
+    return cast(Prompt[M], prompt)

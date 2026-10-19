@@ -40,7 +40,13 @@ from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Index, Segment, compose_key
 from effective.ops import AwaitEvent, Step
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+)
 from effective.skills import Pin
 
 # ------------------------------------------------------------- run_code + code_act
@@ -80,7 +86,7 @@ def scripted(*turns: AssistantTurn):
     """A `decide` that answers each turn from `turns` in order, yielding no op."""
     script = iter(turns)
 
-    def decide(messages, level):
+    def decide(request):
         yield from ()
         return next(script)
 

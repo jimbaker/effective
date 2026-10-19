@@ -222,7 +222,7 @@ All under `src/effective/` unless noted.
 | combinators: `recurse`, `route`, `descend`, `fixpoint` and `mutual` (loops in constant stack), `respawn` (a long loop as a chain of tasks), `hoisted` (a skill activated once above a fan-out), and sandboxed code as an effect (`run_code`, on Pydantic Monty) | `combinators.py`, `code.py`, `monty.py` |
 | judgments: `judge` and `select` ask typed questions from a t-string | `judgment.py`, `api.py` |
 | layers: retry, permission, budgets and telemetry as generator middleware, and `govern` to compose them | `layers.py`, `govern.py` |
-| the ReAct agent loop, with interrupts, steering and in-flight cancellation | `react.py`, `interrupts.py`, `steering.py`, `cancel.py` |
+| the ReAct agent loop, with a typed answer repaired inside the loop, interrupts, steering and in-flight cancellation | `react.py`, `interrupts.py`, `steering.py`, `cancel.py` |
 | child tasks, and a parent that hears how its child ended | `spawning.py` |
 | permission: a fail-closed cascade of rules and a human | `permission.py`, `parked.py` |
 | cost: metered model calls, spend caps that survive a crash, a cache | `cost.py`, `budget.py`, `spend.py`, `cache.py` |

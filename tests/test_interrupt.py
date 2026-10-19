@@ -12,7 +12,13 @@ Both are recorded `CallTool` polls, so the winner is a checkpoint and replay re-
 
 from effective import RecordingHandler, ReplayHandler
 from effective.compose import Interrupted, tool_interrupt
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+)
 
 ANSWER = AssistantTurn(thought="redirected", answer="answered per the interrupt")
 ACT_SEARCH = AssistantTurn(thought="act", tool=ToolRequest(name="search", args={}))
@@ -23,7 +29,8 @@ def counting_decide(calls, *turns):
     iteration is observable — proving a pre-turn interrupt skips the model call)."""
     script = iter(turns)
 
-    def decide(messages, level):
+    def decide(request):
+        level = request.level
         yield from ()
         calls.append(level.depth)
         return next(script)
@@ -82,7 +89,7 @@ def test_quiet_channel_leaves_loop_behavior_unchanged():
             ]
         )
 
-        def decide(messages, tag):
+        def decide(request):
             yield from ()
             return next(script)
 
@@ -121,4 +128,5 @@ def test_interrupted_trajectory_replays_deterministically():
     )
 
     assert replayed == live
+    assert isinstance(replayed, Trajectory)
     assert replayed.answer == "answered per the interrupt"

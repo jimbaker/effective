@@ -22,6 +22,7 @@ from _conformance import Fault, FaultPosition, at_every_op
 from _fence import within
 
 from effective.api import Effect
+from effective.cancel import Cancelled
 from effective.combinators import fix
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool, DomainOp
@@ -83,6 +84,19 @@ def recursive(run_id: str, depth: int = DEPTH) -> Effect[dict[str, Any]]:
     return (yield from fix(open_coder)(run_id, "the root goal", depth, None))
 
 
+class CancelledBelow(Reporting):
+    """The root reports, and the level it delegates to has its model call cancelled."""
+
+    def run(self, op: DomainOp[Any]) -> Any:
+        match op:
+            case AskLLM(messages=messages) if any(
+                m["role"] == "user" and m["content"].startswith("step") for m in messages
+            ):
+                return Cancelled(partial="half")
+            case _:
+                return super().run(op)
+
+
 def run_recursive(backend, fault: Fault, depth: int = DEPTH, model=None):
     """`register`'s third positional is the DOMAIN, so the depth binds into the factory.
 
@@ -100,6 +114,16 @@ def test_a_coder_recurses_to_depth_and_each_level_is_addressed(backend):
     assert snap.state == "completed", snap
     assert snap.result["passed"]
     assert snap.result["summary"] == "the root goal"
+
+
+def test_a_delegated_child_whose_loop_escapes_is_committed_before_its_cancel_climbs(backend):
+    """A cancel crosses no scope, so the child's own frame commits it, and the task stops at it."""
+    run_id, snap = run_recursive(backend, Fault(), depth=1, model=CancelledBelow)
+
+    assert snap.state == "failed", snap
+    assert "RunCancelled" in str(snap.failure), snap.failure
+    parked = [row.get("reason") for row in backend.ledger_payloads(run_id)]
+    assert parked.count("cancelled") == 1, parked
 
 
 def test_every_level_writes_its_own_ledger_address(backend):

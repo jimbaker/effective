@@ -160,27 +160,38 @@ class Crashed:
 
 def stopped_at(
     raised: Exception, refusals: tuple[type[Exception], ...]
-) -> Refusal | Crashed | None:
-    """Where a child that raised `raised` stopped, for its task body to answer or re-raise.
+) -> Refusal | Cancelled | Crashed | None:
+    """Where a child that raised `raised` stopped, for its task body to answer or re-raise. A
+    crash outranks a refusal, and a refusal outranks a cancel.
 
-    A `Refusal` when every leaf is one of `refusals`. When refusals were raised beside a crash, and
-    no leaf is of a type a retry would raise again, every leaf with the first crash leading: a
-    refusal alone would have completed the child, so the crash is what its worker retries and
-    reports. `None` when `raised` goes on to the worker as it is."""
+    | the leaves of `raised`                     | stopped at                          |
+    |--------------------------------------------|-------------------------------------|
+    | refusals and cancels, one a refusal        | `Refusal`, over the refusals        |
+    | cancels only                               | `Cancelled`, the partials in order  |
+    | a crash beside refusals, none unretryable  | `Crashed`, the first crash leading  |
+    | anything else                              | `None`: it goes on as it is         |
+
+    A refusal or a cancel alone would have completed the child, so a crash beside refusals is what
+    its worker retries and reports."""
     stopped = list(leaves(raised))
-    answers = [isinstance(leaf, refusals) for leaf in stopped]
-    match all(answers), any(answers), unretryable(raised):
-        case (True, _, _):
-            return Refusal(refusals=[described(leaf) for leaf in stopped])
-        case (False, True, None):
-            cause = stopped[answers.index(False)]
+    refused = [leaf for leaf in stopped if isinstance(leaf, refusals)]
+    cancels = [leaf for leaf in stopped if isinstance(leaf, OpCancelled)]
+    crashes = [leaf for leaf in stopped if not isinstance(leaf, (*refusals, OpCancelled))]
+    match crashes, refused, unretryable(raised):
+        case [], [_, *_], _:
+            return Refusal(refusals=[described(leaf) for leaf in refused])
+        case [], [], _:
+            return Cancelled(partial="\n".join(cancel.partial for cancel in cancels))
+        case [cause, *_], [_, *_], None:
             others = [leaf for leaf in stopped if leaf is not cause]
             return Crashed(BaseExceptionGroup("a crash raised beside refusals", [cause, *others]))
         case _:
             return None
 
 
-def answer_with(ctx: Any, params: Mapping[str, Any], answer: Returned | Refusal | Failed) -> Any:
+def answer_with(
+    ctx: Any, params: Mapping[str, Any], answer: Returned | Refusal | Failed | Cancelled
+) -> Any:
     """Answer the parent that spawned this task, if one did. Returns the answer as plain JSON."""
     payload = ChildAnswer(answer=answer).model_dump(mode="json")
     if DONE_EVENT_PARAM in params:
@@ -198,25 +209,27 @@ def run_child(
     ctx: Any, params: Mapping[str, Any], handler: RunsTasks, program: Callable[[], Effect[Any]]
 ) -> Any:
     """Walk ``program`` as a spawned child and answer its parent, if it has one, with its value or
-    the refusals it stopped at.
+    the refusals or cancel it stopped at.
 
     Anything else propagates unchanged: the worker answers `Failed` when it fails the task for
-    good, and a crash beside a refusal is retried. A refusal raised bare or from a gather
-    classifies alike. A walk that ends at a generation boundary answers nobody: the successor
-    carries the same done event and answers when the chain finishes. Returns the task's own
+    good, and a crash beside a refusal is retried. A refusal or a cancel raised bare or from a
+    gather classifies alike. The task's state is the engine's view, whether it was stopped from
+    outside, and its answer is the program's: a program that stopped at a cancel completes. A walk
+    that ends at a generation boundary answers nobody: the successor carries the same done event
+    and answers when the chain finishes. Returns the task's own
     result, so a root with no parent reports what a child would."""
     try:
         match handler.run_task(program):
             case Continued(result=result):
                 return result
             case Finished(value=value):
-                answer: Returned | Refusal = Returned(value=value)
+                answer: Returned | Refusal | Cancelled = Returned(value=value)
             case unreachable:
                 assert_never(unreachable)
     except Exception as raised:
         match stopped_at(raised, REFUSALS):
-            case Refusal() as refusal:
-                answer = refusal
+            case Refusal() | Cancelled() as stopped:
+                answer = stopped
             case Crashed(errors=errors):
                 raise errors from None
             case None:

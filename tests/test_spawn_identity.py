@@ -29,9 +29,10 @@ from effective.spawning import (
     ChildAnswer,
     ChildFailed,
     Failed,
+    Returned,
     answer_parent,
+    answer_with,
     join_answer,
-    join_child,
     run_child,
     spawn_child,
 )
@@ -55,7 +56,7 @@ def completes(backend, task_id: Any) -> None:
 
 def child(params, ctx):
     """A child that answers the parent waiting on it through the substrate's child side."""
-    answer_parent(ctx, params, {"answer": "ok"})
+    answer_with(ctx, params, Returned(value="ok"))
     return "ok"
 
 
@@ -398,7 +399,7 @@ def test_a_viewer_replays_a_refused_spawn_from_its_record(backend):
 
 def answering_with_its_task(params, ctx):
     """A child whose answer is its own task id, so a parent can tell whose answer it got."""
-    answer_parent(ctx, params, {"answer": str(ctx.task_id)})
+    answer_with(ctx, params, Returned(value=str(ctx.task_id)))
     return "ok"
 
 
@@ -542,7 +543,7 @@ def test_children_spawned_twice_under_one_name_each_answer_their_parent(backend)
         second = yield from spawn_child(child_task, "c", {})
         answers = []
         for spawned in (first, second):
-            answers.append((yield from join_child(spawned, dict))["answer"])
+            answers.append((yield from join_answer(spawned)))
         return answers
 
     backend.register(parent, workflow, spawning(backend), Fault(), layers=[])

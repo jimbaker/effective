@@ -48,9 +48,13 @@ from agent.bank import (
 from effective.checkpoints import Checkpoint, keys, read_sqlite_task
 from effective.keys.grammar import KeySyntaxError
 
-pytestmark = pytest.mark.skipif(
-    not BENCHES.exists(), reason="banked corpus absent (gitignored; `just rebank`)"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not BENCHES.exists(), reason="banked corpus absent (gitignored; `just rebank`)"
+    ),
+    pytest.mark.xdist_group("banked-corpus"),
+]
+"""One worker runs the file: opening a banked store writes its schema to it."""
 
 _STORES = all_stores()
 _CURRENT = [p for p in _STORES if is_current(p)]

@@ -28,7 +28,14 @@ import pytest
 from effective import RecordingHandler, ReplayHandler
 from effective.keys.grammar import parse
 from effective.ops import CompositionRefused, Unretryable
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent, tool_key
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+    tool_key,
+)
 
 pytestmark = pytest.mark.adversarial
 
@@ -53,7 +60,7 @@ def _decide(bad_name: str):
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(script)
 

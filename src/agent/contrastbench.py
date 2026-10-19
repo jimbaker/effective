@@ -31,7 +31,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -55,7 +55,17 @@ from effective.interpreters.openai import (
     usage_from_openai,
 )
 from effective.monty import MontyEngine, execute_tool
-from effective.react import AssistantTurn, ToolRequest, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    Ending,
+    Escaped,
+    Exhausted,
+    ToolRequest,
+    Trajectory,
+    load_ending,
+    run_agent,
+    unwrap,
+)
 
 ARMS = ("stuff", "repl", "structured", "structured-text", "combinator")
 SIZES: Mapping[str, int] = {"S": 150, "L": 4000}
@@ -827,7 +837,7 @@ def run_structured(
         if snap is None or snap.state != "completed":
             failure = snap.failure if snap is not None else "no snapshot"
             return ArmOutcome(None, 0, 0, interp.sandbox_errors, f"error: {failure}")
-        traj = Trajectory.model_validate(snap.result)
+        traj: Ending[Any] = load_ending(snap.result)
         cells = sum(1 for s in traj.steps if s.tool is not None)
         sub = (
             {
@@ -838,12 +848,21 @@ def run_structured(
             if subcalls is not None
             else {"calls": 0, "ptok": 0, "ctok": 0}
         )
+        match traj:
+            case Trajectory(answer=text, stop_reason=stop_reason):
+                answer = text or None
+            case Escaped():
+                answer, stop_reason = None, "escaped"
+            case Exhausted():
+                answer, stop_reason = None, "exhausted"
+            case unreachable:
+                assert_never(unreachable)
         return ArmOutcome(
-            answer=traj.answer or None,
+            answer=answer,
             turns=len(traj.steps),
             cells=cells,
             sandbox_errors=interp.sandbox_errors,
-            stop_reason=traj.stop_reason,
+            stop_reason=stop_reason,
             sub=sub,
         )
     finally:
@@ -899,7 +918,7 @@ def replay_structured(
             ctx = SqliteTaskContext(app.conn, task_ids[0], app.write_lock)
             params = json.loads(stored[0][1])
             interp = MeteredInterpreter(llm=explode_llm, tools=explode_tool)
-            traj = Trajectory.model_validate(
+            traj = load_ending(
                 to_jsonable_python(
                     DurableHandler(ctx, interp, params=params).run(
                         # The SAME wrap the record path used — replay re-derives the keys by
@@ -915,7 +934,7 @@ def replay_structured(
                     )
                 )
             )
-            return traj.answer or None
+            return unwrap(traj) or None
         except Exception:
             return None
     finally:

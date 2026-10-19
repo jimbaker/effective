@@ -16,7 +16,7 @@ from effective.contexts import LocalCtx
 from effective.cost import CostBudget, MeteredInterpreter, Usage
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner
-from effective.react import Trajectory, run_agent
+from effective.react import load_ending, run_agent, unwrap
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,8 @@ def evaluate(
         handler = DurableHandler(ctx=LocalCtx(), domain=interp)
         try:
             raw = handler.run(lambda t=task: run_agent(t.prompt, max_iters=max_iters))
-            traj = Trajectory.model_validate(raw)
-            answer, turns = traj.answer, len(traj.steps)
+            traj = load_ending(raw)
+            answer, turns = unwrap(traj), len(traj.steps)
         except Exception as exc:
             answer, turns = f"[error: {exc}]", 0
         results.append(

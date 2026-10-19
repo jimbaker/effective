@@ -5,17 +5,28 @@ from typing import Any
 import pytest
 
 from effective import RecordingHandler
+from effective.api import Effect
 from effective.interrupts import (
     EVERY_PHASE,
     Escape,
     Interrupted,
+    Phase,
     Quiet,
     Redirect,
     Signal,
     signal_of,
     tool_interrupt,
 )
-from effective.react import ESCAPED, AssistantTurn, Ran, ToolRequest, ToolResult, run_turns
+from effective.react import (
+    ESCAPED,
+    AssistantTurn,
+    Escaped,
+    Ran,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_turns,
+)
 
 ACT = AssistantTurn(thought="look", tool=ToolRequest(name="ls"))
 ANSWER = AssistantTurn(thought="done", answer="answered")
@@ -43,6 +54,13 @@ POLL_KEYS = {
     (1, "act"): "d:1;tool:interrupt,act",
 }
 """The canned key of each poll a two-turn run makes, by depth and phase."""
+
+POLL_NAMES = {
+    "pre": "tool:interrupt,pre",
+    "post": "tool:interrupt,post",
+    "act": "tool:interrupt,act",
+}
+"""The authored name of each phase's poll, which an escape it reports carries."""
 
 
 def poll_key(depth: int, phase: str) -> str:
@@ -114,10 +132,34 @@ def test_an_escape_ends_the_run_at_the_phase_it_arrives(phase: str):
     responses[poll_key(0, phase)] = Interrupted(escape=True)
     ran, handler = run(responses)
     recorded, transcript = ESCAPES[phase]
-    assert ran.trajectory.stop_reason == "escaped"
-    assert ran.trajectory.answer == ""
     assert keys(handler) == recorded
     assert [(m["role"], m["content"]) for m in ran.messages] == transcript
+    dropped = "look" if phase == "post" else ""  # the thought whose action never ran
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == (
+        "escape",
+        POLL_NAMES[phase],
+        dropped,
+    )
+
+
+def escape_at_once(_turn: int, _phase: Phase) -> Effect[Signal]:
+    """A poll that records nothing."""
+    yield from ()
+    return Escape()
+
+
+def test_an_escape_from_a_poll_that_records_nothing_has_no_name():
+    handler = RecordingHandler({})
+    ran = handler.run(
+        lambda: run_turns([{"role": "user", "content": "go"}], interrupt=escape_at_once)
+    )
+    assert isinstance(ran, Ran)
+    assert handler.trace == []
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == ("escape", None, "")
 
 
 def test_a_redirect_after_the_action_follows_its_observation():
@@ -129,7 +171,9 @@ def test_a_redirect_after_the_action_follows_its_observation():
         "d:0;tool:interrupt,act": Interrupted(redirect="only txt files"),
     }
     ran, _ = run(responses)
-    assert ran.trajectory.stop_reason == "finish"
+    ending = ran.trajectory
+    assert isinstance(ending, Trajectory)
+    assert ending.stop_reason == "finish"
     assert [(m["role"], m["content"]) for m in ran.messages][2:4] == [
         ("tool", "a b"),
         ("user", "[interrupt] only txt files"),

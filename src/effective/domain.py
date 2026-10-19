@@ -22,8 +22,12 @@ class AsksModel:
 @final
 @dataclass(frozen=True)
 class AskLLM[T](AsksModel):
+    """A model call. `answer_schema` is the JSON schema a typed run's answer takes, which an
+    interpreter asks the provider to follow; `None` for an answer in text."""
+
     messages: Any  # phase 0: opaque; phase 1+: list[Message] / PEP 750 Template
     response_schema: type[T]
+    answer_schema: dict[str, Any] | None = None
 
 
 @final

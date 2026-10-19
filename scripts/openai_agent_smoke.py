@@ -21,7 +21,7 @@ from effective.cost import BudgetExceeded, CostBudget, MeteredInterpreter
 from effective.domain import CallTool
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import OpenAITurnCaller
-from effective.react import ToolResult, Trajectory, run_agent
+from effective.react import Escaped, ToolResult, Trajectory, load_ending, run_agent
 
 BUDGET_USD = 0.05  # hard ceiling for the run (user limit: <= $1)
 MODEL = "gpt-5-nano"
@@ -85,9 +85,13 @@ def main() -> None:
     print(f"Q: {QUESTION}\n")
     try:
         result = handler.run(lambda: run_agent(QUESTION, max_iters=4))
-        traj = Trajectory.model_validate(result)
-        print(f"answer: {traj.answer}")
-        print(f"stop_reason: {traj.stop_reason}")
+        traj = load_ending(result)
+        match traj:
+            case Trajectory(answer=answer, stop_reason=stop_reason):
+                print(f"answer: {answer}")
+                print(f"stop_reason: {stop_reason}")
+            case Escaped(origin=origin):
+                print(f"escaped: {origin}")
         for i, s in enumerate(traj.steps):
             act = f"{s.tool.name}({s.tool.args})" if s.tool else "(final)"
             print(f"  step {i}: {act} -> {s.observation}")

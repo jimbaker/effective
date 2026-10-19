@@ -236,8 +236,14 @@ def _domain_effect(op: DomainOp[Any]) -> Any:
     match op:
         case CallTool(name=name, args=args):
             return {"tool": name, "args": _shown(args)}
-        case AskLLM(messages=messages, response_schema=schema):
+        case AskLLM(messages=messages, response_schema=schema, answer_schema=None):
             return {"request": content_digest(_shown(messages)), "schema": _spelled(schema)}
+        case AskLLM(messages=messages, response_schema=schema, answer_schema=answer):
+            return {
+                "request": content_digest(_shown(messages)),
+                "schema": _spelled(schema),
+                "answer": content_digest(_shown(answer)),
+            }
         case Judge(state=state, questions=questions, response_schema=schema):
             request = content_digest(_shown({"state": state, "questions": questions}))
             return {"request": request, "schema": _spelled(schema)}

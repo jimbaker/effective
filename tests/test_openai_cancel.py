@@ -7,7 +7,6 @@ import inspect
 import json
 import os
 import threading
-import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -39,6 +38,7 @@ class _Stream:
         self.reading = threading.Event()
         self.closed = threading.Event()
         self.release = threading.Event()
+        self.unblocked = threading.Event()
 
     def __enter__(self) -> _Stream:
         return self
@@ -52,6 +52,7 @@ class _Stream:
         if self.hang:
             self.reading.set()
             self.release.wait(10)
+            self.unblocked.set()
             raise ConnectionError("the connection was reset")
 
     def close(self) -> None:
@@ -99,13 +100,12 @@ def test_a_cancel_closes_the_stream_and_answers_what_arrived():
 
     pressed = threading.Thread(target=face, name="face")
     pressed.start()
-    began = time.monotonic()
     turn, usage = caller(_Client(stream), token)(ASK)
-    returned_in = time.monotonic() - began
+    held = not stream.unblocked.is_set()
     pressed.join()
     stream.release.set()
     assert turn == Cancelled(partial="hel")
-    assert returned_in < 5, "the op waited for a read the close cannot wake"
+    assert held, "the op waited for a read the close cannot wake"
     assert stream.closed.is_set()
     assert usage.prompt_tokens == 0
 
@@ -239,6 +239,8 @@ class _Provider:
         self.silent = threading.Event()
         self.resume = threading.Event()
         self.client_gone = threading.Event()
+        self.released = threading.Event()
+        self.spoke = threading.Event()
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -254,6 +256,7 @@ class _Provider:
                 if stall == "headers":
                     provider.silent.set()
                     provider.resume.wait(10)
+                    provider.released.set()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Transfer-Encoding", "chunked")
@@ -296,7 +299,8 @@ class _Provider:
                 threading.Event().wait(0.01)
         if stall == "silent":
             self.silent.set()
-            self.resume.wait(10)
+            self.resume.wait(SAFETY_NET)
+            self.spoke.set()
             for _ in range(20):
                 send(_delta("x"))
             return
@@ -307,21 +311,36 @@ class _Provider:
             self.resume.wait(10)
 
 
-def _lingering() -> tuple[int, int]:
+type Readers = tuple[set[threading.Thread], set[asyncio.Task[Any]]]
+
+SAFETY_NET = 60
+"""Seconds a wait in these pins allows for an event a passing run delivers at once: a join, a
+watched delta, a silent provider's resume. Only a run whose event never comes reaches it."""
+
+
+def _readers() -> Readers:
     """The threaded caller's reader threads, and the tasks on the asyncio callers' loop."""
 
-    async def tasks() -> int:
-        return len(asyncio.all_tasks()) - 1  # less this count's own task
+    async def tasks() -> set[asyncio.Task[Any]]:
+        return asyncio.all_tasks() - {asyncio.current_task()}
 
-    readers = sum(thread.name == "responses-stream" for thread in threading.enumerate())
-    return readers, shared_loop().run(tasks())
+    threads = {thread for thread in threading.enumerate() if thread.name == "responses-stream"}
+    return threads, shared_loop().run(tasks())
 
 
-def _within(seconds: float, condition: Any) -> bool:
-    deadline = time.monotonic() + seconds
-    while not condition() and time.monotonic() < deadline:
-        threading.Event().wait(0.01)
-    return condition()
+def _join(before: Readers) -> Readers:
+    """Join every reader started since `before`, and answer the ones still running."""
+    threads, tasks = _readers()
+    for thread in threads - before[0]:
+        thread.join(SAFETY_NET)
+
+    async def joined(started: set[asyncio.Task[Any]]) -> set[asyncio.Task[Any]]:
+        if started:
+            await asyncio.wait(started, timeout=SAFETY_NET)
+        return {task for task in started if not task.done()}
+
+    running = {thread for thread in threads - before[0] if thread.is_alive()}
+    return running, shared_loop().run(joined(tasks - before[1]))
 
 
 type Flavor = Literal["sync", "async"]
@@ -332,7 +351,9 @@ FLAVORS: list[Flavor] = ["sync", "async"]
 def _client(flavor: Flavor, provider: _Provider) -> Any:
     openai = pytest.importorskip("openai")
     kind = openai.OpenAI if flavor == "sync" else openai.AsyncOpenAI
-    return kind(base_url=provider.url, api_key="unused", max_retries=0)
+    # a worker stalled under load connects late, and no pin here is about the connect
+    timeout = openai.Timeout(600, connect=60)
+    return kind(base_url=provider.url, api_key="unused", max_retries=0, timeout=timeout)
 
 
 def _caller(flavor: Flavor, client: Any, token: CancelToken) -> ResponsesTurnCaller:
@@ -346,14 +367,23 @@ def _caller(flavor: Flavor, client: Any, token: CancelToken) -> ResponsesTurnCal
 def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(flavor: Flavor):
     """Measured by a review: with the reader blocked in `recv` when the cancel closed the stream,
     and the next call on the same client, the reader stayed asleep and the provider wrote its
-    whole reply. The face waits a moment after the silence so the reader is in that read; on a
-    machine too slow for that the test is weaker, never wrong."""
+    whole reply. The face waits until the reader has taken the first delta, then a moment more
+    so the reader is in that read; on a machine too slow for that the test is weaker, never
+    wrong."""
     provider = _Provider()
-    client = _client(flavor, provider)
-    before, token = _lingering(), CancelToken()
+    pooled = _client(flavor, provider)
+    taken, token = threading.Event(), CancelToken()
+    wrap = _Watched if flavor == "sync" else _AsyncWatched
+    seen: list[bool] = []
+
+    def stream(**kwargs: Any) -> _Watched:
+        return wrap(pooled.responses.stream(**kwargs), taken, DELTA)
+
+    client = SimpleNamespace(responses=SimpleNamespace(stream=stream))
+    before = _readers()
 
     def face() -> None:
-        provider.silent.wait(10)
+        seen.append(taken.wait(SAFETY_NET))
         threading.Event().wait(0.3)
         token.cancel()
 
@@ -362,11 +392,13 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
     try:
         turn, _ = _caller(flavor, client, token)(ASK)
         pressed.join()
+        assert seen == [True], "the face pressed Esc before the reader took the first delta"
         assert turn == Cancelled(partial=ANSWER[:5])
         following, _ = _caller(flavor, client, CancelToken())(ASK)
         assert isinstance(following, AssistantTurn)
         assert following.answer == "hello"
-        assert _within(1, lambda: _lingering() == before), "the reader outlived the cancel"
+        assert _join(before) == (set(), set()), "the reader outlived the cancel"
+        assert not provider.spoke.is_set(), "the reader ended only once the provider spoke"
     finally:
         provider.resume.set()
     assert provider.client_gone.wait(3), "the provider never heard the client leave"
@@ -374,24 +406,27 @@ def test_a_cancel_on_a_pooled_connection_ends_the_reader_and_tells_the_provider(
 
 
 class _Watched:
-    """The SDK's stream manager, with a signal once the reader has taken `response.completed`: set
-    when the reader asks for the event after it, so the reader has finished with that one."""
+    """The SDK's stream manager, with a signal once the reader has taken an event of one of
+    `types`: set when the reader asks for the event after it, so the reader has finished with that
+    one."""
 
-    def __init__(self, manager: Any, completed: threading.Event) -> None:
+    def __init__(self, manager: Any, completed: threading.Event, types: frozenset[str]) -> None:
         self.manager = manager
         self.completed = completed
+        self.types = types
 
     def __enter__(self) -> Any:
-        return _WatchedStream(self.manager.__enter__(), self.completed)
+        return _WatchedStream(self.manager.__enter__(), self.completed, self.types)
 
     def __exit__(self, *raised: object) -> Any:
         return self.manager.__exit__(*raised)
 
 
 class _WatchedStream:
-    def __init__(self, stream: Any, completed: threading.Event) -> None:
+    def __init__(self, stream: Any, completed: threading.Event, types: frozenset[str]) -> None:
         self._stream = stream
         self._completed = completed
+        self._types = types
 
     def __getattr__(self, name: str) -> Any:  # `_sever` reaches `_response` through here
         return getattr(self._stream, name)
@@ -399,13 +434,13 @@ class _WatchedStream:
     def __iter__(self) -> Any:
         for event in self._stream:
             yield event
-            if event.type in WATCHED:
+            if event.type in self._types:
                 self._completed.set()
 
 
 class _AsyncWatched(_Watched):
     async def __aenter__(self) -> Any:
-        return _AsyncWatchedStream(await self.manager.__aenter__(), self.completed)
+        return _AsyncWatchedStream(await self.manager.__aenter__(), self.completed, self.types)
 
     async def __aexit__(self, *raised: object) -> Any:
         return await self.manager.__aexit__(*raised)
@@ -415,18 +450,20 @@ class _AsyncWatchedStream(_WatchedStream):
     async def __aiter__(self) -> Any:
         async for event in self._stream:
             yield event
-            if event.type in WATCHED:
+            if event.type in self._types:
                 self._completed.set()
 
 
 WATCHED = frozenset({"response.completed", "response.incomplete"})
+DELTA = frozenset({"response.output_text.delta"})
 
 
 def _cancelled_at_the_stall(
     flavor: Flavor, first: Literal["headers", "end", "ended"]
 ) -> tuple[Any, Any, float, bool]:
-    """One call cancelled during the provider's stall: the turn, its usage, how long the op took
-    to return, and whether the provider heard the client leave.
+    """One call cancelled during the provider's stall: the turn, its usage, whether the op
+    returned while the provider still held the headers, and whether the provider heard the client
+    leave.
 
     | `first`   | the face presses Esc                                     |
     |-----------|----------------------------------------------------------|
@@ -439,35 +476,34 @@ def _cancelled_at_the_stall(
     completed, token = threading.Event(), CancelToken()
     opened = client.responses.stream
     wrap = _Watched if flavor == "sync" else _AsyncWatched
-    watched = SimpleNamespace(stream=lambda **kwargs: wrap(opened(**kwargs), completed))
+    watched = SimpleNamespace(stream=lambda **kwargs: wrap(opened(**kwargs), completed, WATCHED))
 
     def face() -> None:
         if first in ("end", "ended"):
             completed.wait(10)
         else:
             provider.silent.wait(10)
-            threading.Event().wait(0.3)
+            threading.Event().wait(0.3)  # the reader into its wait for headers
         token.cancel()
 
     pressed = threading.Thread(target=face, name="face")
     pressed.start()
-    began = time.monotonic()
     try:
         turn, usage = _caller(flavor, SimpleNamespace(responses=watched), token)(ASK)
-        returned_in = time.monotonic() - began
+        held = not provider.released.is_set()
         pressed.join()
     finally:
         provider.resume.set()
     heard = provider.client_gone.wait(3)
     provider.server.shutdown()
-    return turn, usage, returned_in, heard
+    return turn, usage, held, heard
 
 
 @pytest.mark.parametrize("flavor", FLAVORS)
 def test_a_cancel_before_the_first_byte_returns_at_once(flavor: Flavor):
-    turn, _, returned_in, heard = _cancelled_at_the_stall(flavor, "headers")
+    turn, _, held, heard = _cancelled_at_the_stall(flavor, "headers")
     assert turn == Cancelled(partial="")
-    assert returned_in < 3, "the op waited for headers the stop could not reach"
+    assert held, "the op waited for headers the stop could not reach"
     assert heard, "the reader read the whole reply for a client that had left"
 
 
@@ -516,13 +552,12 @@ def test_a_stop_whose_close_raises_still_releases_the_op():
 
     pressed = threading.Thread(target=face, name="face")
     pressed.start()
-    began = time.monotonic()
     turn, _ = caller(_Client(stream), token)(ASK)
-    returned_in = time.monotonic() - began
+    held = not stream.unblocked.is_set()
     pressed.join()
     stream.release.set()
     assert turn == Cancelled(partial="hel")
-    assert returned_in < 2, "the op waited for the read the failed close never ended"
+    assert held, "the op waited for the read the failed close never ended"
 
 
 class _Incomplete(_Stream):

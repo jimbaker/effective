@@ -17,12 +17,27 @@ from effective.cancel import (
     load_cancelled,
     served,
 )
-from effective.cost import Usage
+from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool
+from effective.engines.sqlite import SqliteApp
 from effective.fork import Bridged, decode_checkpoint
+from effective.govern import REFUSALS, ChildRefused
 from effective.handlers.durable import DurableHandler, _dump, _load_step
+from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key, Run, compose_key
-from effective.react import ESCAPED, AssistantTurn, Ran, ToolRequest, ToolResult, run_turns
+from effective.react import (
+    ESCAPED,
+    LOOP_ESCAPE,
+    AssistantTurn,
+    Escaped,
+    Ran,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_turns,
+    unwrap,
+)
+from effective.spawning import ChildAnswer, Crashed, Refusal, run_child, stopped_at
 
 
 def test_a_stop_registered_during_a_block_runs_once_on_cancel():
@@ -101,22 +116,26 @@ def test_a_decide_cancelled_while_it_ran_escapes_with_nothing_chosen():
     handler = RecordingHandler({"d:0;react:turn": Cancelled(partial="I thi")})
     ran = handler.run(turns)
     assert isinstance(ran, Ran)
-    assert ran.trajectory.stop_reason == "escaped"
     assert ran.trajectory.steps[-1].thought == "I thi"
     assert ran.messages[-1] == {"role": "user", "content": ESCAPED}
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == ("decide", "react:turn", "I thi")
 
 
 def test_an_action_cancelled_while_it_ran_is_its_observation_and_replays_as_recorded():
     recorder = RecordingHandler({"d:0;react:turn": LS, "d:0;tool:ls": Cancelled(partial="a b")})
     ran = recorder.run(turns)
     assert isinstance(ran, Ran)
-    assert ran.trajectory.stop_reason == "escaped"
     assert ran.messages[-2:] == [
         {"role": "tool", "content": f"a b\n{ESCAPED}"},
         {"role": "user", "content": ESCAPED},
     ]
     replayed = ReplayHandler(recorder.trace).run(turns)
     assert replayed == ran
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == ("action", "tool:ls", "a b")
 
 
 def test_a_final_decide_cancelled_while_it_ran_escapes():
@@ -129,20 +148,35 @@ def test_a_final_decide_cancelled_while_it_ran_escapes():
     )
     ran = handler.run(lambda: run_turns([{"role": "user", "content": "go"}], max_iters=1))
     assert isinstance(ran, Ran)
-    assert ran.trajectory.stop_reason == "escaped"
     assert ran.messages[-2:] == [
         {"role": "tool", "content": "a b"},
         {"role": "user", "content": ESCAPED},
     ]
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == ("decide", "react:final", "the answ")
 
 
 def test_a_compaction_cancelled_while_it_ran_escapes():
-    handler = RecordingHandler({"d:0;react:compact": Cancelled(partial="")})
+    handler = RecordingHandler({"d:0;react:compact": Cancelled(partial="sum")})
     ran = handler.run(
         lambda: run_turns([{"role": "user", "content": "go"}], compact=lambda _messages: True)
     )
     assert isinstance(ran, Ran)
-    assert ran.trajectory.stop_reason == "escaped"
+    ending = ran.trajectory
+    assert isinstance(ending, Escaped)
+    assert (ending.origin, ending.name, ending.partial) == ("compaction", "react:compact", "sum")
+
+
+def test_unwrap_hands_back_the_answer():
+    assert unwrap(Trajectory[int](answer=3, steps=[], stop_reason="finish")) == 3
+
+
+@pytest.mark.parametrize(("name", "raised"), [("react:turn", "react:turn"), (None, LOOP_ESCAPE)])
+def test_unwrap_raises_an_escape_as_a_cancel_with_its_partial(name: str | None, raised: str):
+    with pytest.raises(OpCancelled) as cancelled:
+        unwrap(Escaped(origin="decide", name=name, partial="hal", steps=[]))
+    assert (cancelled.value.name, cancelled.value.partial) == (raised, "hal")
 
 
 def test_a_stop_whose_block_exited_during_the_cancel_never_runs():
@@ -302,3 +336,80 @@ def test_an_engine_refuses_to_checkpoint_a_result_in_the_reserved_shape(backend)
     assert snap.state == "failed", snap
     assert "reserved for a cancel" in str(snap.failure), snap.failure
     assert "tool:fetch" in str(snap.failure), "the refusal names the value, not the step"
+
+
+def test_a_bare_cancel_stops_its_task_as_a_cancel():
+    assert stopped_at(OpCancelled("react:turn", "half"), REFUSALS) == Cancelled(partial="half")
+
+
+def test_cancels_raised_together_stop_as_one_cancel_with_their_partials_in_order():
+    raised = ExceptionGroup("a gather", [OpCancelled("a", "one"), OpCancelled("b", "two")])
+    assert stopped_at(raised, REFUSALS) == Cancelled(partial="one\ntwo")
+
+
+def test_a_cancel_beside_a_refusal_stops_at_the_refusal():
+    raised = ExceptionGroup("a gather", [OpCancelled("a", "one"), ChildRefused("no")])
+    assert stopped_at(raised, REFUSALS) == Refusal(refusals=[("ChildRefused", "no")])
+
+
+def test_a_cancel_beside_a_crash_goes_on_as_the_crash():
+    raised = ExceptionGroup("a gather", [OpCancelled("a", "one"), ValueError("a crash")])
+    assert stopped_at(raised, REFUSALS) is None
+
+
+class _EqualToAll(Exception):
+    def __eq__(self, other: object) -> bool:
+        return True
+
+    __hash__ = Exception.__hash__
+
+
+def test_a_crash_equal_to_every_leaf_is_still_a_crash():
+    crash = _EqualToAll("a crash")
+    beside_a_cancel = ExceptionGroup("a gather", [OpCancelled("a", "one"), crash])
+    beside_a_refusal = ExceptionGroup("a gather", [ChildRefused("no"), crash])
+    assert stopped_at(beside_a_cancel, REFUSALS) is None
+    match stopped_at(beside_a_refusal, REFUSALS):
+        case Crashed(errors=errors):
+            assert errors.exceptions[0] is crash
+        case other:
+            raise AssertionError(f"a crash beside a refusal stopped at {other!r}")
+
+
+def _root(raised: Exception) -> Any:
+    """A root task whose program raises `raised`, run as `run_child` runs any task."""
+    app = SqliteApp(":memory:")
+
+    def program() -> Effect[None]:
+        yield from ()
+        raise raised
+
+    @app.register_task("root", default_max_attempts=1)
+    def root(params, ctx):
+        domain = MeteredInterpreter(llm=_unreachable, tools=make_tool_runner({}))
+        return run_child(ctx, params, DurableHandler(ctx, domain, params=params), program)
+
+    snap = app.run_until_result(app.spawn("root", {}))
+    app.close()
+    return snap
+
+
+def _unreachable(_op: Any) -> Any:
+    raise AssertionError("the root calls no model")
+
+
+def test_a_refused_root_completes_with_its_refusal():
+    snap = _root(ChildRefused("no"))
+    assert (snap.state, snap.result) == (
+        "completed",
+        _answered(Refusal(refusals=[("ChildRefused", "no")])),
+    )
+
+
+def test_a_root_whose_program_raises_a_cancel_completes_with_it():
+    snap = _root(OpCancelled("react:turn", "half"))
+    assert (snap.state, snap.result) == ("completed", _answered(Cancelled(partial="half")))
+
+
+def _answered(answer: Any) -> Any:
+    return ChildAnswer(answer=answer).model_dump(mode="json")

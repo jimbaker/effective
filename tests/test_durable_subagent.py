@@ -22,7 +22,13 @@ from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+)
 
 pytestmark = pytest.mark.spine
 
@@ -40,7 +46,7 @@ def parent_decide():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(script)
 

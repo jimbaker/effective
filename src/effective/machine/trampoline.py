@@ -10,11 +10,13 @@ exhausted or rejected, the run reaches the canonical record, and at small-model 
 the common stop.
 
 **A judge, worker or grantor that raises skips the postamble, and the run stays uncommitted.** A
-refusal climbs to the caller, which may catch it: a parent running this machine inside a state
-closes its own run either way. What stays on the record is the run's middle, since rows a
-canonical state appended before the refusal are not withdrawn, with no commit row, no outcome row
-and no artifact after them. A caller that wants a refused run committed says so where it catches
-the refusal.
+visit that is refused or cancelled parks the run where it stands, and the run climbs to the caller
+as `RunRefused` or `RunCancelled`, which may catch it: a parent running this machine inside a
+state closes its own run either way. What stays on the record is the run's middle, since rows a
+canonical state appended before the stop are not withdrawn, with no commit row, no outcome row and
+no artifact after them. A caller that wants a stopped run committed says so with `committing`,
+inside any scope that runs the machine: a handler delivers a refusal across a scope, and a cancel
+crosses none, so it climbs to the task.
 
 **Two scope tags.** `state:{name}` names which code runs. `d:{n}`, the level, counts
 re-executions of one position: a re-entered `state:` frame gets no occurrence suffix, so
@@ -33,6 +35,7 @@ from typing import Any, assert_never
 from pydantic_core import to_jsonable_python
 
 from effective.api import Effect, append_ledger, call_tool, scoped, store_artifact
+from effective.cancel import OpCancelled
 from effective.combinators import Answered, Deeper, Grantor, Level, descend
 from effective.domain import ToolRefused
 from effective.govern import ChildRefused, all_refusals
@@ -384,57 +387,111 @@ def commitment_postamble[S: StrEnum, V: StrEnum, R: Measured](
     return commitment
 
 
-class RunRefused(ChildRefused):
-    """A machine run stopped at a refusal, carrying what it had built.
+class _CarriesRun:
+    """What a stopped run carries to its caller. The run is uncommitted: `session.commitment` is
+    `None`, its two ids are composed and not appended, and `session.stopped` parks at the state
+    that stopped. `tree`, `seed` and `predicate` are what the skipped postamble would have used, so
+    a caller can run it with `committing`."""
 
-    Raised where `run_machine` was called, from the refusal that stopped it. The run is
-    uncommitted: `session.commitment` is `None`, its two ids are composed and not appended, and
-    `session.stopped` parks at the refused state. `tree`, `seed` and `predicate` are what the
-    skipped postamble would have used, so a caller can run it with `committing`.
+    session: Session[Any, Any, Any]
+    tree: Mapping[str, str]
+    seed: Mapping[str, str]
+    predicate: Predicate[Any]
 
-    A refusal, so a handler delivers it across a scope or a gather, and a spawned task raising it
-    answers its parent `Refusal`. It is not a `Refused`, so a loop that turns a `Refused` into an
-    observation lets this one climb: a nested run's ending is not an op a loop can route around."""
-
-    def __init__(
+    def _carry(
         self,
-        message: str,
         session: Session[Any, Any, Any],
         tree: Mapping[str, str],
         predicate: Predicate[Any],
-        *,
         seed: Mapping[str, str],
     ) -> None:
-        super().__init__(message)
         self.session = session
         self.tree = tree
         self.seed = seed
         self.predicate = predicate
 
 
+class RunRefused(_CarriesRun, ChildRefused):
+    """A machine run stopped at a refusal, carrying what it had built.
+
+    Raised where `run_machine` was called, from the refusal that stopped it. A refusal, so a
+    handler delivers it across a scope or a gather, and a spawned task raising it answers its
+    parent `Refusal`. It is not a `Refused`, so a loop that turns a `Refused` into an observation
+    lets this one climb: a nested run's ending is not an op a loop can route around.
+
+    `refused` is the refusal's own text, since a parent hears only this exception's; the refusal
+    itself is its cause."""
+
+    def __init__(
+        self,
+        refusal: Exception,
+        session: Session[Any, Any, Any],
+        tree: Mapping[str, str],
+        predicate: Predicate[Any],
+        *,
+        seed: Mapping[str, str],
+    ) -> None:
+        super().__init__(session.run_id, str(refusal))
+        self.run_id = str(session.run_id)
+        self.refused = str(refusal)
+        self._carry(session, tree, predicate, seed)
+
+    def __str__(self) -> str:
+        return f"machine run {self.run_id} was refused before it committed: {self.refused}"
+
+
+class RunCancelled(_CarriesRun, OpCancelled):
+    """A machine run stopped at a cancel, carrying what it had built.
+
+    Raised where `run_machine` was called, from the cancel that stopped it: a step cancelled while
+    it ran, or a worker's agent loop that escaped. `name` and `partial` are the cancel's, so a
+    task under `run_child` answers its parent `Cancelled` with the partial text. It crosses no
+    scope: raised inside one, it climbs to the task, past any state of an enclosing run."""
+
+    def __init__(
+        self,
+        cancelled: OpCancelled,
+        session: Session[Any, Any, Any],
+        tree: Mapping[str, str],
+        predicate: Predicate[Any],
+        *,
+        seed: Mapping[str, str],
+    ) -> None:
+        super().__init__(cancelled.name, cancelled.partial)
+        self.run_id = str(session.run_id)
+        self._carry(session, tree, predicate, seed)
+
+    def __str__(self) -> str:
+        return f"machine run {self.run_id} was cancelled at {self.name}"
+
+
 def committing[T](body: Callable[[], Effect[T]]) -> Effect[T]:
-    """Run `body`, and commit a machine refused inside it before the refusal climbs on.
+    """Run `body`, and commit a machine refused or cancelled inside it before the stop climbs on.
 
-    The postamble the refused run skipped, run by the caller that chose to have it: the artifact,
-    the predicate and the two rows, with the outcome row reading `machine-parked` and `refused`.
+    The postamble the stopped run skipped, run by the caller that chose to have it: the artifact,
+    the predicate and the two rows, with the outcome row reading `machine-parked` and `refused` or
+    `cancelled`.
 
-    **A run commits once however many frames catch it.** The refusal that climbs on is the same
+    `body` runs the machine with no scope between: a cancel crosses none, so one raised inside a
+    scope in `body` climbs past this frame uncommitted.
+
+    **A run commits once however many frames catch it.** The stop that climbs on is the same
     object, so the commitment is recorded on the session it carries, and a frame further out finds
-    it set and passes the refusal on. Two commits would append one run's ids from two placements in
+    it set and passes the stop on. Two commits would append one run's ids from two placements in
     one task, which the store refuses."""
     try:
         return (yield from body())
-    except RunRefused as refused:
-        if refused.session.commitment is None:
+    except (RunRefused, RunCancelled) as stopped:
+        if stopped.session.commitment is None:
             commitment = yield from commitment_postamble(
-                refused.session,
-                refused.tree,
-                seed=refused.seed,
-                commit_id=refused.session.commit_id,
-                outcome_id=refused.session.outcome_id,
-                predicate=refused.predicate,
+                stopped.session,
+                stopped.tree,
+                seed=stopped.seed,
+                commit_id=stopped.session.commit_id,
+                outcome_id=stopped.session.outcome_id,
+                predicate=stopped.predicate,
             )
-            refused.session = replace(refused.session, commitment=commitment)
+            stopped.session = replace(stopped.session, commitment=commitment)
         raise
 
 
@@ -456,8 +513,8 @@ class _Walked[S: StrEnum, V: StrEnum, R: Measured = CommandRun]:
     turns: tuple[Turn[S, V, R], ...]
     stopped: Finish | Park[S]
     carried: Mapping[str, str]
-    refusal: Exception | None = None
-    """What stopped the walk, when a visit was refused rather than judged."""
+    stop: Exception | None = None
+    """What stopped the walk, when a visit was refused or cancelled rather than judged."""
 
 
 def _step[S: StrEnum, V: StrEnum, R: Measured](
@@ -479,8 +536,10 @@ def _step[S: StrEnum, V: StrEnum, R: Measured](
         tree=walk.carried,
         incoming=walk.incoming,
     )
-    # A refusal ends the walk where it stands, as `Finish` and `Park` do, so the caller learns
-    # what the run had built. The visit has no verdict and no turn; the turns before it stand.
+    # A refusal or a cancel ends the walk where it stands, as `Finish` and `Park` do, so the
+    # caller learns what the run had built. The visit has no verdict and no turn; the turns before
+    # it stand. A handler delivers a refusal across the state's scope, and `_visit` catches a
+    # cancel inside it.
     try:
         visited: _Visited[S, V, R] = yield from scoped(
             compose_key(t"state:{Name(state.value)}"),
@@ -489,11 +548,11 @@ def _step[S: StrEnum, V: StrEnum, R: Measured](
     except Exception as raised:
         if not all_refusals(raised):
             raise
-        return Answered(_refused(walk, raised, walk.carried))
+        return Answered(_stopped(walk, ParkReason.REFUSED, raised, walk.carried))
     match visited:
-        case _JudgedRefused(raised, left):
-            built = walk.carried if left.tree is None else dict(left.tree)
-            return Answered(_refused(walk, raised, built))
+        case _Stop(why, raised, left):
+            built = walk.carried if left is None or left.tree is None else dict(left.tree)
+            return Answered(_stopped(walk, why, raised, built))
         case (verdict, produced):
             pass
         case unreachable:
@@ -522,27 +581,26 @@ def _step[S: StrEnum, V: StrEnum, R: Measured](
 
 
 @dataclass(frozen=True, slots=True)
-class _JudgedRefused[R: Measured = CommandRun]:
-    """A fused state's judge was refused after its worker returned what `left` holds."""
+class _Stop[R: Measured = CommandRun]:
+    """A visit stopped inside its scope: cancelled, or its fused judge refused, after its worker
+    returned what `left` holds, when it returned."""
 
+    why: ParkReason
     raised: Exception
-    left: Evidence[R]
+    left: Evidence[R] | None
 
 
 type _Visited[S: StrEnum, V: StrEnum, R: Measured] = (
-    tuple[V | Exhausted[S], Report[V, R] | None] | _JudgedRefused[R]
+    tuple[V | Exhausted[S], Report[V, R] | None] | _Stop[R]
 )
-"""A visit's result: its verdict and report, or its judge's refusal with what the worker left."""
+"""A visit's result: its verdict and report, or its stop with what the worker left."""
 
 
-def _refused[S: StrEnum, V: StrEnum, R: Measured](
-    walk: _Walk[S, V, R], raised: Exception, carried: Mapping[str, str]
+def _stopped[S: StrEnum, V: StrEnum, R: Measured](
+    walk: _Walk[S, V, R], why: ParkReason, raised: Exception, carried: Mapping[str, str]
 ) -> _Walked[S, V, R]:
     return _Walked[S, V, R](
-        turns=walk.turns,
-        stopped=Park(walk.state, ParkReason.REFUSED),
-        carried=carried,
-        refusal=raised,
+        turns=walk.turns, stopped=Park(walk.state, why), carried=carried, stop=raised
     )
 
 
@@ -555,23 +613,32 @@ def _visit[S: StrEnum, V: StrEnum, R: Measured](
     One call per state: a worker and judge pair is a construction an embodiment may choose
     (`specs.fuse`), and one that wants its judge as a state of its own writes two states. The
     report's tree is what the state derived from its recorded ops, which a replay reconstructs.
-    A `Fused` run is run phase by phase, so a refusal of its own judge returns with what the
-    worker left, where a refusal anywhere else raises. Any other callable, a subclass or a wrapper
-    of one included, is run as it is written."""
+    A `Fused` run is run phase by phase, so a refusal or cancel of its own judge returns with what
+    the worker left, where a refusal anywhere else raises. A cancel is caught here, inside the
+    state's scope, since a handler delivers only a refusal across it. Any other callable, a
+    subclass or a wrapper of one included, is run as it is written."""
     if final:
         return Exhausted(ctx.state, level=ctx.visit), None
     match spec.run:
         case Fused(worker, judge) if type(spec.run) is Fused:
-            evidence = yield from worker(ctx)
+            try:
+                evidence = yield from worker(ctx)
+            except OpCancelled as cancelled:
+                return _Stop(ParkReason.CANCELLED, cancelled, None)
             try:
                 verdict = yield from judge(ctx, evidence)
+            except OpCancelled as cancelled:
+                return _Stop(ParkReason.CANCELLED, cancelled, evidence)
             except Exception as raised:
                 if not all_refusals(raised):
                     raise
-                return _JudgedRefused(raised, evidence)
+                return _Stop(ParkReason.REFUSED, raised, evidence)
             report = Report.of(verdict, evidence)
         case run:
-            report = yield from run(ctx)
+            try:
+                report = yield from run(ctx)
+            except OpCancelled as cancelled:
+                return _Stop(ParkReason.CANCELLED, cancelled, None)
     return report.verdict, report
 
 
@@ -579,6 +646,21 @@ def _storable(tree: Mapping[str, str], what: str) -> dict[str, str]:
     """`tree`, when every store holds it alike (`ops.refuse_an_unportable_value`)."""
     refuse_an_unportable_value(dict(tree), what)
     return dict(tree)
+
+
+def _stopped_run(
+    walked: _Walked[Any, Any, Any],
+    stop: Exception,
+    session: Session[Any, Any, Any],
+    predicate: Predicate[Any],
+    seed: Mapping[str, str],
+) -> RunRefused | RunCancelled:
+    """The run a refused or cancelled visit stopped, for `run_machine` to raise."""
+    match stop:
+        case OpCancelled() as cancelled:
+            return RunCancelled(cancelled, session, walked.carried, predicate, seed=seed)
+        case refusal:
+            return RunRefused(refusal, session, walked.carried, predicate, seed=seed)
 
 
 def run_machine[S: StrEnum, V: StrEnum, R: Measured = CommandRun](
@@ -599,9 +681,10 @@ def run_machine[S: StrEnum, V: StrEnum, R: Measured = CommandRun](
     Each visit is a `descend` level under `d:{n}` and runs its state under `state:{name}`. The
     final level mints `Exhausted` without running the spec, and `grantor` may add visits before it.
 
-    A visit that is refused raises `RunRefused`, carrying the run as far as it got, and the
-    postamble does not run. Anything else a judge or worker raises propagates as it was raised, and
-    so does a refusal out of `grantor`, which arrives between visits and has no state to park at.
+    A visit that is refused raises `RunRefused`, and one that is cancelled raises `RunCancelled`,
+    each carrying the run as far as it got, and the postamble does not run. Anything else a judge
+    or worker raises propagates as it was raised, and so does a refusal out of `grantor`, which
+    arrives between visits and has no state to park at.
 
     `specs` must be total over the state type, which `Mapping[S, StateSpec]` does not say, so a
     partial map is refused here, naming every missing state, before the first op. `build_specs`
@@ -626,9 +709,8 @@ def run_machine[S: StrEnum, V: StrEnum, R: Measured = CommandRun](
     which a nested run shares with the run above it, so two nested runs of one state that both
     park for a grant want distinct ids there."""
     # `None` rather than a concrete default: a generic function's parameter cannot TAKE a
-    # concrete default (`ty` refuses `Predicate[R] = Predicate(SUITE_TOOL, CommandRun)` — the
-    # gotcha this arc recorded), so the PEP 696 default on `R` supplies the type and this
-    # supplies the value.
+    # concrete default (`ty` refuses `Predicate[R] = Predicate(SUITE_TOOL, CommandRun)`), so
+    # the PEP 696 default on `R` supplies the type and this supplies the value.
     # BEFORE ANY OP, and beside the address for the same reason: a run that cannot complete should
     # refuse while refusing is still free. `type(start)` is the embodiment's `StrEnum` class, so
     # the domain is the enum itself rather than a list someone passed alongside it.
@@ -678,16 +760,10 @@ def run_machine[S: StrEnum, V: StrEnum, R: Measured = CommandRun](
         commit_id=commit_id,
         outcome_id=outcome_id,
     )
-    if walked.refusal is not None:
-        raise RunRefused(
-            f"machine {run_id} was refused before it committed: {walked.refusal}",
-            session,
-            walked.carried,
-            chosen,
-            seed=seeded,
-        ) from walked.refusal
+    if walked.stop is not None:
+        raise _stopped_run(walked, walked.stop, session, chosen, seeded) from walked.stop
     # THE ONE POSTAMBLE CALL SITE for a run that ended, so that a run which exhausted or was
-    # rejected still reaches the canonical record. A refused run ended nowhere and raised above.
+    # rejected still reaches the canonical record. A stopped run ended nowhere and raised above.
     # `tests/test_coding_livelock.py` pins this structurally, because no fixture can.
     commitment = yield from commitment_postamble(
         session,

@@ -1,8 +1,9 @@
-"""Every f-string in `src/`, gated: allowed only where a t-string processor renders, or a raise.
+"""Every f-string in `src/`, gated: allowed where a t-string processor renders and where an
+exception says itself.
 
-    uv run python scripts/fstring_sweep.py --gate          # the gate `just check` runs
-    uv run python scripts/fstring_sweep.py                 # report, no exit code
-    uv run python scripts/fstring_sweep.py --init-baseline # bootstrap only
+    uv run python scripts/fstring_sweep.py --gate --touched main # the gate `just check` runs
+    uv run python scripts/fstring_sweep.py                       # report, no exit code
+    uv run python scripts/fstring_sweep.py --init-baseline       # bootstrap, keeping reasons
 
 **The rule: an f-string is for a t-string processor's RENDER BACKEND, and
 generally nowhere else.** Effective is the PEP 750 showcase; an f-string standing where a
@@ -10,20 +11,24 @@ generally nowhere else.** Effective is the PEP 750 showcase; an f-string standin
 axis — it can be done correctly, it has many edge cases, so it usually is not — and ask what
 totality asks of an `isinstance` chain: was a structure available here, and did this flatten it?
 
-**Two designated positions, and for now only two.**
+**Two designated positions.**
 
 1. **A t-string processor's render backend** — `DESIGNATED`, below. Once the structural decisions
    are made, eager format-then-concat is exactly right and it is the fastest thing Python has
    (26.6 ns/op against `str.format`'s 72.1). The decision has to be ABOVE it.
-2. **Creating an exception.** Sanctioned for now, and expected to be structured later — a
-   deferral, not a clearance.
+2. **A structured exception's `__str__`.** The exception keeps its context in plain fields, and
+   says itself from them, so the structure is decided before the message is.
 
-Everything else is a finding. The ones that exist today are recorded in the baseline with the
-grammar each one builds, so the gate fails on GROWTH and on any entry that no longer reproduces:
-the record can only shrink. Where each grammar's processor already lives — a key is `compose_key`,
-SQL is the psycopg t-string boundary, a prompt is `effective.channels`, a web search query is
-`effective.query`, markdown is `effective.markdown`, HTML/SVG is `tdom.html`
-(vendored at `infra/tdom`). A URL path and a data URI have none yet, which is a gap, not a licence.
+Everything else is a finding, a raise that builds its message included. The ones that exist today
+are recorded in the baseline with the grammar each one builds, and a count where several sites
+share a key, so the gate fails on GROWTH and on any entry that no longer reproduces: the record
+can only shrink. A raise is also refused on any line a branch changed (`--touched`), so a change
+structures each exception it touches.
+
+Where each grammar's processor already lives: a key is `compose_key`, SQL is the psycopg
+t-string boundary, a prompt is `effective.channels`, a web search query is `effective.query`,
+markdown is `effective.markdown`, HTML/SVG is `tdom.html` (vendored at `infra/tdom`). A URL path
+and a data URI have none yet, which is a gap to fill.
 
 Keyed on `(path, statics)` and never a line number, so an edit above a finding does not invalidate
 its entry — the same reason `key-sweep-baseline.txt` is keyed that way.
@@ -31,13 +36,23 @@ its entry — the same reason `key-sweep-baseline.txt` is keyed that way.
 
 import argparse
 import ast
+import builtins
+import importlib.util
 import pathlib
 import re
+import subprocess
 import sys
+from collections import Counter
+from collections.abc import Callable, Iterator
 
 BASELINE = pathlib.Path("scripts/fstring-baseline.txt")
 PRIVATE_BASELINE = pathlib.Path("scripts/fstring-private-baseline.txt")
 """A tree that ships more than this repository keeps its own entries here; the gate reads both."""
+MANIFEST = pathlib.Path("scripts/public-manifest.txt")
+"""What such a tree ships, read by its `sync_public.py`; a site in a file it does not ship is a
+private entry. A tree that ships everything has neither file."""
+
+RAISE = "raise -> structured exception"
 
 DESIGNATED: frozenset[tuple[str, str]] = frozenset(
     {
@@ -86,15 +101,69 @@ def _enclosing(tree: ast.AST) -> dict[ast.AST, ast.AST]:
     return parent
 
 
+def _exception_classes(trees: list[ast.Module]) -> frozenset[str]:
+    """The class names in `trees` that derive from an exception, read by simple name: a builtin
+    exception, or a class whose base already is one, to a fixed point. A name is one only when
+    every class of that name is, so two classes sharing a name never lend each other the
+    designation."""
+    definitions: dict[str, list[set[str]]] = {}
+    for tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                definitions.setdefault(node.name, []).append(
+                    {
+                        base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "")
+                        for base in node.bases
+                    }
+                )
+    known = {
+        name
+        for name, value in vars(builtins).items()
+        if isinstance(value, type) and issubclass(value, BaseException) and name not in definitions
+    }
+    while grown := {
+        name
+        for name, each in definitions.items()
+        if name not in known and all(bases & known for bases in each)
+    }:
+        known |= grown
+    return frozenset(known)
+
+
+def _says_an_exception(chain: list[ast.AST], exceptions: frozenset[str]) -> bool:
+    """Whether the innermost function in `chain` is the `__str__` of an exception class."""
+    functions = [c for c in chain if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef)]
+    if not functions or functions[0].name != "__str__":
+        return False
+    above = chain[chain.index(functions[0]) + 1 :]
+    return bool(above) and isinstance(above[0], ast.ClassDef) and above[0].name in exceptions
+
+
+def _designated(path: pathlib.Path, chain: list[ast.AST], exceptions: frozenset[str]) -> bool:
+    """Whether an f-string under `chain` stands in a designated position."""
+    if any(isinstance(c, ast.Raise) for c in chain):
+        return False  # a raise builds its message before any structure is decided
+    if _says_an_exception(chain, exceptions):
+        return True  # a structured exception says itself
+    scopes = [
+        c.name
+        for c in chain
+        if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    ]
+    return bool(scopes) and (str(path), ".".join(reversed(scopes))) in DESIGNATED
+
+
 def findings(paths: list[str]) -> list[tuple[str, int, str, str]]:
     """`(path, line, statics, why)` for every f-string that is not in a designated position."""
     out = []
+    parsed = []
     for path in _files(paths):
-        text = path.read_text()
         try:
-            tree = ast.parse(text)
+            parsed.append((path, ast.parse(path.read_text())))
         except SyntaxError:
             continue
+    exceptions = _exception_classes([tree for _, tree in parsed])
+    for path, tree in parsed:
         parent = _enclosing(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.JoinedStr):
@@ -105,21 +174,111 @@ def findings(paths: list[str]) -> list[tuple[str, int, str, str]]:
             while cur in parent:
                 cur = parent[cur]
                 chain.append(cur)
-            if any(isinstance(c, ast.Raise) for c in chain):
-                continue  # designated: creating an exception
-            scopes = [
-                c.name
-                for c in chain
-                if isinstance(c, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            ]
-            if scopes and (str(path), ".".join(reversed(scopes))) in DESIGNATED:
-                continue  # designated: a t-string processor's render backend
+            if _designated(path, chain, exceptions):
+                continue
             statics = "".join(
                 v.value
                 for v in node.values
                 if isinstance(v, ast.Constant) and isinstance(v.value, str)
             )
-            out.append((str(path), node.lineno, statics, _grammar(statics)))
+            raised = any(isinstance(c, ast.Raise) for c in chain)
+            out.append((str(path), node.lineno, statics, RAISE if raised else _grammar(statics)))
+    return out
+
+
+def _interpolates(node: ast.AST) -> bool:
+    return any(
+        isinstance(n, ast.JoinedStr) and any(isinstance(v, ast.FormattedValue) for v in n.values)
+        for n in ast.walk(node)
+    )
+
+
+def _builds_its_message(raised: ast.Raise, bound: set[str]) -> bool:
+    """Whether a raise interpolates an f-string itself, or names one bound in its own scope."""
+    return _interpolates(raised) or any(
+        isinstance(n, ast.Name) and n.id in bound for n in ast.walk(raised)
+    )
+
+
+def _raises_by_scope(tree: ast.Module) -> list[tuple[ast.Raise, set[str]]]:
+    """Each raise, with the names its scope binds to an interpolating f-string."""
+    out = []
+    for scope in [tree, *(n for n in ast.walk(tree) if isinstance(n, _FUNCTIONS))]:
+        inner = list(_walk_scope(scope))
+        bound = {
+            target.id
+            for n in inner
+            if isinstance(n, ast.Assign) and _interpolates(n.value)
+            for target in n.targets
+            if isinstance(target, ast.Name)
+        }
+        out.extend((n, bound) for n in inner if isinstance(n, ast.Raise))
+    return out
+
+
+def _walk_scope(scope: ast.AST) -> Iterator[ast.AST]:
+    """The nodes of `scope`, stopping at a nested function, which is its own scope."""
+    for child in ast.iter_child_nodes(scope):
+        yield child
+        if not isinstance(child, _FUNCTIONS):
+            yield from _walk_scope(child)
+
+
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def touched_raises(paths: list[str], changed: dict[str, set[int]]) -> list[tuple[str, int]]:
+    """`(path, line)` for every raise that builds its message with an f-string and spans a line in
+    `changed`, a path's changed lines."""
+    out = []
+    for path in _files(paths):
+        if not (lines := changed.get(str(path))):
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:
+            continue
+        out.extend(
+            (str(path), raised.lineno)
+            for raised, bound in _raises_by_scope(tree)
+            if _builds_its_message(raised, bound)
+            and lines & set(range(raised.lineno, (raised.end_lineno or raised.lineno) + 1))
+        )
+    return sorted(out)
+
+
+def changed_lines(base: str) -> dict[str, set[int]] | None:
+    """The lines the working tree adds or changes since the merge base of `base`, or of
+    `origin/<base>`, and `HEAD`, by path; a deletion marks the lines on either side of it. `None`
+    when neither resolves, as in a shallow checkout."""
+    for ref in (base, f"origin/{base}"):
+        merge = subprocess.run(
+            ["git", "merge-base", ref, "HEAD"], capture_output=True, text=True, check=False
+        )
+        if merge.returncode == 0:
+            break
+    else:
+        return None
+    # every option that shapes the headers and hunks is fixed here, whatever the user's config
+    diff = subprocess.run(
+        [
+            *("git", "-c", "core.quotePath=false", "diff", "-U0", "--inter-hunk-context=0"),
+            *("--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"),
+            merge.stdout.strip(),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    out: dict[str, set[int]] = {}
+    path = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            path = line[6:].rstrip("\t") if line.startswith("+++ b/") else None
+        elif path and (hunk := re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)):
+            start, count = int(hunk[1]), int(hunk[2] or 1)
+            lines = range(start, start + count) if count else (start, start + 1)
+            out.setdefault(path, set()).update(lines)
     return out
 
 
@@ -158,8 +317,9 @@ def _files(paths: list[str]) -> list[pathlib.Path]:
 Entry = tuple[str, str]
 
 
-def load_baseline() -> dict[Entry, str]:
-    entries: dict[Entry, str] = {}
+def load_baseline() -> dict[Entry, tuple[str, int]]:
+    """Each entry's reason and how many sites share its key."""
+    entries: dict[Entry, tuple[str, int]] = {}
     for line in (
         line
         for file in (BASELINE, PRIVATE_BASELINE)
@@ -170,28 +330,67 @@ def load_baseline() -> dict[Entry, str]:
             continue
         path, rest = line.split(" :: ", 1)
         literal, reason = rest.rsplit(" :: ", 1)
+        count = 1
+        if reason.strip().isdigit():
+            count = int(reason)
+            literal, reason = literal.rsplit(" :: ", 1)
         # The statics are stored as a Python literal, so a `::` or a newline inside them cannot
         # be read as the field separator.
-        entries[(path.strip(), ast.literal_eval(literal))] = reason.strip()
+        entries[(path.strip(), ast.literal_eval(literal))] = (reason.strip(), count)
     return entries
 
 
-def write_baseline(entries: dict[Entry, str]) -> None:
+def write_baseline(entries: dict[Entry, tuple[str, int]]) -> None:
+    """Write `entries` to the shared baseline, and a private file's to the private baseline where
+    this tree keeps a manifest."""
     head = [
-        "# f-string baseline — sites recorded as accepted, so the gate can fail on GROWTH.",
+        "# f-string baseline: sites recorded as accepted, so the gate can fail on GROWTH.",
         "#",
         "# Format:  <path> :: <statics, as a Python literal> :: <which processor should own it>",
+        "#          [:: <how many sites share the key, when more than one>]",
         "#",
-        "# An f-string is for a t-string processor's RENDER BACKEND, and (for now) creating an",
-        "# exception. Those two are DESIGNATED in fstring_sweep.py and never appear here.",
-        "# Everything below is a finding waiting for its processor. The gate fails on a finding",
-        "# NOT listed, and on an entry nothing produces — so this file can only shrink.",
+        "# An f-string is for a t-string processor's RENDER BACKEND and a structured exception's",
+        "# `__str__`. Those two are DESIGNATED in fstring_sweep.py and never appear here.",
+        "# Everything below is a finding waiting for its processor, and a raise is waiting for a",
+        "# structured exception. The gate fails on a site NOT counted, and on a count nothing",
+        "# produces, so this file can only shrink.",
         "#",
         "# Keyed on (path, statics), never a line number: an edit above a site keeps its entry.",
         "",
     ]
-    body = [f"{p} :: {s!r} :: {r}" for (p, s), r in sorted(entries.items())]
-    BASELINE.write_text("\n".join([*head, *body, ""]))
+    private_head = [
+        "# Private entries for scripts/fstring-baseline.txt: sites in files that do not ship."
+        " Same format.",
+    ]
+    ships = _shipping()
+    shared = {k: v for k, v in entries.items() if ships(k[0])}
+    private = {k: v for k, v in entries.items() if not ships(k[0])}
+    BASELINE.write_text("\n".join([*head, *_lines(shared), ""]))
+    if private:
+        PRIVATE_BASELINE.write_text("\n".join([*private_head, *_lines(private), ""]))
+    else:
+        PRIVATE_BASELINE.unlink(missing_ok=True)
+
+
+def _lines(entries: dict[Entry, tuple[str, int]]) -> list[str]:
+    return [
+        f"{p} :: {s!r} :: {r}" + (f" :: {n}" if n > 1 else "")
+        for (p, s), (r, n) in sorted(entries.items())
+    ]
+
+
+def _shipping() -> Callable[[str], bool]:
+    """Whether a path ships, by this tree's manifest; every path ships in a tree without one."""
+    reader = MANIFEST.parent / "sync_public.py"
+    if not (MANIFEST.exists() and reader.exists()):
+        return lambda _path: True
+    spec = importlib.util.spec_from_file_location("sync_public", reader)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclasses resolve their module by name
+    spec.loader.exec_module(module)
+    return module.read_manifest(MANIFEST.read_text()).ships
 
 
 def main() -> int:
@@ -199,19 +398,25 @@ def main() -> int:
     ap.add_argument("paths", nargs="*", default=["src"])
     ap.add_argument("--gate", action="store_true")
     ap.add_argument("--init-baseline", action="store_true")
+    ap.add_argument("--touched", metavar="BASE", help="refuse an f-string raise on a changed line")
     args = ap.parse_args()
 
     found = findings(args.paths or ["src"])
-    live: dict[Entry, str] = {(p, s): g for p, _, s, g in found}
-
-    if args.init_baseline:
-        write_baseline(live)
-        print(f"wrote {len(live)} entries to {BASELINE}")
-        return 0
+    counts = Counter((p, s) for p, _, s, _ in found)
+    raised = Counter((p, s) for p, _, s, g in found if g == RAISE)
+    live: dict[Entry, tuple[str, int]] = {(p, s): (g, counts[(p, s)]) for p, _, s, g in found}
 
     baseline = load_baseline()
-    new = {k: v for k, v in live.items() if k not in baseline}
-    stale = {k for k in baseline if k not in live}
+    if args.init_baseline:
+        # an entry keeps the reason a reader wrote for it; a new one gets the grammar's
+        write_baseline({k: (baseline.get(k, v)[0], v[1]) for k, v in live.items()})
+        print(f"wrote {len(live)} entries, {len(found)} sites")
+        return 0
+
+    new = {k: v for k, v in live.items() if v[1] > baseline.get(k, ("", 0))[1]}
+    stale = {k: v for k, v in baseline.items() if v[1] > live.get(k, ("", 0))[1]}
+    # a raise's message built above it still counts under the raise's key
+    hoisted = {k for k, (r, _) in baseline.items() if r == RAISE and counts[k] > raised[k]}
 
     if not args.gate:
         for path, line, statics, grammar in sorted(found):
@@ -219,12 +424,35 @@ def main() -> int:
         print(f"\n{len(found)} f-strings outside a designated position")
         return 0
 
-    for (path, statics), grammar in sorted(new.items()):
-        print(f"{path}: [{grammar}] {statics[:60]!r} — NOT in the baseline")
-    for path, statics in sorted(stale):
-        print(f"{path}: {statics[:60]!r} — baselined but GONE; drop the line")
-    print(f"\nfstring-sweep: {len(baseline)} baselined, {len(new)} new, {len(stale)} stale")
-    return 1 if (new or stale) else 0
+    for (path, statics), (grammar, n) in sorted(new.items()):
+        had = baseline.get((path, statics), ("", 0))[1]
+        print(f"{path}: [{grammar}] {statics[:60]!r}: {n} sites, {had} in the baseline")
+    for (path, statics), (_, n) in sorted(stale.items()):
+        left = live.get((path, statics), ("", 0))[1]
+        fix = "lower the count" if left else "drop the line"
+        print(f"{path}: {statics[:60]!r}: {n} baselined, {left} left; {fix}")
+    for path, statics in sorted(hoisted):
+        print(f"{path}: {statics[:60]!r}: a raise's message, now built outside the raise")
+    print(
+        f"\nfstring-sweep: {len(baseline)} baselined, {len(new)} new, {len(stale)} stale,"
+        f" {len(hoisted)} hoisted"
+    )
+    touched: list[tuple[str, int]] = []
+    unresolved = False
+    if args.touched:
+        if unresolved := (changed := changed_lines(args.touched)) is None:
+            print(
+                f"fstring-sweep: neither {args.touched} nor origin/{args.touched} resolves;"
+                f" fetch it (`git fetch origin {args.touched}`) so the changed lines can be read"
+            )
+        else:
+            touched = touched_raises(args.paths or ["src"], changed)
+            for path, line in touched:
+                print(
+                    f"{path}:{line}: a changed raise builds its message; structure the exception"
+                )
+            print(f"fstring-sweep: {len(touched)} changed raises since {args.touched}")
+    return 1 if (new or stale or hoisted or touched or unresolved) else 0
 
 
 if __name__ == "__main__":

@@ -27,9 +27,11 @@ podman run --rm --pod "${POD}" "${CONNECT[@]}" "${ODOO}" \
   odoo -d spike -i account --stop-after-init >/dev/null 2>&1
 
 # Odoo 20 binds 127.0.0.1 inside the container unless told otherwise, which the pod's port
-# forward cannot reach.
+# forward cannot reach. Worker processes serve concurrent tests in parallel; one threaded process
+# serves them in turn.
 podman run -d --pod "${POD}" --name "${POD}-app" "${CONNECT[@]}" "${ODOO}" \
-  odoo -d spike --db-filter='^spike$' --http-interface=0.0.0.0 >/dev/null
+  odoo -d spike --db-filter='^spike$' --http-interface=0.0.0.0 \
+  --workers="${ODOO_WORKERS:-6}" --max-cron-threads=0 >/dev/null
 echo "==> wait for Odoo on ${PORT}"
 curl -sf -o /dev/null --retry 90 --retry-delay 1 --retry-all-errors "http://127.0.0.1:${PORT}/web/login"
 echo "==> ready"

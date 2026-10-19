@@ -40,6 +40,9 @@ from .port import Unknown
 DEBIT = {"out_invoice"}
 """The move types whose receivable line is a debit."""
 
+READS = frozenset({"search", "search_read", "search_count", "read"})
+"""The methods that answer from the books and change nothing; every other method writes."""
+
 LINES = 100
 """A receivable line's id is its move's id times this, plus its installment's index."""
 
@@ -162,7 +165,7 @@ class ScriptedOdoo:
             match model, method, args:
                 case "ir.actions.server", "run", ([int(action)],):
                     return self._run(action, kwargs.get("context", {}))
-                case _, "search" | "search_read" | "search_count" | "read", _:
+                case _, str(read), _ if read in READS:
                     if set(kwargs) - {"order"} or kwargs.get("order", "id") != "id":
                         raise Unknown(f"the scripted Odoo answers in id order only, not {kwargs}")
                     return self._query(model, method, args)

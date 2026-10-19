@@ -36,7 +36,7 @@ from effective.handlers.durable import DurableHandler
 from effective.interpreters.tools import make_tool_runner
 from effective.keys import Key
 from effective.pareto import Objective, label_frontier
-from effective.react import Trajectory, run_agent
+from effective.react import load_ending, run_agent, unwrap
 from effective.telemetry import (
     Sink,
     Span,
@@ -276,17 +276,18 @@ def run_strategy(
         rec_ctx = RecordingCtx()  # record the paid trajectory so scoring can replay free
         truncated = False
         try:
-            traj = Trajectory.model_validate(
+            traj = load_ending(
                 DurableHandler(rec_ctx, interp).run(
                     lambda t=task: run_agent(t.prompt, max_iters=max_iters)
                 )
             )
-            res.passed += score(traj.answer, task)
+            answer = unwrap(traj)
+            res.passed += score(answer, task)
             res.total += 1
             res.recordings.append(
                 RecordedTrajectory(
                     task,
-                    traj.answer,
+                    answer,
                     interp.meter,
                     dict(rec_ctx.log),
                     max_iters,
@@ -324,12 +325,12 @@ def replay_free(recordings: list[RecordedTrajectory]) -> bool:
 
     for r in recordings:
         interp = MeteredInterpreter(llm=boom, tools=boom)
-        rep = Trajectory.model_validate(
+        rep = load_ending(
             DurableHandler(ReplayCtx(r.log), interp).run(
                 lambda rr=r: run_agent(rr.task.prompt, max_iters=rr.max_iters)
             )
         )
-        if rep.answer != r.answer:
+        if unwrap(rep) != r.answer:
             return False
     return True
 

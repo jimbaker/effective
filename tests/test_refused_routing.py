@@ -16,7 +16,13 @@ from effective.budget import as_policy as budget_policy
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Proceed, govern
 from effective.ops import Step
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+)
 
 
 def block_danger(op):
@@ -26,7 +32,7 @@ def block_danger(op):
     return Allow()
 
 
-def make_decide():
+def scripted_decide():
     script = iter(
         [
             AssistantTurn(thought="try the risky path", tool=ToolRequest(name="danger", args={})),
@@ -35,11 +41,15 @@ def make_decide():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(script)
 
     return decide
+
+
+def make_decide():
+    return scripted_decide()
 
 
 def gate():
@@ -87,9 +97,9 @@ def test_a_budget_refusal_ends_the_loop_at_the_refused_tool():
 
     turns = []
 
-    def decide(messages, tag):
-        turns.append(tag)
-        return (yield from make_decide()(messages, tag))
+    def decide(request):
+        turns.append(request.level)
+        return (yield from scripted_decide()(request))
 
     h = RecordingHandler({}, op_layers=[govern(tools_only, gate="spend", run_id="r")])
     with pytest.raises(BudgetRefused):

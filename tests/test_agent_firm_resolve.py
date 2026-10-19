@@ -35,7 +35,7 @@ from _firm import (
     resolved,
     ruling,
 )
-from _odoo import ERPS, another_invoice, books, fresh_round
+from _odoo import ERPS, another_invoice, books, crashed, durable_sweeps, fresh_round
 from _schedules import Turnstile, branch_of
 from _turns import Turns, gather_branches, schedules
 from pydantic import ValidationError
@@ -789,14 +789,13 @@ def test_a_denied_settlement_is_the_resolutions_answer_and_posts_nothing(backend
 
 
 @pytest.mark.adversarial
-@pytest.mark.parametrize("arm", ERPS)
-@pytest.mark.parametrize("position", list(FaultPosition))
+@pytest.mark.parametrize(("position", "arm"), durable_sweeps(list(FaultPosition)))
 def test_a_resolution_posts_once_whatever_a_crash_interrupts(backend, position, arm):
     erp_of = books(arm, [SLA_CAP])
     unarmed = Fault(None, position=position)
     _resolved(backend, _firm(erp=erp_of()), fault=unarmed)
     crashes = 0
-    for k, fault in at_every_op(unarmed):
+    for k, fault in crashed(arm, at_every_op(unarmed)):
         firm = _firm(erp=erp_of())
         run = _resolved(backend, firm, fault=fault)
         assert Completed.model_validate(run.result), k
@@ -805,7 +804,8 @@ def test_a_resolution_posts_once_whatever_a_crash_interrupts(backend, position, 
         assert firm.world.erp.residual(SLA_CAP.payment.id) == 0, k
         assert _rulers(backend, run.run_id) == [CONTROLLER], k
         crashes += 1
-    assert crashes == {FaultPosition.BEFORE_OP: 22, FaultPosition.AFTER_THUNK: 14}[position]
+    swept = {FaultPosition.BEFORE_OP: 22, FaultPosition.AFTER_THUNK: 14}[position]
+    assert crashes == {"scripted": swept, "odoo": 0}[arm]
 
 
 @pytest.mark.spine

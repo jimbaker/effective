@@ -16,7 +16,6 @@ from effective import (
     RecordingHandler,
     ReplayHandler,
     ReplayMismatch,
-    Suspended,
     ask_llm,
     call_tool,
 )
@@ -107,6 +106,7 @@ def test_agent_trajectory_replays_without_the_model():
     replayed = ReplayHandler(rec.trace).run(lambda: run_agent(QUESTION))
 
     assert replayed == live
+    assert isinstance(replayed, Trajectory)
     assert replayed.answer == "Acme Corp was founded in 1999."
 
 
@@ -130,7 +130,7 @@ def test_replay_detects_a_changed_agent_control_flow():
 def test_max_iters_forces_a_synthesized_final_answer():
     h = RecordingHandler(responses_never_finish())
     traj = h.run(lambda: run_agent(QUESTION, max_iters=2))
-    assert not isinstance(traj, Suspended)
+    assert isinstance(traj, Trajectory)
 
     assert traj.stop_reason == "max_iters"
     assert traj.answer == "best effort from the context"
@@ -178,7 +178,7 @@ def test_compaction_inserts_one_recorded_summary_op():
     management, not a reasoning step."""
     h = RecordingHandler(responses_with_compaction())
     traj = h.run(lambda: run_agent(QUESTION, compact=lambda m: len(m) > 4))
-    assert not isinstance(traj, Suspended)
+    assert isinstance(traj, Trajectory)
 
     assert traj.answer == "Acme Corp was founded in 1999."
     assert traj.stop_reason == "finish"
@@ -203,6 +203,7 @@ def test_compaction_run_replays_without_the_model():
         lambda: run_agent(QUESTION, compact=lambda m: len(m) > 4)
     )
     assert replayed == live
+    assert isinstance(replayed, Trajectory)
     assert replayed.answer == "Acme Corp was founded in 1999."
 
 

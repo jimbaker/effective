@@ -17,15 +17,26 @@ in-process contexts that run these without an engine are in `effective.contexts`
 """
 
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any, Protocol, assert_never
 
+from effective.compose import subagent_task
 from effective.contexts import LocalCtx
 from effective.cost import LLMCall, MeteredInterpreter, ToolRunner, Usage
 from effective.domain import SPAWN_TOOL, CallTool, SpawnArgs, SpawnResult
 from effective.engines.absurd import _adapt_ctx
 from effective.handlers.durable import DurableHandler
-from effective.react import ToolResult, Trajectory, run_agent
-from effective.spawning import answer_parent
+from effective.react import (
+    Escaped,
+    Exhausted,
+    ToolResult,
+    Trajectory,
+    answer_text,
+    escape_observation,
+    exhausted_observation,
+    load_ending,
+    run_agent,
+)
+from effective.spawning import run_child
 from effective.telemetry import Sink, traced
 
 type ToolFn = Callable[[dict[str, Any]], Any]
@@ -98,10 +109,17 @@ def subagent_runner(
         interp = MeteredInterpreter(llm=caller, tools=runner, domain_layers=layers)
         handler = DurableHandler(ctx=LocalCtx(), domain=interp)
         raw = handler.run(lambda: run_agent(subtask, max_iters=max_iters))
-        traj = Trajectory.model_validate(raw)
         if accrue is not None:
             accrue(interp.meter)
-        return ToolResult(content=traj.answer)
+        match load_ending(raw):
+            case Trajectory(answer=answer):
+                return ToolResult(content=answer_text(answer))
+            case Escaped() as escaped:
+                return escape_observation(escaped)
+            case Exhausted() as exhausted:
+                return exhausted_observation(exhausted)
+            case unreachable:
+                assert_never(unreachable)
 
     return run
 
@@ -141,16 +159,12 @@ def spawn_tool(spawner: Spawner) -> AgentTool:
 def run_subagent_as_task(
     params: dict[str, Any], ctx: Any, *, domain: Any, max_iters: int = 4
 ) -> Any:
-    """The child Absurd-task body: run `run_agent` under its **own** ctx, so the child has
-    its own checkpoints, then emit the parent's completion event with the
-    final answer. The emit is a checkpointed step, so a child retry re-emits at most once.
+    """The child task body: `run_agent` under its **own** ctx, so the child has its own
+    checkpoints, answering its parent through `run_child`: its answer, its refusal, or the cancel
+    an escape raises.
 
     Register it with the app, e.g. ``app.register_task(name)(partial(run_subagent_as_task,
     domain=...))``; the parent's `spawn_subagent_task` passes ``task`` and ``done_event``."""
     ctx = _adapt_ctx(ctx)  # the answer below reaches the SDK too, and it speaks text
-    raw = DurableHandler(ctx, domain, params=params).run(
-        lambda: run_agent(params["task"], max_iters=max_iters)
-    )
-    traj = Trajectory.model_validate(raw)
-    answer_parent(ctx, params, {"answer": traj.answer})
-    return raw
+    handler = DurableHandler(ctx, domain, params=params)
+    return run_child(ctx, params, handler, lambda: subagent_task(params["task"], max_iters))

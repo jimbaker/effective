@@ -12,14 +12,16 @@ from typing import Any
 
 import pytest
 
+from effective.cancel import Cancelled
 from effective.coding.states import ReviewVerdict, State
 from effective.coding.transition import Finish, transition
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Run, Segment
 from effective.machine.evidence import CommandRun
+from effective.machine.outcomes import Park, ParkReason
 from effective.machine.spec import Ctx, Evidence
 from effective.machine.specs import agent_worker, build_specs
-from effective.machine.trampoline import Session, run_machine
+from effective.machine.trampoline import RunCancelled, Session, run_machine
 from effective.react import AssistantTurn, ToolLog, Trajectory
 
 pytestmark = pytest.mark.journey
@@ -43,7 +45,7 @@ def scripted_decide(_needs):
     It yields NO op, which is fine for the one thing it is used to prove (that `needs` arrives) and
     is exactly why it is not used to prove anything about the tape."""
 
-    def decide(_messages, _tag):
+    def decide(request):
         return ANSWERED
         yield  # pragma: no cover  -- a `Decide` is a generator
 
@@ -171,3 +173,26 @@ def test_build_specs_refuses_a_map_that_is_not_total() -> None:
     """The failure this module exists to move from run time to assembly time."""
     with pytest.raises(ValueError, match="must be total over `State`"):
         build_specs(State, workers={State.REVIEW: unreachable_worker}, judges={})
+
+
+def test_a_worker_whose_loop_escapes_raises_the_cancel_and_reads_nothing():
+    """An escape is a cancel to the machine, never evidence a judge could rule on."""
+    read: list[Trajectory] = []
+
+    def recording_read(trajectory: Trajectory, _log: ToolLog) -> Evidence:
+        read.append(trajectory)
+        return Evidence(summary=trajectory.answer, detail="")
+
+    specs = specs_with_agent_review(read=recording_read)
+    handler = RecordingHandler(
+        responses={"tool:run_suite": GREEN, "react:turn": Cancelled(partial="half")}
+    )
+    with pytest.raises(RunCancelled) as cancelled:
+        handler.run(
+            lambda: run_machine(
+                Run("aw-2026"), "review it", specs, transition, start=State.REVIEW, budget=4
+            )
+        )
+    assert (cancelled.value.name, cancelled.value.partial) == ("react:turn", "half")
+    assert cancelled.value.session.stopped == Park(State.REVIEW, ParkReason.CANCELLED)
+    assert read == []

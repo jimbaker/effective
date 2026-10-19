@@ -184,11 +184,11 @@ that test for why the rule is relative to it rather than to the top of the funct
 
 
 def _raises_the_refused_run(node: ast.AST) -> bool:
-    """The one exit a run may take after its address: a refusal, raised as the run it stopped,
-    for the caller to commit or not."""
+    """The one exit a run may take after its address: a refusal or a cancel, raised as the run it
+    stopped, for the caller to commit or not."""
     match node:
         case ast.Raise(exc=ast.Call(func=func)):
-            return _callee_name(func) == "RunRefused"
+            return _callee_name(func) == "_stopped_run"
         case _:
             return False
 
@@ -200,8 +200,8 @@ def test_nothing_returns_or_raises_between_the_ADDRESS_and_the_postamble():
     no branch *around* the postamble to skip it. So the pin also reads source order. The `break`
     in the visit loop is deliberately not in that set; it leaves the loop, not the function.
 
-    **One exit is the design: a refused run raises `RunRefused`** and stays uncommitted until a
-    caller commits it. Any other exit is the defect.
+    **One exit is the design: a refused or cancelled run raises the run it stopped** and stays
+    uncommitted until a caller commits it. Any other exit is the defect.
 
     **The floor is the ADDRESS, not the top of the function.** The refusal of a `run_id` that
     cannot form an atom also exits `run_machine` above the postamble, and this pin does not see
@@ -243,13 +243,13 @@ def test_nothing_returns_or_raises_between_the_ADDRESS_and_the_postamble():
         node
         for node in below
         if isinstance(node, ast.If)
-        and ast.unparse(node.test) == "walked.refusal is not None"
+        and ast.unparse(node.test) == "walked.stop is not None"
         and node.body == refusals
         and not node.orelse
     ]
     assert (len(refusals), len(guards)) == (1, 1), (
-        f"the refused run's exit is {refusals} under {guards}: it is one `raise RunRefused`, "
-        "alone under `if walked.refusal is not None`"
+        f"the stopped run's exit is {refusals} under {guards}: it is one `raise _stopped_run`, "
+        "alone under `if walked.stop is not None`"
     )
     early = [
         (type(node).__name__, node.lineno)

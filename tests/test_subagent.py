@@ -11,6 +11,7 @@ traced interpreter. Two properties hold:
    carrying `Usage`) are how the parent observes it.
 """
 
+from effective.cancel import Cancelled
 from effective.contexts import LocalCtx
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM
@@ -64,7 +65,7 @@ def test_subagent_is_opaque_and_peeked_via_telemetry():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(parent_turns)
 
@@ -110,7 +111,7 @@ def test_subagent_cost_can_be_folded_into_a_parent_meter():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(parent_turns)
 
@@ -120,3 +121,34 @@ def test_subagent_cost_can_be_folded_into_a_parent_meter():
     DurableHandler(ctx=LocalCtx(), domain=interp).run(lambda: run_agent("q", decide=decide))
 
     assert total.cost == 0.005
+
+
+def test_an_escaped_subagent_reaches_its_parent_as_a_fenced_escape():
+    """The child's model call is cancelled mid-answer: the parent reads how the child ended and
+    what it had written, never an empty answer."""
+    delegate = subagent_runner(
+        scripted([(Cancelled(partial="half"), Usage())]), {}, agent_name="sub"
+    )
+    parent_turns = iter(
+        [
+            AssistantTurn(thought="go", tool=ToolRequest(name="delegate", args={"task": "t"})),
+            AssistantTurn(thought="done", answer="ok"),
+        ]
+    )
+    read: list[list[dict]] = []
+
+    def decide(request):
+        messages = request.messages
+        read.append(messages)
+        yield from ()
+        return next(parent_turns)
+
+    interp = MeteredInterpreter(
+        llm=boom, tools=make_tool_runner({}, agents={"delegate": delegate})
+    )
+    DurableHandler(ctx=LocalCtx(), domain=interp).run(lambda: run_agent("q", decide=decide))
+
+    observed = read[-1][-1]
+    assert observed["role"] == "tool"
+    assert observed["content"].startswith("[escaped: decide] ")
+    assert "\nhalf\n" in observed["content"], "the partial text arrives as a fenced data block"

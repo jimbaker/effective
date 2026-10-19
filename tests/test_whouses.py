@@ -221,7 +221,14 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # the sandbox that refuses it.
     # `fork.decode_checkpoint` reads a driven entry's result and usage and a bridged entry's state.
     # `grammar._render_terms` reads whether a projected term wraps, as it reads a term's.
-    assert reached == 326, f"the corpus this fix was measured on held 326; found {reached}"
+    # `react.unwrap` reads an answer, or an escape's name and partial; `_before_decide`,
+    # `_after_decide` and `_after_act` read the poll an escape names, and `_act` a cut action's
+    # partial; `interpreters.tools.subagent_runner` reads a subagent's answer.
+    # `handlers.base._domain_effect` and `cache.op_digest` read a model call's answer schema in
+    # an arm of its own, `react.unwrap` an exhausted run's repair reason and budget, and
+    # `react._settled` a refused answer's reason.
+    # `react._carrying` reads the loop a redirect hands the next level.
+    assert reached == 347, f"the corpus this fix was measured on held 347; found {reached}"
 
     seen = {
         (str(p), line + 1)

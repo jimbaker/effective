@@ -44,7 +44,10 @@ class Redirect:
 
 @dataclass(frozen=True, slots=True)
 class Escape:
-    """The user abandoned this turn."""
+    """The user abandoned this turn. `name` is the poll's authored name, `None` for a poll
+    that records nothing."""
+
+    name: str | None = None
 
 
 type Signal = Quiet | Redirect | Escape
@@ -60,9 +63,10 @@ class Interrupted(BaseModel):
     escape: bool = False
 
 
-def signal_of(answer: Interrupted) -> Signal:
+def signal_of(answer: Interrupted, name: str | None = None) -> Signal:
+    """The signal a poll named `name` answered."""
     if answer.escape:
-        return Escape()
+        return Escape(name)
     return Quiet() if answer.redirect is None else Redirect(answer.redirect)
 
 
@@ -79,14 +83,15 @@ def tool_interrupt(phases: Set[Phase] = BETWEEN_TURNS) -> Interrupt:
     def poll(turn: int, phase: Phase) -> Effect[Signal]:
         if phase not in phases:
             return Quiet()
+        # `interrupt` STATIC: an interpolated discriminator is a hole to the key registry, so
+        # the shape would be "not provably disjoint" from any other arity-3 `tool:` variant.
+        name = compose_key(t"tool:interrupt,{Name(phase)}").stored()
         answer = yield from step(
-            # `interrupt` STATIC: an interpolated discriminator is a hole to the key registry, so
-            # the shape would be "not provably disjoint" from any other arity-3 `tool:` variant.
-            compose_key(t"tool:interrupt,{Name(phase)}").stored(),
+            name,
             CallTool(
                 name=INTERRUPT_TOOL, args={"turn": turn, "phase": phase}, result_schema=Interrupted
             ),
         )
-        return signal_of(answer)
+        return signal_of(answer, name)
 
     return poll

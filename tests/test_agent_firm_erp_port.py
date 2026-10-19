@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 from functools import partial
@@ -31,7 +31,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from _odoo import ERPS, another_invoice, opened
+from _odoo import ERPS, another_invoice, faulted, opened
 from _turns import Turns, schedules
 
 from examples.agent_firm.cases import CLEAN, SLA_CAP
@@ -84,15 +84,18 @@ class Position(StrEnum):
 
 @dataclass
 class Faulting:
-    """A transport that raises `Unknown` at its `at`th call, before it or after it committed."""
+    """A transport that raises `Unknown` at its `at`th call, before it or after it committed, and
+    the methods it was called with."""
 
     inner: Transport
     at: int | None
     position: Position
     calls: int = 0
+    methods: list[str] = field(default_factory=list)
 
     def call(self, model: str, method: str, *args: Any, **kwargs: Any) -> Any:
         self.calls += 1
+        self.methods.append(method)
         if self.calls == self.at and self.position is Position.BEFORE_CALL:
             raise Unknown(f"before {model}.{method}")
         answer = self.inner.call(model, method, *args, **kwargs)
@@ -171,7 +174,7 @@ def _found(answer: ErpResult) -> Found | None:
 def test_an_op_lands_once_whatever_a_fault_interrupts(arm, op):
     open_, case = opened(arm, [SLA_CAP]), OPS[op]
 
-    def run(at: int | None, position: Position) -> int:
+    def run(at: int | None, position: Position) -> list[str]:
         transport, documents = open_()
         erp = OdooErp(transport, documents)
         asked = case.setup(erp)
@@ -188,11 +191,11 @@ def test_an_op_lands_once_whatever_a_fault_interrupts(arm, op):
         if answer is not None:
             assert replayed is Found.EXISTING, (at, position)
         case.landed(erp, asked)
-        return faulting.calls
+        return faulting.methods
 
-    calls = run(None, Position.BEFORE_CALL)
+    methods = run(None, Position.BEFORE_CALL)
     for position in Position:
-        for at in range(1, calls + 1):
+        for at in faulted(arm, methods):
             run(at, position)
 
 
@@ -806,13 +809,15 @@ def test_a_draft_is_neither_reversed_nor_applied(arm):
 
 class Interleaving:
     """A transport that, before its `at`th call, runs `replay` once: a second attempt of the op
-    overlapping the first."""
+    overlapping the first. It keeps the methods it was called with."""
 
     def __init__(self, inner: Transport, at: int | None, replay: Callable[[], None]) -> None:
         self.inner, self.at, self.replay, self.calls = inner, at, replay, 0
+        self.methods: list[str] = []
 
     def call(self, model: str, method: str, *args: Any, **kwargs: Any) -> Any:
         self.calls += 1
+        self.methods.append(method)
         if self.calls == self.at:
             self.replay()
         return self.inner.call(model, method, *args, **kwargs)
@@ -825,7 +830,7 @@ class Interleaving:
 def test_an_op_lands_once_when_its_replay_overlaps_it(arm, op):
     open_, case = opened(arm, [SLA_CAP]), OPS[op]
 
-    def run(at: int | None) -> int:
+    def run(at: int | None) -> list[str]:
         transport, documents = open_()
         erp = OdooErp(transport, documents)
         asked, key, answers = case.setup(erp), fresh("the op"), []
@@ -837,10 +842,9 @@ def test_an_op_lands_once_when_its_replay_overlaps_it(arm, op):
         answers.append(_found(OdooErp(interleaving, documents).perform(asked, key)))
         assert all(answers), (at, answers)
         case.landed(erp, asked)
-        return interleaving.calls
+        return interleaving.methods
 
-    calls = run(None)
-    for at in range(1, calls + 1):
+    for at in faulted(arm, run(None)):
         run(at)
 
 

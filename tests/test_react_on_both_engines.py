@@ -14,7 +14,6 @@ from effective import Allow, Deny, cascade, rules
 from effective.api import Effect, qualified_event_name, scoped
 from effective.budget import MeasuredBudget
 from effective.budget import as_policy as budget_policy
-from effective.combinators import Level
 from effective.compose import ASK_HUMAN, Interrupted, make_act, tool_interrupt
 from effective.domain import INTERRUPT_TOOL, AskLLM, CallTool, DomainOp
 from effective.govern import BudgetRefused, Proceed, Refused, govern, routable
@@ -26,7 +25,9 @@ from effective.react import (
     ToolResult,
     Trajectory,
     TrajectorySummary,
+    TurnRequest,
     run_agent,
+    unwrap,
 )
 
 pytestmark = pytest.mark.conformance
@@ -80,10 +81,11 @@ def routed(run_id: str) -> Effect[dict[str, Any]]:
         return {"budget": refused.reason}
     except Refused as refused:
         return {"caught": routable(refused).reason}
-    return {"answer": trajectory.answer, "obs": [s.observation for s in trajectory.steps]}
+    return {"answer": unwrap(trajectory), "obs": [s.observation for s in trajectory.steps]}
 
 
-def refusing_decide(messages: list[dict[str, Any]], level: Level) -> Effect[AssistantTurn]:
+def refusing_decide(request: TurnRequest) -> Effect[AssistantTurn]:
+    messages, level = request.messages, request.level
     yield from ()
     if level.depth == 1:
         asked = Step("react:turn", AskLLM(messages=messages, response_schema=AssistantTurn))
@@ -192,7 +194,7 @@ class MixedDomain:
 
 
 def mixed(run_id: str) -> Effect[dict[str, Any]]:
-    trajectory: Trajectory = yield from scoped(
+    trajectory = yield from scoped(
         compose_key(t"mix:{Run(run_id)}"),
         lambda: run_agent(
             "go",
@@ -202,6 +204,7 @@ def mixed(run_id: str) -> Effect[dict[str, Any]]:
             compact=lambda messages: len(messages) >= 4,
         ),
     )
+    assert isinstance(trajectory, Trajectory), trajectory
     return {
         "answer": trajectory.answer,
         "stop": trajectory.stop_reason,

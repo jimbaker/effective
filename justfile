@@ -28,9 +28,10 @@ install:
 
 # Full test suite, seed-pinned. Postgres-backed tests skip without a database; `just pgt-up`
 # first to run them, on `PGTEST_PORT` if set. Each xdist worker gets its own copy of a template
-# database.
+# database. Tests spread one at a time, except a file marked with an `xdist_group`, which shares
+# state across its tests and runs on one worker.
 test: key-registry
-    DATABASE_URL="{{PG_URL}}" uv run pytest -q -n auto --dist loadfile --randomly-seed={{GATE_SEED}}
+    DATABASE_URL="{{PG_URL}}" uv run pytest -q -n auto --dist loadgroup --randomly-seed={{GATE_SEED}}
 
 # Infra-free tests only: a dead DATABASE_URL makes every backend-gated test skip.
 test-fast: key-registry
@@ -64,9 +65,9 @@ lint:
     uv run python -m effective.lint --key-borrowing tests
     uv run python -m effective.lint --key-literals src
     uv run python -m effective.lint --forged-join src
-    # An f-string belongs in a t-string processor's render backend and in building an exception.
-    # Every other one is recorded with the processor it wants; the gate fails on a new one and on
-    # a record nothing produces, so the record can only shrink.
+    # An f-string belongs in a t-string processor's render backend and in a structured exception's
+    # `__str__`. Every other one is counted with the processor it wants; the gate fails on a new
+    # one and on a count nothing produces, so the record can only shrink.
     uv run python scripts/fstring_sweep.py --gate src
     uv run python -m effective.lint --lazy-imports src/effective src/agent src/tui src/examples
     # Only the Absurd engine module reaches the SDK's private surface. Tests are unscanned, since
@@ -158,7 +159,7 @@ cov:
     just pgt-up
     if [ "$ours" = 1 ]; then trap 'just pgt-down' EXIT; fi
     DATABASE_URL="{{PG_URL}}" \
-        uv run pytest -q -n auto --dist loadfile --cov-fail-under=90 --randomly-seed={{GATE_SEED}}
+        uv run pytest -q -n auto --dist loadgroup --cov-fail-under=90 --randomly-seed={{GATE_SEED}}
 
 # Per-test coverage contexts, for asking which test covers a line
 cov-contexts *ARGS:

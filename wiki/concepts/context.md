@@ -14,6 +14,7 @@ channels declare the schema the answer parses back into
 | skills | a catalog in the cached prefix; a disclosed body as the volatile tail | `SkillRegistry` in [`src/effective/skills.py`](../../src/effective/skills.py) |
 | skill hoisting | one activation above a fan-out, its pin shared by every branch | `hoisted` in [`src/effective/combinators.py`](../../src/effective/combinators.py) |
 | code | code the model or a skill supplies runs as an effect in a sandbox | `run_code` in [`src/effective/code.py`](../../src/effective/code.py), `MontyEngine` in [`src/effective/monty.py`](../../src/effective/monty.py) |
+| answer | a typed run's answer contract: the schema every decide asks for, and a tail naming its fields, the rendered contract and the last refusal | `run_agent(answer=...)` in [`src/effective/react.py`](../../src/effective/react.py) |
 | tools | a stable catalog in the prefix; a per-turn allowlist constrains selection | [ADR-0004](../../docs/adr/0004-react-loop-driver.md) D5, [`src/agent/bracket.py`](../../src/agent/bracket.py) |
 | memory | open: a run's record is durable, and nothing carries it into the next run | [ADR-0002](../../docs/adr/0002-harness-layer-stack.md), open questions |
 | MCP | an MCP server's tools would reach the loop through an interpreter for `CallTool`; nothing is built | none |
@@ -33,6 +34,26 @@ The content cache is a second, independent layer. `op_digest` keys an `AskLLM`, 
 a model. A `Message`'s `cache` flag is a provider hint and stays out of the key. A hit reports
 `Usage()`, and its entry keeps what the answer cost when it was first asked. `FileStore` is the
 store that exists.
+
+## A typed answer
+
+`run_agent(answer=contract)` types a run's answer. The contract is a function returning
+`Prompt[M]`, and each of its parameters binds the last result of the one declared tool producing
+that type, so a `Gated` channel can check the answer against the evidence the run gathered; a
+parameter's default stands in until its tool answers. Every decide receives `M`'s schema and a
+volatile tail after the transcript: the answer's fields, the rendered contract once its evidence
+binds, and the last refusal on a repair turn. The transcript never keeps the tail, so compaction
+and the cached prefix never see it. A refused answer is decided again at the same level, as a
+numbered repeat of the turn's op that compacts nothing, until `repairs` run out and the run ends
+`Exhausted`, which `unwrap` raises as a climbing refusal. A redirect on a repair turn carries the
+refusal to the next level. The provider's answer is recorded raw and resolved by
+`Prompt.resolve`, live and on replay alike.
+
+| transport | the answer |
+|---|---|
+| the Responses caller | shaped to the schema by the provider, read back as raw JSON |
+| a caller whose answer is a string | the answer's JSON inside the string, which the interpreter asks for |
+| a CLI | the schema inside the one it hands the CLI |
 
 ## Skills
 

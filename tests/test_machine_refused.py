@@ -1,8 +1,10 @@
-"""What a refused run leaves on the canonical record, and what its caller can do with it.
+"""What a refused or cancelled run leaves on the canonical record, and what its caller can do
+with it.
 
-ROLE: adversarial. A canonical state appends, then the budget refuses a later ask. The
-run stays uncommitted and raises `RunRefused`, carrying what it built; a caller that wants the run
-on the record commits it with `committing`. Both engines.
+ROLE: adversarial. A canonical state appends, then the budget refuses a later ask, or a later
+step is cancelled. The run stays uncommitted and raises `RunRefused` or `RunCancelled`, carrying
+what it built; a caller that wants the run on the record commits it with `committing`. Both
+engines.
 """
 
 from collections.abc import Callable, Mapping
@@ -13,10 +15,11 @@ from uuid import uuid4
 import pytest
 from _conformance import Fault
 
-from effective.api import Effect, append_ledger, ask_llm, gather
+from effective.api import Effect, append_ledger, ask_llm, call_tool, gather, scoped
+from effective.cancel import Cancelled
 from effective.combinators import Grant
 from effective.cost import MeteredInterpreter, Usage
-from effective.govern import ChildRefused
+from effective.govern import REFUSALS, ChildRefused
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Name, Run, compose_key
 from effective.machine.evidence import CommandRun
@@ -24,6 +27,7 @@ from effective.machine.outcomes import Exhausted, Finish, Outcome, Park, ParkRea
 from effective.machine.spec import Ctx, Evidence, Report, StateSpec
 from effective.machine.specs import fuse
 from effective.machine.trampoline import (
+    RunCancelled,
     RunRefused,
     Session,
     committing,
@@ -31,6 +35,7 @@ from effective.machine.trampoline import (
     running_under,
 )
 from effective.ops import CHAIN_GENERATION, LedgerRow
+from effective.spawning import stopped_at
 
 COST = 0.001
 LIMIT = 0.0015
@@ -62,6 +67,17 @@ def spending(ctx: Ctx[Step]) -> Effect[Report[Said]]:
 SPECS = {Step.SPEND: StateSpec(Step.SPEND, spending, canonical=True)}
 
 
+def stopping(ctx: Ctx[Step]) -> Effect[Report[Said]]:
+    """Appends its row, then runs a step that is cancelled while it runs."""
+    note = compose_key(t"note:{Name('spent')},{Name(ctx.run_id)}")
+    yield from append_ledger(LedgerRow(event_id=note, kind="noted"))
+    yield from call_tool("stop", {}, CommandRun)
+    return Report(Said.DONE, summary="stopped")
+
+
+CANCELLING = {Step.SPEND: StateSpec(Step.SPEND, stopping, canonical=True)}
+
+
 def writing(_ctx: Ctx[Step]) -> Effect[Evidence]:
     return Evidence(summary="wrote", tree={"changed.py": "new"})
     yield  # pragma: no cover  -- a worker is a generator
@@ -75,6 +91,15 @@ def spending_judge(_ctx: Ctx[Step], _evidence: Evidence) -> Effect[Said]:
 
 
 JUDGED = {Step.SPEND: StateSpec(Step.SPEND, fuse(writing, spending_judge))}
+
+
+def stopping_judge(_ctx: Ctx[Step], _evidence: Evidence) -> Effect[Said]:
+    """Runs a step that is cancelled, after its worker has returned."""
+    yield from call_tool("stop", {}, CommandRun)
+    return Said.DONE
+
+
+JUDGED_CANCELLED = {Step.SPEND: StateSpec(Step.SPEND, fuse(writing, stopping_judge))}
 
 
 def writing_through_a_helper(ctx: Ctx[Step]) -> Effect[Evidence]:
@@ -95,8 +120,8 @@ def refused_run(run_id: str) -> Effect[Session]:
     return (yield from run_machine(Run(run_id), "spend", SPECS, finish, start=Step.SPEND))
 
 
-CAUGHT: list[RunRefused] = []
-"""The refusals a parent caught, taken while they are still objects."""
+CAUGHT: list[RunRefused | RunCancelled] = []
+"""The stopped runs a parent caught, taken while they are still objects."""
 
 
 @pytest.fixture(autouse=True)
@@ -129,6 +154,9 @@ def delegating(
         except RunRefused as refused:
             CAUGHT.append(refused)
             return Report(Said.DONE, summary="the child was refused")
+        except RunCancelled as cancelled:
+            CAUGHT.append(cancelled)
+            return Report(Said.DONE, summary="the child was cancelled")
         return Report(Said.DONE, summary="the child finished")
 
     return state
@@ -161,7 +189,9 @@ def parent(
 def domain() -> MeteredInterpreter:
     return MeteredInterpreter(
         llm=lambda _op: ("ans", Usage(prompt_tokens=1, completion_tokens=1, cost=COST)),
-        tools=lambda _op: CommandRun(exit_code=0),
+        tools=lambda op: (
+            Cancelled(partial="half") if op.name == "stop" else CommandRun(exit_code=0)
+        ),
     )
 
 
@@ -189,11 +219,15 @@ def test_a_refused_run_carries_what_it_built(backend):
     _run_id, _task, snap = run(backend, parent(bare), attempts=1)
     assert snap.state == "completed", snap
     (refused,) = CAUGHT
+    assert isinstance(refused, RunRefused)
     session = refused.session
     assert session.stopped == Park(Step.SPEND, ParkReason.REFUSED)
     assert session.turns == ()
     assert session.commitment is None
     assert type(refused.__cause__).__name__ == "BudgetRefused"
+    assert (refused.run_id, refused.refused) == (str(session.run_id), str(refused.__cause__))
+    assert refused.run_id in str(refused)
+    assert refused.refused in str(refused)
 
 
 def test_a_parent_that_catches_the_refusal_closes_its_own_run(backend):
@@ -224,6 +258,50 @@ def test_committing_writes_the_refused_run_before_its_refusal_climbs(backend):
         "machine-finished",
     ]
     assert backend.ledger_ids(run_id)[1:] == child + snap.result["closed"]
+
+
+DEEPER = compose_key(t"sub:{Name('deeper')}")
+
+
+def committing_in_its_scope(child: Callable[[], Effect[Session]]) -> Effect[Session]:
+    return (yield from scoped(DEEPER, lambda: committing(child)))
+
+
+def committing_outside_its_scope(child: Callable[[], Effect[Session]]) -> Effect[Session]:
+    return (yield from committing(lambda: scoped(DEEPER, child)))
+
+
+def test_a_refused_child_in_a_scope_is_committed_and_its_parent_catches_it(backend):
+    """A handler delivers a refusal across the scope, so the parent parks its own run."""
+    run_id, _task, snap = run(backend, parent(committing_in_its_scope), attempts=1)
+
+    assert snap.state == "completed", snap
+    assert snap.result["summary"] == "the child was refused"
+    assert backend.ledger_kinds(run_id) == [
+        "noted",
+        "machine-committed",
+        "machine-parked",
+        "machine-committed",
+        "machine-finished",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("wrap", "kinds"),
+    [
+        (committing_in_its_scope, ["noted", "machine-committed", "machine-parked"]),
+        (committing_outside_its_scope, ["noted"]),
+    ],
+)
+def test_a_cancelled_child_in_a_scope_climbs_to_the_task(backend, wrap, kinds):
+    """A cancel crosses no scope: the parent never catches it, and only a `committing` inside the
+    scope commits the child before it climbs."""
+    run_id, _task, snap = run(backend, parent(wrap, CANCELLING), attempts=1)
+
+    assert snap.state == "failed", snap
+    assert "RunCancelled" in str(snap.failure), snap.failure
+    assert CAUGHT == []
+    assert backend.ledger_kinds(run_id) == kinds
 
 
 def nested(child: Callable[[], Effect[Session]]) -> Effect[Session]:
@@ -276,6 +354,71 @@ def test_a_helpers_refused_judge_leaves_the_last_returned_tree(backend):
     commitment = refused.session.commitment
     assert commitment is not None
     assert commitment.files == ()
+
+
+def test_a_cancelled_run_carries_what_it_built_and_answers_as_a_cancel(backend):
+    """The run parks at the cancelled state, uncommitted, with the cancel's partial text; a task
+    that raises it under `run_child` answers its parent `Cancelled` with that text."""
+    _run_id, _task, snap = run(backend, parent(bare, CANCELLING), attempts=1)
+
+    assert snap.state == "completed", snap
+    assert snap.result["summary"] == "the child was cancelled"
+    (cancelled,) = CAUGHT
+    assert type(cancelled) is RunCancelled
+    assert cancelled.session.stopped == Park(Step.SPEND, ParkReason.CANCELLED)
+    assert cancelled.session.turns == ()
+    assert cancelled.session.commitment is None
+    assert cancelled.partial == "half"
+    assert cancelled.run_id == str(cancelled.session.run_id)
+    assert cancelled.run_id in str(cancelled)
+    assert cancelled.name in str(cancelled)
+    assert stopped_at(cancelled, REFUSALS) == Cancelled(partial="half")
+
+
+def test_committing_writes_the_cancelled_run_before_its_cancel_climbs(backend):
+    """The skipped postamble, run by the caller that chose it, with the outcome row reading
+    `cancelled`; the cancel still reaches the parent, which closes its own run."""
+    run_id, _task, snap = run(backend, parent(committing, CANCELLING), attempts=1)
+
+    assert snap.state == "completed", snap
+    (cancelled,) = CAUGHT
+    child = [cancelled.session.commit_id.stored(), cancelled.session.outcome_id.stored()]
+    assert backend.ledger_kinds(run_id) == [
+        "noted",
+        "machine-committed",
+        "machine-parked",
+        "machine-committed",
+        "machine-finished",
+    ]
+    assert backend.ledger_ids(run_id)[1:] == child + snap.result["closed"]
+    assert [row.get("reason") for row in backend.ledger_payloads(run_id)][2] == "cancelled"
+
+
+def test_a_cancelled_run_is_committed_once_however_many_frames_catch_it(backend):
+    run_id, _task, snap = run(backend, parent(nested, CANCELLING), attempts=1)
+
+    assert snap.state == "completed", snap
+    (cancelled,) = CAUGHT
+    assert cancelled.session.commitment is not None
+    assert backend.ledger_kinds(run_id) == [
+        "noted",
+        "machine-committed",
+        "machine-parked",
+        "machine-committed",
+        "machine-finished",
+    ]
+
+
+def test_a_cancelled_judge_leaves_the_tree_its_worker_returned(backend):
+    _run_id, _task, snap = run(backend, parent(committing, JUDGED_CANCELLED), attempts=1)
+
+    assert snap.state == "completed", snap
+    (cancelled,) = CAUGHT
+    assert type(cancelled) is RunCancelled
+    assert cancelled.tree == {"changed.py": "new"}
+    commitment = cancelled.session.commitment
+    assert commitment is not None
+    assert commitment.files == ("changed.py",)
 
 
 def refused_branch() -> Effect[Report[Said]]:

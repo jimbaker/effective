@@ -6,9 +6,10 @@ on a run that never reached it.
 
 import os
 import socket
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from decimal import Decimal
 from functools import cache
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -18,7 +19,7 @@ from examples.agent_firm.ar import Round
 from examples.agent_firm.cases import SLA_CAP, Case
 from examples.agent_firm.erp.odoo import OdooErp, Transport, XmlRpc, seed
 from examples.agent_firm.erp.port import Erp
-from examples.agent_firm.erp.scripted import ScriptedOdoo
+from examples.agent_firm.erp.scripted import READS, ScriptedOdoo
 
 ERPS = ["scripted", "odoo"]
 """The arms a test of the port runs on."""
@@ -63,6 +64,54 @@ def opened(arm: str, cases: Sequence[Case]) -> Callable[[], Opened]:
             return lambda: (transport, seed(transport, cases, uuid4().hex[:8]))
         case _:
             raise ValueError(f"no ERP arm {arm!r}")
+
+
+def faulted(arm: str, methods: Sequence[str]) -> list[int]:
+    """The calls, counted from 1, that a sweep over a transport's `methods` faults on an arm.
+
+    | arm        | the calls                                                         |
+    |------------|-------------------------------------------------------------------|
+    | `scripted` | every call                                                        |
+    | `odoo`     | each call that writes, where a lost answer leaves a commit behind |
+
+    A fault at a read loses no write, so on either arm it ends as a fault after the write before
+    it. A replay overlapping a read sends the first attempt down a path that a kept position or
+    the scripted arm's every-call sweep also reaches. The live arm keeps the calls where Odoo's
+    own answer to a write decides what the retry finds."""
+    match arm:
+        case "scripted":
+            return list(range(1, len(methods) + 1))
+        case "odoo":
+            return [at for at, method in enumerate(methods, 1) if method not in READS]
+        case _:
+            raise ValueError(arm)
+
+
+def crashed[T](arm: str, points: Iterable[T]) -> Iterable[T]:
+    """The engine crash points a durable sweep runs on an arm.
+
+    | arm        | the crash points                           |
+    |------------|--------------------------------------------|
+    | `scripted` | every one                                  |
+    | `odoo`     | none: the flow runs once on the live books |
+
+    A crash's replay performs the crashed op again against the books. On the live books that
+    retry is swept per write at the transport, faulted after each commit and replayed to find
+    its own entry."""
+    match arm:
+        case "scripted":
+            return points
+        case "odoo":
+            return ()
+        case _:
+            raise ValueError(arm)
+
+
+def durable_sweeps[P](positions: Sequence[P]) -> list[Any]:
+    """The `(position, arm)` cases of a durable crash sweep: each position on the scripted arm,
+    and the live arm once, `unbroken`, since `crashed` gives it no crash point to place."""
+    scripted = [pytest.param(p, "scripted", id=f"{p}-scripted") for p in positions]
+    return [*scripted, pytest.param(positions[0], "odoo", id="unbroken-odoo")]
 
 
 def books(arm: str, cases: Sequence[Case]) -> Callable[[], Erp]:

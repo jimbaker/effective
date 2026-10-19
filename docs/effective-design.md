@@ -1031,7 +1031,7 @@ The backend position is a positive choice. Measured here, 2M iterations on a 3-s
 
 f-string when the processor knows the shape, `str.join` when arity is variable. A bare f-string in
 an identity, SQL, prompt or markup position reads as *"a decision was skipped here."* A gate
-enforces it (`scripts/fstring_sweep.py --gate src`), with a baseline that can only shrink.
+enforces it (`scripts/fstring_sweep.py --gate src`), with a counted baseline that can only shrink.
 
 ---
 

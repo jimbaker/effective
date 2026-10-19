@@ -25,7 +25,8 @@ from pydantic import TypeAdapter
 from effective.channels import Message
 from effective.cost import Usage
 from effective.domain import AskLLM
-from effective.interpreters.openai import GPT6_LUNA, GPT6_SOL, Price
+from effective.interpreters.openai import GPT6_LUNA, GPT6_SOL, Price, with_answer
+from effective.react import AssistantTurn
 from effective.spend import TokenBudget
 
 type Runner = Callable[[Sequence[str], Path, str], str]
@@ -71,7 +72,12 @@ def _parsed(cli: str, stdout: str) -> Any:
 
 
 def _schema(op: AskLLM[Any]) -> dict[str, Any]:
-    return TypeAdapter(op.response_schema).json_schema()
+    """The op's response schema. A turn's answer takes a typed run's schema, and text without
+    one."""
+    schema = TypeAdapter(op.response_schema).json_schema()
+    if op.response_schema is not AssistantTurn:
+        return schema
+    return with_answer(schema, op.answer_schema or {"type": "string"})
 
 
 def _strict(schema: Any) -> Any:

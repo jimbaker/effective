@@ -18,10 +18,17 @@ from effective.budget import Grant, depth_grant_name
 from effective.combinators import grant_cascade, human_grant
 from effective.compose import ASK_HUMAN, make_act
 from effective.domain import AskLLM, CallTool, DomainOp
-from effective.handlers.recording import RecordingHandler, Suspended
+from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Index, Run, compose_key
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+    unwrap,
+)
 
 DEPTH = 2 * sys.getrecursionlimit()
 SPIN = AssistantTurn(thought="spin", tool=ToolRequest(name="spin"))
@@ -46,10 +53,10 @@ class Answers(Mapping[str, Any]):
 
 def walk(handler: RecordingHandler, max_iters: int) -> Trajectory:
     match handler.run(lambda: run_agent("spin", max_iters=max_iters)):
-        case Suspended() as parked:
-            raise AssertionError(f"no park was expected: {parked}")
-        case trajectory:
+        case Trajectory() as trajectory:
             return trajectory
+        case other:
+            raise AssertionError(f"an answer was expected: {other}")
 
 
 def test_run_agent_past_the_recursion_limit_on_the_recorder_and_replay():
@@ -95,6 +102,7 @@ def add_two_turns_once(depth: int) -> Effect[Grant]:
 
 def granted(run_id: str) -> Effect[dict[str, Any]]:
     trajectory = yield from run_agent("spin", max_iters=1, grantor=add_two_turns_once)
+    assert isinstance(trajectory, Trajectory), trajectory
     return {"steps": len(trajectory.steps), "stop": trajectory.stop_reason}
 
 
@@ -111,6 +119,7 @@ def test_a_grantor_adds_turns_on_both_engines(backend):
 def granted_by_a_human(run_id: str) -> Effect[dict[str, Any]]:
     grantor = grant_cascade([human_grant(run_id)])
     trajectory = yield from run_agent("spin", max_iters=1, grantor=grantor)
+    assert isinstance(trajectory, Trajectory), trajectory
     return {"steps": len(trajectory.steps), "stop": trajectory.stop_reason}
 
 
@@ -170,7 +179,7 @@ def shipping(run_id: str) -> Effect[str]:
         compose_key(t"shipping:{Run(run_id)}"),
         lambda: run_agent("ship it?", act=make_act()),
     )
-    return trajectory.answer
+    return unwrap(trajectory)
 
 
 def test_a_human_ask_parks_inside_its_turns_frame_on_both_engines(backend):
@@ -196,7 +205,7 @@ class Broken(Exception):
     """A defect in a `decide`, which no refusal covers."""
 
 
-def broken_decide(messages, level):
+def broken_decide(request):
     raise Broken("the decide is broken")
     yield  # pragma: no cover  -- a `Decide` is a generator
 

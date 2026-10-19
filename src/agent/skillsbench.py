@@ -33,7 +33,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, assert_never
 
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
@@ -48,7 +48,16 @@ from effective.envelope import Envelope, JsonEnvelope
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.openai import OpenAITurnCaller, to_openai_messages, usage_from_openai
 from effective.interpreters.tools import make_tool_runner
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    Escaped,
+    Exhausted,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    load_ending,
+    run_agent,
+)
 from effective.skills import Pin, SkillRegistry
 from effective.telemetry import Span, measurements, multi, otlp_jsonl_sink, traced
 
@@ -428,6 +437,21 @@ class TrialResult:
     wire_failures: int = 0
 
 
+def _stopped(ending: Trajectory | Escaped | Exhausted | None) -> str:
+    """How a trial's run stopped, or `error` when it never ended."""
+    match ending:
+        case Trajectory(stop_reason=stop_reason):
+            return stop_reason
+        case Escaped():
+            return "escaped"
+        case Exhausted():
+            return "exhausted"
+        case None:
+            return "error"
+        case unreachable:
+            assert_never(unreachable)
+
+
 def run_trial(
     task: TaskSpec,
     arm: str,
@@ -502,7 +526,7 @@ def run_trial(
         elif errors:
             error = f"{type(errors[0]).__name__}: {errors[0]}"
         else:
-            traj = Trajectory.model_validate(result[0])
+            traj = load_ending(result[0])
         reward = container.run_verifier()
     except Exception as exc:
         error = error or f"{type(exc).__name__}: {exc}"
@@ -515,7 +539,7 @@ def run_trial(
         arm=arm,
         attempt=attempt,
         reward=reward,
-        stop_reason=traj.stop_reason if traj else "error",
+        stop_reason=_stopped(traj),
         steps=len(traj.steps) if traj else 0,
         prompt_tokens=meter.prompt_tokens,
         completion_tokens=meter.completion_tokens,

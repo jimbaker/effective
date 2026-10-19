@@ -28,7 +28,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 from effective.cancel import Cancelled, CancelToken
 from effective.channels import Message
@@ -218,6 +218,66 @@ class _WireTurn(BaseModel):
     answer: str | None = Field(description="The final answer, or null when acting.")
 
 
+class _TypedTurn(BaseModel):
+    """A turn whose answer the provider shaped to a typed run's schema, read back as raw JSON.
+    The run resolves the answer against its model; nothing validates it here."""
+
+    thought: str = ""
+    tool: _WireTool | None = None
+    answer: JsonValue | None = None
+
+
+def with_answer(schema: dict[str, Any], answer_schema: dict[str, Any]) -> dict[str, Any]:
+    """`schema`, a turn's JSON schema, with its `answer` taking `answer_schema` or null. The
+    answer schema's definitions join the turn's, keeping those a reference reaches."""
+    answer = {key: value for key, value in answer_schema.items() if key != "$defs"}
+    properties = {**schema["properties"], "answer": {"anyOf": [answer, {"type": "null"}]}}
+    shaped = {key: value for key, value in schema.items() if key != "$defs"}
+    shaped["properties"] = properties
+    definitions = {**schema.get("$defs", {}), **answer_schema.get("$defs", {})}
+    reached = _referenced(shaped, definitions)
+    return shaped if not reached else {**shaped, "$defs": reached}
+
+
+def _referenced(schema: Any, definitions: dict[str, Any]) -> dict[str, Any]:
+    """The definitions `schema` reaches through `$ref`, directly or through one another."""
+    reached: dict[str, Any] = {}
+    pending = [schema]
+    while pending:
+        for name in _refs(pending.pop()):
+            if name in definitions and name not in reached:
+                reached[name] = definitions[name]
+                pending.append(definitions[name])
+    return reached
+
+
+def _refs(schema: Any) -> Iterator[str]:
+    """The definition names `schema`'s local references point at."""
+    match schema:
+        case {"$ref": str(ref), **rest}:
+            yield ref.removeprefix("#/$defs/")
+            yield from _refs(rest)
+        case dict():
+            for value in schema.values():
+                yield from _refs(value)
+        case list():
+            for value in schema:
+                yield from _refs(value)
+        case _:
+            pass
+
+
+def encoding(answer_schema: dict[str, Any]) -> dict[str, Any]:
+    """The instruction a transport whose answer is a string gives a typed run: write the answer
+    as a JSON object inside that string."""
+    shape = json.dumps(answer_schema, sort_keys=True)
+    return {
+        "role": "user",
+        "content": "Write the answer as a JSON object, inside the answer string, matching this "
+        "schema:\n" + shape,
+    }
+
+
 def _counter(usage: Any, name: str) -> int | None:
     """One token counter, or `None` when the reply did not carry a number for it.
 
@@ -384,7 +444,7 @@ def to_openai_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _to_turn(wire: _WireTurn) -> AssistantTurn:
+def _to_turn(wire: _WireTurn | _TypedTurn) -> AssistantTurn:
     tool = None
     if wire.tool is not None:
         # strict=False: models embed literal newlines/tabs inside string values
@@ -444,7 +504,13 @@ class _BaseTurnCaller:
         self.extra = extra or {}
         self.clock = clock
 
-    def _complete(self, messages: list[dict[str, Any]]) -> tuple[_WireTurn, Any]:
+    native_answer = False
+    """Whether the provider shapes a typed run's answer itself; a caller without that tells the
+    model to write the answer's JSON in its answer string."""
+
+    def _complete(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None
+    ) -> tuple[_WireTurn | _TypedTurn, Any]:
         raise NotImplementedError
 
     def __call__(self, op: AskLLM[Any]) -> tuple[AssistantTurn | Cancelled, Usage]:
@@ -452,10 +518,12 @@ class _BaseTurnCaller:
             {"role": "system", "content": self.system_prompt},
             *to_openai_messages(op.messages),
         ]
+        if op.answer_schema is not None and not self.native_answer:
+            messages.append(encoding(op.answer_schema))
         start = self.clock()
         try:
             with _as_transient():  # the one door both subclasses' `_complete` go through
-                wire, response = self._complete(messages)
+                wire, response = self._complete(messages, op.answer_schema)
         except _StreamStopped as stopped:
             # The provider reports no usage for a response it never finished.
             return Cancelled(partial=stopped.partial), Usage(latency_s=self.clock() - start)
@@ -479,7 +547,9 @@ class OpenAITurnCaller(_BaseTurnCaller):
     ) -> None:
         super().__init__(client, system_prompt, model, price, max_completion_tokens, extra, clock)
 
-    def _complete(self, messages: list[dict[str, Any]]) -> tuple[_WireTurn, Any]:
+    def _complete(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None
+    ) -> tuple[_WireTurn | _TypedTurn, Any]:
         response = self.client.chat.completions.parse(
             model=self.model,
             messages=messages,
@@ -525,14 +595,24 @@ class ResponsesTurnCaller(_BaseTurnCaller):
         self.tools = tools
         self.cancel = cancel
 
-    def _complete(self, messages: list[dict[str, Any]]) -> tuple[_WireTurn, Any]:
-        kwargs = self._request(messages)
-        if self.cancel is not None:
-            return _streamed(self.client, kwargs, self.cancel)
-        response = self.client.responses.parse(**kwargs)
-        return _wire_from_response(response), response
+    native_answer = True
 
-    def _request(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def _complete(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None
+    ) -> tuple[_WireTurn | _TypedTurn, Any]:
+        kwargs = self._request(messages, answer_schema)
+        typed = answer_schema is not None
+        if self.cancel is not None:
+            return _streamed(self.client, kwargs, self.cancel, typed)
+        if typed:
+            response = self.client.responses.create(**kwargs)
+        else:
+            response = self.client.responses.parse(**kwargs)
+        return _wire_from_response(response, typed), response
+
+    def _request(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         extra = dict(self.extra)
         # `reasoning_effort=` (chat completions) is spelled `reasoning={"effort": …}` here, and
         # the token cap is `max_output_tokens`. Translated rather than passed through, so a
@@ -541,10 +621,18 @@ class ResponsesTurnCaller(_BaseTurnCaller):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "input": messages,
-            "text_format": _WireTurn,
             "max_output_tokens": self.max_completion_tokens,
             **extra,
         }
+        if answer_schema is None:
+            kwargs["text_format"] = _WireTurn
+        else:
+            # The provider shapes the answer to the run's schema, and the reply comes back as JSON
+            # text the run resolves; a model handed to the SDK would validate it there first.
+            shape = with_answer(_WireTurn.model_json_schema(), answer_schema)
+            kwargs["text"] = {
+                "format": {"type": "json_schema", "name": "turn", "schema": shape, "strict": False}
+            }
         if effort is not None:
             kwargs["reasoning"] = {"effort": effort}
         if self.tools:
@@ -567,11 +655,16 @@ class AsyncResponsesTurnCaller(ResponsesTurnCaller):
     def loop(self) -> LoopThread:
         return shared_loop()
 
-    def _complete(self, messages: list[dict[str, Any]]) -> tuple[_WireTurn, Any]:
-        kwargs = self._request(messages)
+    def _complete(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None
+    ) -> tuple[_WireTurn | _TypedTurn, Any]:
+        kwargs = self._request(messages, answer_schema)
+        typed = answer_schema is not None
         if self.cancel is None:
-            response = self.loop.run(self.client.responses.parse(**kwargs))
-            return _wire_from_response(response), response
+            responses = self.client.responses
+            asked = responses.create(**kwargs) if typed else responses.parse(**kwargs)
+            response = self.loop.run(asked)
+            return _wire_from_response(response, typed), response
         seen = _Seen()
         try:
             response = self.loop.run(_astreamed(self.client, kwargs, seen), self.cancel)
@@ -582,7 +675,7 @@ class AsyncResponsesTurnCaller(ResponsesTurnCaller):
                 raise _StreamStopped(text) from None
             if response is None:
                 raise RuntimeError("the response ended without completing", ended) from None
-        return _wire_from_response(response), response
+        return _wire_from_response(response, typed), response
 
 
 class _Seen:
@@ -692,7 +785,9 @@ class _Reader:
             self.settled.set()
 
 
-def _streamed(client: Any, kwargs: dict[str, Any], cancel: CancelToken) -> tuple[_WireTurn, Any]:
+def _streamed(
+    client: Any, kwargs: dict[str, Any], cancel: CancelToken, typed: bool = False
+) -> tuple[_WireTurn | _TypedTurn, Any]:
     """The call streamed on a reader thread, so a cancel returns at once.
 
     The reader opens the stream too, so a stop reaches the call while it waits for the first
@@ -720,7 +815,7 @@ def _streamed(client: Any, kwargs: dict[str, Any], cancel: CancelToken) -> tuple
         case None, None, None:
             raise RuntimeError("the stream ended with no response")
         case _:
-            return _wire_from_response(response), response
+            return _wire_from_response(response, typed), response
 
 
 _NAMESPACE = "functions."
@@ -732,7 +827,7 @@ at the seam that knows this is one provider's spelling of the name it was given,
 every table a loop dispatches on."""
 
 
-def _wire_from_response(response: Any) -> _WireTurn:
+def _wire_from_response(response: Any, typed: bool = False) -> _WireTurn | _TypedTurn:
     """Read one turn back: a native `function_call` if the model acted, else the parsed answer.
 
     A `function_call` carries no `thought` — the model's reasoning is either summarised in a
@@ -749,6 +844,8 @@ def _wire_from_response(response: Any) -> _WireTurn:
     if call is not None:
         tool = _WireTool(name=call.name.removeprefix(_NAMESPACE), arguments_json=call.arguments)
         return _WireTurn(thought="", tool=tool, answer=None)
+    if typed:
+        return _TypedTurn.model_validate_json(response.output_text)
     parsed = response.output_parsed
     if parsed is None:
         raise ValueError(
@@ -779,7 +876,9 @@ class LlamaCppTurnCaller(_BaseTurnCaller):
     ) -> None:
         super().__init__(client, system_prompt, model, price, max_completion_tokens, extra, clock)
 
-    def _complete(self, messages: list[dict[str, Any]]) -> tuple[_WireTurn, Any]:
+    def _complete(
+        self, messages: list[dict[str, Any]], answer_schema: dict[str, Any] | None
+    ) -> tuple[_WireTurn | _TypedTurn, Any]:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,

@@ -6,8 +6,9 @@ Parsing a turn and choosing between an answer and an action is pure code between
 
 Three policy seams are parameters:
 
-- `decide` takes the transcript and the `Level` and yields one `AssistantTurn`; a turn with a tool
-  acts, a turn without one answers. At the final level the transcript ends in a nudge to answer.
+- `decide` takes a `TurnRequest` (the transcript, the `Level` and a typed run's answer schema)
+  and yields one `AssistantTurn`; a turn with a tool acts, a turn without one answers. At the
+  final level the transcript ends in a nudge to answer.
 - `act` runs a `ToolRequest`. The default is `call_tool`; a HITL `act` yields `await_event`, so the
   loop suspends durably.
 - `compact` is a pure trigger over the transcript; when it fires the loop records a
@@ -17,21 +18,35 @@ Cost and cache accounting stay a handler concern over `AskLLM`.
 """
 
 import json
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from functools import cache, partial
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from functools import cache, partial, reduce
+from inspect import Parameter, signature
+from operator import or_
 from string.templatelib import Template
-from typing import Any, Literal, assert_never
+from types import UnionType
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    TypeAliasType,
+    Union,
+    assert_never,
+    get_args,
+    get_origin,
+    get_type_hints,
+    overload,
+)
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, JsonValue, TypeAdapter, ValidationError
 
 from effective import Effect, Refused, ask_llm, await_event, step
 from effective.api import direct_tool_key
-from effective.cancel import Cancelled, OpCancelled
-from effective.channels import directives, render
+from effective.cancel import OpCancelled
+from effective.channels import Prompt, Repair, answer_model, answering, directives, render
 from effective.combinators import Answered, Deeper, Grantor, Level, descend
-from effective.domain import ASK_TOOL, CallTool, ToolRefused
-from effective.govern import routable
+from effective.domain import ASK_TOOL, AskLLM, CallTool, ToolRefused
+from effective.govern import ChildRefused, routable
 from effective.interrupts import Escape, Interrupt, Quiet, Redirect, Signal
 from effective.keys import Key, Name, compose_key
 from effective.ops import CompositionRefused
@@ -54,7 +69,7 @@ class AssistantTurn(BaseModel):
 
     thought: str = ""
     tool: ToolRequest | None = None
-    answer: str | None = None
+    answer: JsonValue | None = None
 
 
 class ToolResult(BaseModel):
@@ -64,20 +79,118 @@ class ToolResult(BaseModel):
 
 
 class Step(BaseModel):
-    """One recorded iteration of the loop (the trajectory is a list of these)."""
+    """One recorded iteration of the loop (the trajectory is a list of these). `repair` is why a
+    typed run refused the answer this turn gave."""
 
     thought: str
     tool: ToolRequest | None = None
     observation: str | None = None
+    repair: str | None = None
 
 
-type StopReason = Literal["finish", "max_iters", "escaped"]
+type StopReason = Literal["finish", "max_iters"]
 
 
-class Trajectory(BaseModel):
-    answer: str
+class Trajectory[T = str](BaseModel):
+    """A run that answered."""
+
+    kind: Literal["answered"] = "answered"
+    answer: T
     steps: list[Step]
     stop_reason: StopReason
+
+
+type EscapeOrigin = Literal["escape", "decide", "action", "compaction"]
+"""What ended a run without an answer, and what its `partial` holds.
+
+| origin       | what happened                               | `partial`                    |
+|--------------|---------------------------------------------|------------------------------|
+| `escape`     | a poll reported the user's Esc              | the dropped action's thought |
+| `decide`     | a decide was cancelled while it ran         | the model's output so far    |
+| `action`     | an action was cancelled while it ran        | the tool's output so far     |
+| `compaction` | a compaction was cancelled while it ran     | the summary so far           |
+"""
+
+
+class Escaped(BaseModel):
+    """A run that ended without an answer. `name` is the name the op or poll that reported it was
+    raised under: an op's authored name, a joined child's done event, or `None` for a poll that
+    records nothing. It addresses the report, and the checkpoint stays readable from the tape by
+    position."""
+
+    kind: Literal["escaped"] = "escaped"
+    origin: EscapeOrigin
+    name: str | None
+    partial: str
+    steps: list[Step]
+
+
+class Exhausted(BaseModel):
+    """A typed run whose answers were refused until its repairs ran out: `repair` is the last
+    refusal and `repairs` the budget the run had."""
+
+    kind: Literal["exhausted"] = "exhausted"
+    repair: Repair
+    repairs: int
+    steps: list[Step]
+
+
+type Ending[M] = Trajectory[M] | Escaped | Exhausted
+
+
+_ENDING: TypeAdapter[Ending[Any]] = TypeAdapter(
+    Annotated[Trajectory[Any] | Escaped | Exhausted, Field(discriminator="kind")]
+)
+
+
+@cache
+def _typed_ending(answer: type[Any]) -> TypeAdapter[Any]:
+    return TypeAdapter(
+        # ty: ignore[invalid-type-form]  -- the run's answer model is a value known at run time
+        Annotated[Trajectory[answer] | Escaped | Exhausted, Field(discriminator="kind")]
+    )
+
+
+@overload
+def load_ending(raw: Any) -> Ending[Any]: ...
+@overload
+def load_ending[M](raw: Any, *, answer: type[M]) -> Ending[M]: ...
+def load_ending(raw: Any, *, answer: type[Any] | None = None) -> Ending[Any]:
+    """A run's ending as a handler hands it back: the value itself, or its stored form. A typed
+    run's answer validates as `answer`; without it, an answer is any JSON value."""
+    adapter = _ENDING if answer is None else _typed_ending(answer)
+    return adapter.validate_python(raw)
+
+
+LOOP_ESCAPE = "react:escape"
+"""The name an escape carries out of `unwrap` when its poll recorded nothing."""
+
+
+class RepairsExhausted(ChildRefused):
+    """A typed run's answers were refused until its repairs ran out. A refusal, so it climbs a
+    spawn tree; `reason` is the last answer's refusal and `repairs` the budget."""
+
+    def __init__(self, reason: str, repairs: int) -> None:
+        super().__init__(reason, repairs)
+        self.reason = reason
+        self.repairs = repairs
+
+    def __str__(self) -> str:
+        return f"the answer was refused after {self.repairs} repairs: {self.reason}"
+
+
+def unwrap[T](ending: Trajectory[T] | Escaped | Exhausted) -> T:
+    """The answer; `OpCancelled` with the escape's partial text; or `RepairsExhausted` with the
+    last refusal: the counterpart of `join_answer` for a run in this task."""
+    match ending:
+        case Trajectory(answer=answer):
+            return answer
+        case Escaped(name=name, partial=partial):
+            raise OpCancelled(name if name is not None else LOOP_ESCAPE, partial)
+        case Exhausted(repair=Repair(reason=reason), repairs=repairs):
+            raise RepairsExhausted(reason, repairs)
+        case unreachable:
+            assert_never(unreachable)
 
 
 class TrajectorySummary(BaseModel):
@@ -85,7 +198,7 @@ class TrajectorySummary(BaseModel):
     replaces the compacted transcript prefix. This is the parse contract (the data
     axis); a handler-side channel template + ``FormGate`` (a ``Gated``
     extractor guardrail, e.g. "every `tried` entry names a tool op in
-    the transcript") is the guardrail follow-up, not needed for the recorded seam."""
+    the transcript") is not needed for the recorded seam."""
 
     facts: list[str] = []  # established by tool evidence
     tried: list[str] = []  # approaches attempted, and how each failed
@@ -177,10 +290,25 @@ def action_line(tool: ToolRequest) -> str:
     return f"Action: {tool.name}({json.dumps(tool.args, sort_keys=True)})"
 
 
+def answer_text(answer: JsonValue) -> str:
+    """An answer as transcript text: a string as itself, any other JSON value compact."""
+    # lint: totality(coercion): a JSON value is text or is encoded as text.
+    match answer:
+        case str():
+            return answer
+        case _:
+            return json.dumps(answer, separators=(",", ":"), sort_keys=True)
+
+
+def _said(turn: AssistantTurn) -> str:
+    """The answer a turn gave, or its thought when it gave none."""
+    return turn.thought if turn.answer is None or turn.answer == "" else answer_text(turn.answer)
+
+
 def _assistant(turn: AssistantTurn) -> dict[str, Any]:
     """The assistant's turn as the model will re-read it — thought AND action."""
     if turn.tool is None:
-        return {"role": "assistant", "content": turn.answer or turn.thought}
+        return {"role": "assistant", "content": _said(turn)}
     return {"role": "assistant", "content": f"{turn.thought}\n{action_line(turn.tool)}"}
 
 
@@ -232,7 +360,20 @@ def summary_message(summary: TrajectorySummary) -> dict[str, Any]:
 
 # --- the policy seams ----------------------------------------------------------
 
-type Decide = Callable[[list[dict[str, Any]], Level], Effect[AssistantTurn]]
+
+@dataclass(frozen=True, slots=True)
+class TurnRequest:
+    """What a decide is asked for one turn: the transcript, the level, and the JSON schema of the
+    answer the run expects, or `None` for a run that answers in text."""
+
+    messages: list[dict[str, Any]]
+    level: Level
+    answer_schema: dict[str, Any] | None = None
+
+
+type Decide = Callable[[TurnRequest], Effect[AssistantTurn]]
+
+
 type Act = Callable[[ToolRequest, Level], Effect[ToolResult]]
 type Compact = Callable[[list[dict[str, Any]]], bool]  # PURE trigger over workflow state
 
@@ -289,12 +430,29 @@ def refusal(tool: str, diagnostic: str) -> ToolResult:
     return ToolResult(content=_observed(t"[refused] {tool}: {diagnostic:data}"))
 
 
-def default_decide(messages: list[dict[str, Any]], level: Level) -> Effect[AssistantTurn]:
+def escape_observation(ending: Escaped) -> ToolResult:
+    """An escaped run as the model that delegated it reads it. The partial text is a data hole,
+    since a model or a tool wrote it."""
+    return ToolResult(content=_observed(t"[escaped: {ending.origin}] {ending.partial:data}"))
+
+
+def exhausted_observation(ending: Exhausted) -> ToolResult:
+    """An exhausted run as the model that delegated it reads it. The reason is a data hole, since
+    a validator quoting the model's answer wrote it."""
+    return ToolResult(content=_observed(t"[exhausted: repairs] {ending.repair.reason:data}"))
+
+
+def default_decide(request: TurnRequest) -> Effect[AssistantTurn]:
     """One reasoning step: `react:turn`, or `react:final` at the final level.
 
     It takes no scope: a nested agent is `scoped(...)` around its `run_agent` call."""
-    key = react_key("final" if level.final else "turn")
-    decided = yield from ask_llm(key.stored(), messages, AssistantTurn)
+    key = react_key("final" if request.level.final else "turn")
+    asked = AskLLM(
+        messages=request.messages,
+        response_schema=AssistantTurn,
+        answer_schema=request.answer_schema,
+    )
+    decided = yield from step(key.stored(), asked)
     return decided
 
 
@@ -429,6 +587,14 @@ class ToolLog:
                 return value
         return None
 
+    def last_from(self, tool: Tool[Any, Any]) -> Any | None:
+        """The most recent result `tool` itself returned, skipping a refusal as `last` does."""
+        for logged, value in reversed(self.entries):
+            # lint: totality(filter): a refused entry is skipped; the fold takes the last value.
+            if logged is tool and not isinstance(value, ToolRefused):
+                return value
+        return None
+
     @property
     def names(self) -> tuple[str, ...]:
         """Which tools ran, in order — for a reader that wants to say what a state did."""
@@ -513,32 +679,373 @@ def typed_act(
     return act
 
 
+class DuplicateToolName(CompositionRefused):
+    """Two declared tools share a dispatch name, so a call by that name could reach either."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return f"two tools are declared under the name {self.name!r}, and a call reaches one"
+
+
+def declared(tools: Iterable[Tool[Any, Any]]) -> dict[str, Tool[Any, Any]]:
+    """The dispatch table for `tools`, each under its own name."""
+    table: dict[str, Tool[Any, Any]] = {}
+    for tool in tools:
+        if tool.name in table:
+            raise DuplicateToolName(tool.name)
+        table[tool.name] = tool
+    return table
+
+
+@dataclass(slots=True)
+class Toolbox:
+    """What one run, or one visit of a machine state, dispatches actions through: the declared
+    tools, the log of what they returned, the arguments the workflow binds into their calls, and
+    the `fallback` an undeclared name goes to. A declaration says what a name means; which names a
+    model may call is the `Decide`'s business."""
+
+    tools: Mapping[str, Tool[Any, Any]]
+    log: ToolLog = field(default_factory=ToolLog)
+    bind: Callable[[], Mapping[str, Any]] | None = None
+    fallback: Act | None = None
+
+    def act(self) -> Act:
+        return typed_act(self.tools, self.log, fallback=self.fallback, bind=self.bind)
+
+
+type EvidenceFault = Literal[
+    "unannotated",
+    "unpassable",
+    "unsupported",
+    "unsupported-result",
+    "unproduced",
+    "ambiguous",
+    "undeclared-tool",
+    "other-result",
+]
+
+_EVIDENCE_FAULTS: dict[EvidenceFault, str] = {
+    "unannotated": "has no annotation",
+    "unpassable": "cannot be passed by name; take it as a positional-or-keyword parameter",
+    "unsupported-result": "meets a declared tool whose result type evidence cannot bind",
+    "unsupported": "is a form evidence cannot bind, such as a generic alias",
+    "unproduced": "is the result of no declared tool",
+    "ambiguous": "is the result of more than one declared tool; name one with Annotated[T, tool]",
+    "undeclared-tool": "names a tool the run does not declare",
+    "other-result": "names a tool whose result is another type",
+}
+
+
+class EvidenceUnbound(CompositionRefused):
+    """An answer contract's parameter the run's declared tools cannot supply exactly once.
+    `declared` holds each declared tool's name and its result type, rendered."""
+
+    def __init__(
+        self,
+        contract: str,
+        parameter: str,
+        fault: EvidenceFault,
+        annotation: str,
+        declared: tuple[tuple[str, str], ...],
+    ) -> None:
+        super().__init__(contract, parameter, fault)
+        self.contract = contract
+        self.parameter = parameter
+        self.fault: EvidenceFault = fault
+        self.annotation = annotation
+        self.declared = declared
+
+    def __str__(self) -> str:
+        return (
+            f"{self.contract}'s parameter {self.parameter}: {self.annotation} "
+            f"{_EVIDENCE_FAULTS[self.fault]}; "
+            f"the run declares {', '.join(f'{n} -> {r}' for n, r in self.declared) or 'none'}"
+        )
+
+
+class _Unsupported(Exception):
+    """An annotation form evidence cannot bind."""
+
+
+def _plain(annotation: Any) -> Any:
+    """`annotation` with every type alias replaced by what it names, at any depth."""
+    if isinstance(annotation, TypeAliasType):
+        return _plain(annotation.__value__)
+    origin = get_origin(annotation)
+    if origin is None:
+        return annotation
+    if isinstance(origin, TypeAliasType):
+        raise _Unsupported(annotation)
+    args = tuple(_plain(arg) for arg in get_args(annotation))
+    if origin in (Union, UnionType):
+        return reduce(or_, args)
+    try:
+        return origin[args]
+    except TypeError as unsupported:
+        raise _Unsupported(annotation) from unsupported
+
+
+@dataclass(frozen=True, slots=True)
+class _Evidence:
+    """A contract parameter, the declared tool whose last result it takes, and what it receives
+    before that tool has answered: its `default`, else `None` when it is `optional`."""
+
+    parameter: str
+    annotation: Any
+    tool: Tool[Any, Any]
+    optional: bool
+    default: Any = Parameter.empty
+
+
+def _bound(
+    contract: Callable[..., Prompt[Any]], tools: Mapping[str, Tool[Any, Any]]
+) -> tuple[_Evidence, ...]:
+    """Each parameter of `contract`, bound to the one declaration in `tools` whose result type it
+    names. An `Annotated[T, tool]` parameter names its tool."""
+    name = getattr(contract, "__qualname__", repr(contract))
+    hints = get_type_hints(contract, include_extras=True)
+    declared = tuple((tool.name, repr(tool.result)) for tool in tools.values())
+    bound: list[_Evidence] = []
+    for parameter, spec in signature(contract).parameters.items():
+        if spec.kind not in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY):
+            raise EvidenceUnbound(name, parameter, "unpassable", str(spec), declared)
+        if (annotation := hints.get(parameter)) is None:
+            raise EvidenceUnbound(name, parameter, "unannotated", "", declared)
+        evidence = _bind(name, parameter, annotation, tools, declared)
+        bound.append(replace(evidence, default=spec.default))
+    return tuple(bound)
+
+
+def _named(annotation: Any) -> tuple[Any, list[Tool[Any, Any]]]:
+    """The type an `Annotated` parameter wraps, and the tools its metadata names."""
+    if get_origin(annotation) is not Annotated:
+        return annotation, []
+    base, *metadata = get_args(annotation)
+    named: list[Tool[Any, Any]] = []
+    for marker in metadata:
+        match marker:
+            case Tool():
+                named.append(marker)
+            case _:
+                pass
+    return base, named
+
+
+def _optional(wanted: Any) -> tuple[Any, bool]:
+    """`wanted` without `None`, and whether it held `None`."""
+    if get_origin(wanted) in (Union, UnionType) and type(None) in get_args(wanted):
+        return reduce(or_, (arg for arg in get_args(wanted) if arg is not type(None))), True
+    return wanted, False
+
+
+def _result(
+    contract: str, parameter: str, tool: Tool[Any, Any], declared: tuple[tuple[str, str], ...]
+) -> Any:
+    """`tool`'s result type with its aliases replaced, or the refusal of a form evidence cannot
+    bind, met while binding `parameter`."""
+    try:
+        return _plain(tool.result)
+    except _Unsupported:
+        raise EvidenceUnbound(
+            contract, parameter, "unsupported-result", repr(tool.result), declared
+        ) from None
+
+
+def _bind(
+    contract: str,
+    parameter: str,
+    annotation: Any,
+    tools: Mapping[str, Tool[Any, Any]],
+    declared: tuple[tuple[str, str], ...],
+) -> _Evidence:
+    base, named = _named(annotation)
+    try:
+        wanted, optional = _optional(_plain(base))
+    except _Unsupported:
+        raise EvidenceUnbound(contract, parameter, "unsupported", repr(base), declared) from None
+
+    def refused(fault: EvidenceFault) -> EvidenceUnbound:
+        return EvidenceUnbound(contract, parameter, fault, repr(base), declared)
+
+    def result(tool: Tool[Any, Any]) -> Any:
+        return _result(contract, parameter, tool, declared)
+
+    match named:
+        case [tool]:
+            if not any(tool is held for held in tools.values()):
+                raise refused("undeclared-tool")
+            if result(tool) != wanted:
+                raise refused("other-result")
+            return _Evidence(parameter, wanted, tool, optional)
+        case []:
+            pass
+        case _:
+            raise refused("ambiguous")
+    match [tool for tool in tools.values() if result(tool) == wanted]:
+        case [tool]:
+            return _Evidence(parameter, wanted, tool, optional)
+        case []:
+            raise refused("unproduced")
+        case _:
+            raise refused("ambiguous")
+
+
+TOOL_AND_ANSWER = "a turn calls a tool or answers, never both"
+FINAL_TOOL = "the final turn answers and calls no tool"
+NOT_JSON = "the answer is not a JSON object"
+
+
+@dataclass(frozen=True, slots=True)
+class _Answering:
+    """A typed run's answer contract: the function, the model it declares, that model's JSON
+    schema, the evidence its parameters bind, the log they read, and the repair budget.
+
+    The contract and its gates must be deterministic over their arguments: an answer resolves on
+    a replay from the recorded turn and the recorded tool results alone."""
+
+    contract: Callable[..., Prompt[Any]]
+    model: type[BaseModel]
+    schema: dict[str, Any]
+    evidence: tuple[_Evidence, ...]
+    log: ToolLog
+    repairs: int
+
+    def values(self) -> dict[str, Any] | Repair:
+        """The contract's arguments from the log, or the repair naming evidence not yet
+        produced."""
+        values: dict[str, Any] = {}
+        for evidence in self.evidence:
+            if (value := self.log.last_from(evidence.tool)) is None:
+                if evidence.default is not Parameter.empty:
+                    value = evidence.default
+                elif not evidence.optional:
+                    wanted = repr(evidence.annotation)
+                    return Repair(
+                        _observed(t"the answer needs {wanted}, which no tool has returned")
+                    )
+            values[evidence.parameter] = value
+        return values
+
+    def prompt(self, values: dict[str, Any]) -> Prompt[BaseModel]:
+        return answering(self.contract, self.contract(**values), self.model)
+
+    def resolved(self, turn: AssistantTurn) -> BaseModel | Repair:
+        """The model `turn`'s answer resolves to, or the repair to ask for."""
+        if turn.tool is not None:
+            return Repair(TOOL_AND_ANSWER)
+        raw = turn.answer
+        # lint: totality(coercion): the fallback transport writes the answer's JSON in a string.
+        match raw:
+            case str():
+                try:
+                    raw = json.loads(raw)
+                except ValueError:
+                    return Repair(NOT_JSON)
+            case _:
+                pass
+        match self.values():
+            case Repair() as repair:
+                return repair
+            case dict() as values:
+                return self.prompt(values).resolve(raw)
+            case unreachable:
+                assert_never(unreachable)
+
+    def tail(self, repair: Repair | None) -> list[dict[str, Any]]:
+        """The volatile message a decide reads last: the answer's fields, the rendered contract
+        once its evidence binds, and the last refusal on a repair turn."""
+        properties = self.schema.get("properties", {})
+        fields = "\n".join(
+            _observed(t"{name}: {json.dumps(spec, sort_keys=True)}")
+            for name, spec in properties.items()
+        )
+        parts = [_observed(t"The answer has these fields:\n{fields}")]
+        match self.values():
+            case Repair():
+                rendered = []
+            case dict() as values:
+                rendered = self.prompt(values).messages
+            case unreachable:
+                assert_never(unreachable)
+        if rendered:
+            if any(message.cache for message in rendered):
+                raise UncarriedDirective(
+                    "an answer contract declared a cache flag, and the loop places its "
+                    "rendering in the volatile tail"
+                )
+            if any(message.role != "user" for message in rendered):
+                raise UncarriedDirective(
+                    "an answer contract declared a role, and the loop places its rendering in "
+                    "one user message"
+                )
+            parts.extend(message.content for message in rendered)
+        if repair is not None:
+            parts.append(_observed(t"The last answer was refused: {repair.reason:data}"))
+        return [_user("\n".join(parts))]
+
+
+def _answering(
+    contract: Callable[..., Prompt[Any]] | None, repairs: int, toolbox: Toolbox | None
+) -> _Answering | None:
+    if contract is None:
+        return None
+    model = answer_model(contract)
+    tools = toolbox.tools if toolbox is not None else {}
+    log = toolbox.log if toolbox is not None else ToolLog()
+    evidence = _bound(contract, tools)
+    return _Answering(contract, model, model.model_json_schema(), evidence, log, repairs)
+
+
 @dataclass(frozen=True, slots=True)
 class _Loop:
-    """What one turn hands the next: the transcript the model reads and the steps so far."""
+    """What one turn hands the next: the transcript the model reads, the steps so far, and the
+    refusal a redirect carried past the repair turn it interrupted."""
 
     messages: list[dict[str, Any]]
     steps: list[Step]
+    repair: Repair | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Ran:
-    """A finished run: its trajectory, and the transcript a later run continues from."""
+    """A finished run: how it ended, and the transcript a later run continues from."""
 
-    trajectory: Trajectory
+    trajectory: Ending[Any]
     messages: list[dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class _Cut:
+    """An op cancelled while it ran: what it was, its authored name, and its output so far."""
+
+    origin: EscapeOrigin
+    name: str
+    partial: str
 
 
 ESCAPED = "[escaped]"
 """The marker a transcript carries where the user escaped a turn."""
 
 
-def _escaped(messages: list[dict[str, Any]], steps: list[Step], thought: str) -> Answered[Ran]:
-    """The turn the user abandoned. What already ran stays in the transcript, and the thought that
+def _escaped(
+    messages: list[dict[str, Any]],
+    steps: list[Step],
+    thought: str,
+    origin: EscapeOrigin,
+    name: str | None,
+) -> Answered[Ran]:
+    """The turn the run abandoned. What already ran stays in the transcript, and the thought that
     chose an action the loop did not run is recorded without the action."""
     step_ = Step(thought=thought, observation=ESCAPED)
-    trajectory = Trajectory(answer="", steps=[*steps, step_], stop_reason="escaped")
-    return Answered(Ran(trajectory, [*messages, _user(ESCAPED)]))
+    ending = Escaped(origin=origin, name=name, partial=thought, steps=[*steps, step_])
+    return Answered(Ran(ending, [*messages, _user(ESCAPED)]))
+
+
+def _cut(messages: list[dict[str, Any]], steps: list[Step], cut: _Cut) -> Answered[Ran]:
+    return _escaped(messages, steps, cut.partial, cut.origin, cut.name)
 
 
 type _Ended = Answered[Ran] | Deeper[_Loop]
@@ -558,8 +1065,8 @@ def _before_decide(
                     [*steps, Step(thought="", observation=f"[interrupted] {text}")],
                 )
             )
-        case Escape():
-            return _escaped(messages, steps, "")
+        case Escape(name=name):
+            return _escaped(messages, steps, "", "escape", name)
         case unreachable:
             assert_never(unreachable)
 
@@ -582,8 +1089,8 @@ def _after_decide(
                     [*steps, Step(thought=turn.thought, observation=f"[interrupted] {text}")],
                 )
             )
-        case Escape():
-            return _escaped([*messages, thought], steps, turn.thought)
+        case Escape(name=name):
+            return _escaped([*messages, thought], steps, turn.thought, "escape", name)
         case unreachable:
             assert_never(unreachable)
 
@@ -595,37 +1102,90 @@ def _after_act(signal: Signal, messages: list[dict[str, Any]], steps: list[Step]
             return Deeper(_Loop(messages, steps))
         case Redirect(text):
             return Deeper(_Loop([*messages, _user(f"[interrupt] {text}")], steps))
-        case Escape():
-            trajectory = Trajectory(answer="", steps=steps, stop_reason="escaped")
-            return Answered(Ran(trajectory, [*messages, _user(ESCAPED)]))
+        case Escape(name=name):
+            ending = Escaped(origin="escape", name=name, partial="", steps=steps)
+            return Answered(Ran(ending, [*messages, _user(ESCAPED)]))
         case unreachable:
             assert_never(unreachable)
 
 
 def _decided(
-    decide: Decide, compact: Compact | None, messages: list[dict[str, Any]], level: Level
-) -> Effect[tuple[list[dict[str, Any]], AssistantTurn] | Cancelled]:
+    decide: Decide,
+    compact: Compact | None,
+    messages: list[dict[str, Any]],
+    level: Level,
+    answering: _Answering | None = None,
+    repair: Repair | None = None,
+) -> Effect[tuple[list[dict[str, Any]], AssistantTurn] | _Cut]:
     """The decide, over the transcript compacted first when `compact` fires, with the transcript
-    it read. Either model call cancelled while it ran is a `Cancelled`."""
-    try:
-        if compact is not None and compact(messages):
+    it read. A typed run's decide reads the answer's tail after it, which the transcript does not
+    keep. Either model call cancelled while it ran is a `_Cut`."""
+    if compact is not None and compact(messages):
+        try:
             messages = yield from _compacted(messages)
-        return messages, (yield from decide(messages, level))
+        except OpCancelled as cancelled:
+            return _Cut("compaction", cancelled.name, cancelled.partial)
+    if answering is None:
+        request = TurnRequest(messages, level)
+    else:
+        request = TurnRequest([*messages, *answering.tail(repair)], level, answering.schema)
+    try:
+        return messages, (yield from decide(request))
     except OpCancelled as cancelled:
-        return Cancelled(partial=cancelled.partial)
+        return _Cut("decide", cancelled.name, cancelled.partial)
+
+
+type _Again = Callable[[_Loop, Level, Repair], Effect[_Ended]]
 
 
 def _final(
-    decide: Decide, messages: list[dict[str, Any]], steps: list[Step], level: Level
+    decide: Decide,
+    answering: _Answering | None,
+    again: _Again,
+    messages: list[dict[str, Any]],
+    steps: list[Step],
+    level: Level,
+    repair: Repair | None,
 ) -> Effect[_Ended]:
-    """The last level's turn, which must answer: its decide reads the nudge."""
-    match (yield from _decided(decide, None, [*messages, _NUDGE], level)):
-        case Cancelled() as cancelled:
-            return _escaped(messages, steps, cancelled.partial)
+    """The last level's turn, which must answer: its decide reads the nudge. A typed run's final
+    turn calls no tool, and its answer may spend the repairs left."""
+    match (yield from _decided(decide, None, [*messages, _NUDGE], level, answering, repair)):
+        case _Cut() as cut:
+            return _cut(messages, steps, cut)
         case (_, final):
-            answer = final.answer or final.thought
-            closing = [*messages, {"role": "assistant", "content": answer}]
-            return _answered(closing, steps, final.thought, answer, "max_iters")
+            pass
+        case unreachable:
+            assert_never(unreachable)
+    closing = [*messages, {"role": "assistant", "content": _said(final)}]
+    if answering is None:
+        return _answered(closing, steps, final.thought, _said(final), "max_iters")
+    resolved = Repair(FINAL_TOOL) if final.tool is not None else answering.resolved(final)
+    return (yield from _settled(again, answering, closing, steps, final, level, resolved))
+
+
+def _settled(
+    again: _Again,
+    answering: _Answering,
+    messages: list[dict[str, Any]],
+    steps: list[Step],
+    turn: AssistantTurn,
+    level: Level,
+    resolved: BaseModel | Repair,
+) -> Effect[_Ended]:
+    """A typed answer: the trajectory when it resolved, else another turn at this level while
+    repairs are left, else the run exhausted."""
+    why: StopReason = "max_iters" if level.final else "finish"
+    match resolved:
+        case Repair(reason=reason) as repair:
+            steps = [*steps, Step(thought=turn.thought, repair=reason)]
+            if sum(step.repair is not None for step in steps) > answering.repairs:
+                ending = Exhausted(repair=repair, repairs=answering.repairs, steps=steps)
+                return Answered(Ran(ending, messages))
+            return (yield from again(_Loop(messages, steps), level, repair))
+        case BaseModel() as answer:
+            steps = [*steps, Step(thought=turn.thought)]
+            trajectory = Trajectory[Any](answer=answer, steps=steps, stop_reason=why)
+            return Answered(Ran(trajectory, messages))
         case unreachable:
             assert_never(unreachable)
 
@@ -658,12 +1218,12 @@ def _guarded(
             assert_never(unreachable)
 
 
-def _acted(act: Act, request: ToolRequest, level: Level) -> Effect[ToolResult | Cancelled]:
+def _acted(act: Act, request: ToolRequest, level: Level) -> Effect[ToolResult | _Cut]:
     """The action's result, with a refusal as an observation the model can route around."""
     try:
         return (yield from act(request, level))
     except OpCancelled as cancelled:
-        return Cancelled(partial=cancelled.partial)
+        return _Cut("action", cancelled.name, cancelled.partial)
     except Refused as refusal:
         return ToolResult(content=f"[denied] {routable(refusal).reason}")
     except UnusableToolName as unusable:
@@ -684,12 +1244,16 @@ def _act(
     """Run the chosen action unless the guard refuses it, then poll; an action cancelled while it
     ran ends the run."""
     refused = None if guard is None else (yield from _guarded(guard, request, messages, level))
-    outcome: ToolResult | Cancelled = (
+    outcome: ToolResult | _Cut = (
         refused if refused is not None else (yield from _acted(act, request, level))
     )
     match outcome:
-        case Cancelled() as cancelled:  # the output so far is what the model sees ran
-            result, signal = ToolResult(content=f"{cancelled.partial}\n{ESCAPED}"), Escape()
+        case _Cut(partial=partial) as cut:  # the output so far is what the model sees ran
+            result = ToolResult(content=f"{partial}\n{ESCAPED}")
+            messages = [*messages, _observation(result)]
+            steps = [*steps, Step(thought=turn.thought, tool=request, observation=result.content)]
+            ending = Escaped(origin=cut.origin, name=cut.name, partial=partial, steps=steps)
+            return Answered(Ran(ending, [*messages, _user(ESCAPED)]))
         case ToolResult() as result:
             signal = Quiet() if interrupt is None else (yield from interrupt(level.depth, "act"))
         case unreachable:
@@ -712,24 +1276,32 @@ def _turn(
     guard: Guard | None,
     interrupt: Interrupt | None,
     compact: Compact | None,
+    answering: _Answering | None,
     loop: _Loop,
     level: Level,
+    repair: Repair | None = None,
 ) -> Effect[_Ended]:
     """One turn: an answer or an escape ends the loop; an action or a redirect goes a level deeper.
 
-    The final level polls no interrupt and compacts nothing; its decide reads the nudge."""
+    The final level polls no interrupt and compacts nothing; its decide reads the nudge. A typed
+    run's refused answer is decided again at the same level, with the refusal in its tail; that
+    decide compacts nothing, since compaction belongs to a level. A redirect on a repair turn
+    carries the refusal to the next level's tail."""
     messages, steps = loop.messages, loop.steps
+    again: _Again = partial(_turn, decide, act, guard, interrupt, compact, answering)
+    compacting = compact if repair is None else None
+    repair = repair if repair is not None else loop.repair
     if level.final:
-        return (yield from _final(decide, messages, steps, level))
+        return (yield from _final(decide, answering, again, messages, steps, level, repair))
 
     if interrupt is not None:
         signal = yield from interrupt(level.depth, "pre")
         if (ended := _before_decide(signal, messages, steps)) is not None:
-            return ended
+            return _carrying(ended, repair)
 
-    match (yield from _decided(decide, compact, messages, level)):
-        case Cancelled() as cancelled:
-            return _escaped(messages, steps, cancelled.partial)
+    match (yield from _decided(decide, compacting, messages, level, answering, repair)):
+        case _Cut() as cut:
+            return _cut(messages, steps, cut)
         case (compacted, turn):
             messages = compacted
         case unreachable:
@@ -738,14 +1310,31 @@ def _turn(
     if interrupt is not None:
         signal = yield from interrupt(level.depth, "post")
         if (ended := _after_decide(signal, messages, steps, turn)) is not None:
-            return ended
+            return _carrying(ended, repair)
 
+    if answering is not None and (turn.tool is None or turn.answer is not None):
+        # An action the loop refuses with the answer beside it never runs, so the transcript keeps
+        # what the turn said and leaves the action out.
+        messages = [*messages, {"role": "assistant", "content": _said(turn)}]
+        resolved = answering.resolved(turn)
+        return (yield from _settled(again, answering, messages, steps, turn, level, resolved))
     messages = [*messages, _assistant(turn)]
     if turn.tool is None:
-        answer = turn.answer if turn.answer is not None else turn.thought
+        answer = answer_text(turn.answer) if turn.answer is not None else turn.thought
         return _answered(messages, steps, turn.thought, answer, "finish")
 
     return (yield from _act(act, guard, interrupt, turn, turn.tool, messages, steps, level))
+
+
+def _carrying(ended: _Ended, repair: Repair | None) -> _Ended:
+    """`ended`, a redirect carrying `repair` into the next level."""
+    match ended:
+        case Deeper(context=loop) if repair is not None:
+            return Deeper(replace(loop, repair=repair))
+        case Answered() | Deeper():
+            return ended
+        case unreachable:
+            assert_never(unreachable)
 
 
 def run_turns(
@@ -760,6 +1349,22 @@ def run_turns(
     grantor: Grantor | None = None,
 ) -> Effect[Ran]:
     """`run_agent` from a transcript, handing the transcript back with the trajectory."""
+    return (
+        yield from _ran(messages, max_iters, decide, act, guard, interrupt, compact, grantor, None)
+    )
+
+
+def _ran(
+    messages: list[dict[str, Any]],
+    max_iters: int,
+    decide: Decide | None,
+    act: Act | None,
+    guard: Guard | None,
+    interrupt: Interrupt | None,
+    compact: Compact | None,
+    grantor: Grantor | None,
+    answering: _Answering | None,
+) -> Effect[Ran]:
     turn = partial(
         _turn,
         decide if decide is not None else default_decide,
@@ -767,21 +1372,60 @@ def run_turns(
         guard,
         interrupt,
         compact,
+        answering,
     )
     return (yield from descend(_Loop(messages, []), turn, budget=max_iters, grantor=grantor))
+
+
+REPAIRS = 1
+"""The answers a typed run may have refused and ask again for, unless a caller says otherwise."""
+
+
+@overload
+def run_agent(
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    answer: None = None,
+    decide: Decide | None = None,
+    tools: Sequence[Tool[Any, Any]] = (),
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Trajectory | Escaped]: ...
+@overload
+def run_agent[M: BaseModel](
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    answer: Callable[..., Prompt[M]],
+    repairs: int = REPAIRS,
+    decide: Decide | None = None,
+    tools: Sequence[Tool[Any, Any]] = (),
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Ending[M]]: ...
 
 
 def run_agent(
     prompt: str | Template,
     max_iters: int = 6,
     *,
+    answer: Callable[..., Prompt[Any]] | None = None,
+    repairs: int | None = None,
     decide: Decide | None = None,
+    tools: Sequence[Tool[Any, Any]] = (),
     act: Act | None = None,
     guard: Guard | None = None,
     interrupt: Interrupt | None = None,
     compact: Compact | None = None,
     grantor: Grantor | None = None,
-) -> Effect[Trajectory]:
+) -> Effect[Ending[Any]]:
     """Drive the turns to an answer: `max_iters` turns, then one final turn that must answer.
 
     Each turn is a `descend` level under `d:{i}`; a `grantor` adds turns before the final one. A
@@ -791,8 +1435,9 @@ def run_agent(
 
     `interrupt` is polled before the decide, after it, and after the action, each a recorded op
     when the poll subscribes to that phase (`effective.interrupts`). A redirect becomes the next
-    observation, and one that lands before the action runs drops it. An escape ends the run with
-    `stop_reason="escaped"`, dropping an action the model chose but the loop had not run.
+    observation, and one that lands before the action runs drops it. An escape ends the run in
+    `Escaped`, dropping an action the model chose but the loop had not run, and so does an op
+    cancelled while it ran. `unwrap` hands back the answer or raises the escape as a cancel.
 
     `guard` judges each action before it runs, over the transcript that chose it: a `Refuse` is
     the observation in place of the action, and an `Ask` puts its question to the user and parks
@@ -805,15 +1450,141 @@ def run_agent(
     `compact` fires on the transcript before a decide and records one `react:compact` step whose
     summary replaces the transcript's prefix, keeping the task and the last `KEEP_TAIL` messages.
     The splice is loop logic because the transcript is workflow state between yields, where no
-    handler layer reaches."""
-    ran = yield from run_turns(
+    handler layer reaches.
+
+    `tools` declares what each name an action calls means, its arguments and its result type,
+    and `act` dispatches every action itself, so a run takes one or the other. An undeclared name
+    still goes to `default_act`. Declarations are not an authorization boundary.
+
+    `answer` types the run's answer: a function returning `Prompt[M]` whose parameters bind, by
+    result type, the last result of the one declared tool producing each (`Annotated[T, tool]`
+    names one). Every decide receives `M`'s schema and a tail naming its fields, the
+    rendered contract once its evidence binds, and the last refusal on a repair turn. A refused
+    answer is decided again at the same level, `repairs` times over the run, and then the run
+    ends `Exhausted`, which `unwrap` raises as `RepairsExhausted`. A turn calling a tool spends
+    no repair, and the final turn calls none. Evidence from an earlier occurrence of a tool, or
+    produced inside a subagent, is out of reach."""
+    if tools and act is not None:
+        raise ValueError("`tools` and `act` each dispatch the run's actions; pass one")
+    toolbox = Toolbox(declared(tools)) if tools else None
+    return (
+        yield from _run(
+            toolbox,
+            prompt,
+            max_iters,
+            answer,
+            repairs,
+            decide,
+            act,
+            guard,
+            interrupt,
+            compact,
+            grantor,
+        )
+    )
+
+
+@overload
+def run_in(
+    toolbox: Toolbox | None,
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    decide: Decide | None = None,
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Trajectory | Escaped]: ...
+@overload
+def run_in[M: BaseModel](
+    toolbox: Toolbox | None,
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    answer: Callable[..., Prompt[M]],
+    repairs: int = REPAIRS,
+    decide: Decide | None = None,
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Ending[M]]: ...
+@overload
+def run_in(
+    toolbox: Toolbox | None,
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    answer: Callable[..., Prompt[Any]] | None,
+    repairs: int | None = None,
+    decide: Decide | None = None,
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Ending[Any]]: ...
+def run_in(
+    toolbox: Toolbox | None,
+    prompt: str | Template,
+    max_iters: int = 6,
+    *,
+    answer: Callable[..., Prompt[Any]] | None = None,
+    repairs: int | None = None,
+    decide: Decide | None = None,
+    act: Act | None = None,
+    guard: Guard | None = None,
+    interrupt: Interrupt | None = None,
+    compact: Compact | None = None,
+    grantor: Grantor | None = None,
+) -> Effect[Ending[Any]]:
+    """`run_agent` dispatching through `toolbox`, whose fallback takes the undeclared names, or
+    through `act` without one. The caller holds the toolbox, so it reads the log the run wrote."""
+    return (
+        yield from _run(
+            toolbox,
+            prompt,
+            max_iters,
+            answer,
+            repairs,
+            decide,
+            act,
+            guard,
+            interrupt,
+            compact,
+            grantor,
+        )
+    )
+
+
+def _run(
+    toolbox: Toolbox | None,
+    prompt: str | Template,
+    max_iters: int,
+    answer: Callable[..., Prompt[Any]] | None,
+    repairs: int | None,
+    decide: Decide | None,
+    act: Act | None,
+    guard: Guard | None,
+    interrupt: Interrupt | None,
+    compact: Compact | None,
+    grantor: Grantor | None,
+) -> Effect[Ending[Any]]:
+    if answer is None and repairs is not None:
+        raise ValueError("`repairs` bounds a typed run's answers, and no `answer` was given")
+    answering = _answering(answer, REPAIRS if repairs is None else repairs, toolbox)
+    ran = yield from _ran(
         _messages(prompt),
         max_iters,
-        decide=decide,
-        act=act,
-        guard=guard,
-        interrupt=interrupt,
-        compact=compact,
-        grantor=grantor,
+        decide,
+        toolbox.act() if toolbox is not None else act,
+        guard,
+        interrupt,
+        compact,
+        grantor,
+        answering,
     )
     return ran.trajectory

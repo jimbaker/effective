@@ -983,8 +983,8 @@ class ForkOutcome(BaseModel):
     the fork family refuses loudly by design (a tail sleep, a prefix await, a seed that crossed
     the boundary, a world mutation under `DryRun`), and a refusal that only raised would leave the
     parent parked on a join forever. A crash propagates and the engine retries it; a child that
-    fails for good is answered `Failed` by its worker, and one its engine cancels, `Cancelled`,
-    which only the engine's cancel sends.
+    fails for good is answered `Failed` by its worker, and one cancelled while it ran, by its
+    engine or at a step, `Cancelled`, with what it had written.
     `join_fork` builds this from its handle and the answer, so a sweep keeps every child's
     ending, refusals, failures and cancels included."""
 
@@ -1244,13 +1244,13 @@ def run_fork_as_task(
             transplanted=transplanted,
             params=params,
         )
-        answer: Returned | Refusal = Returned(value=result)
+        answer: Returned | Refusal | Cancelled = Returned(value=result)
     except Exception as raised:
-        # A refusal is a deterministic ANSWER: retrying re-derives it, so report and complete.
-        # Anything else propagates unchanged, and the worker retries it or answers it.
+        # A refusal or a cancel is a deterministic ANSWER: retrying re-derives it, so report and
+        # complete. Anything else propagates unchanged, and the worker retries it or answers it.
         match stopped_at(raised, REFUSALS):
-            case Refusal() as refusal:
-                answer = refusal
+            case Refusal() | Cancelled() as stopped:
+                answer = stopped
             case Crashed(errors=errors):
                 raise errors from None
             case None:

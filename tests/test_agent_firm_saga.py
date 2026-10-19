@@ -23,7 +23,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault, FaultPosition, at_every_op
-from _odoo import ERPS, books, fresh_round
+from _odoo import books, crashed, durable_sweeps, fresh_round
 
 from effective.api import Effect, claim_ledger, step
 from effective.budget import Grant
@@ -75,14 +75,16 @@ def _driven(backend, world: World, fault: Fault, program: Callable[[], Effect[An
     return snapshot.result
 
 
-def _swept(backend, position: FaultPosition, world_of: Callable[[], World], check) -> int:
-    """Run unarmed, then crashed at each op the unarmed run reached, checking every run's ERP;
-    returns how many crash points there were."""
+def _swept(
+    backend, position: FaultPosition, world_of: Callable[[], World], check, arm: str = "scripted"
+) -> int:
+    """Run unarmed, then crashed at each op the unarmed run reached that `arm` sweeps, checking
+    every run's ERP; returns how many crash points there were."""
     unarmed = Fault(None, position=position)
     world = world_of()
     check(_run(backend, world, unarmed), world.erp, None)
     crashes = 0
-    for k, fault in at_every_op(unarmed):
+    for k, fault in crashed(arm, at_every_op(unarmed)):
         world = world_of()
         check(_run(backend, world, fault), world.erp, k)
         crashes += 1
@@ -206,8 +208,7 @@ def test_a_round_starts_once_the_earlier_round_ended(backend):
 
 
 @pytest.mark.adversarial
-@pytest.mark.parametrize("arm", ERPS)
-@pytest.mark.parametrize("position", list(FaultPosition))
+@pytest.mark.parametrize(("position", "arm"), durable_sweeps(list(FaultPosition)))
 def test_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, arm):
     erp_of = books(arm, [SLA_CAP])
 
@@ -223,12 +224,17 @@ def test_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, 
             2000,
         ), k
 
-    assert _swept(backend, position, lambda: _world(erp_of()), check) == 9
+    assert (
+        _swept(backend, position, lambda: _world(erp_of()), check, arm)
+        == {
+            "scripted": 9,
+            "odoo": 0,
+        }[arm]
+    )
 
 
 @pytest.mark.adversarial
-@pytest.mark.parametrize("arm", ERPS)
-@pytest.mark.parametrize("position", list(FaultPosition))
+@pytest.mark.parametrize(("position", "arm"), durable_sweeps(list(FaultPosition)))
 def test_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_memo(
     backend, position, arm
 ):
@@ -244,7 +250,13 @@ def test_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_
         assert (erp.residual(memo.id), erp.residual(reversal.id)) == (0, 0), k
         assert (erp.residual(PAYMENT), erp.residual(INVOICE)) == (97000, 100000), k
 
-    assert _swept(backend, position, lambda: _world(erp_of(), _bounced), check) == 11
+    assert (
+        _swept(backend, position, lambda: _world(erp_of(), _bounced), check, arm)
+        == {
+            "scripted": 11,
+            "odoo": 0,
+        }[arm]
+    )
 
 
 def _spent() -> World:

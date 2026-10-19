@@ -27,7 +27,7 @@ from effective.domain import AskLLM, CallTool
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
 from effective.interpreters.tools import AgentTool, ToolFn, make_tool_runner
-from effective.react import AssistantTurn, Trajectory, run_agent
+from effective.react import AssistantTurn, load_ending, run_agent, unwrap
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ def record_then_replay(
         llm=scripted_caller(caller_script), tools=make_tool_runner(tools or {}, agents)
     )
     rec_ctx = RecordingCtx()
-    rec = Trajectory.model_validate(DurableHandler(rec_ctx, rec_interp).run(program))
+    rec = load_ending(DurableHandler(rec_ctx, rec_interp).run(program))
 
     calls = {"llm": 0, "tool": 0}
 
@@ -75,12 +75,12 @@ def record_then_replay(
 
     rep_interp = MeteredInterpreter(llm=boom_llm, tools=boom_tool)
     rep_raw = DurableHandler(ReplayCtx(rec_ctx.log), rep_interp).run(program)
-    rep = Trajectory.model_validate(rep_raw)
+    rep = load_ending(rep_raw)
 
     return BenchResult(
         name=task.name,
-        answer=rec.answer,
-        passed=bool(task.check(rec.answer)),
+        answer=unwrap(rec),
+        passed=bool(task.check(unwrap(rec))),
         recorded=rec_interp.meter,
         replay_llm_calls=calls["llm"],
         replay_tool_calls=calls["tool"],

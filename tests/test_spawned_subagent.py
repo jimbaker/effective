@@ -22,14 +22,28 @@ from _spawning import absurd_spawner
 
 from effective import call_tool
 from effective.budget import BUDGET_DEPTH_PARAM
+from effective.cancel import Cancelled
 from effective.compose import spawn_subagent_task
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL
 from effective.govern import Refused
 from effective.handlers.durable import DurableHandler
 from effective.interpreters.scripted import scripted_caller
-from effective.interpreters.tools import make_tool_runner, run_subagent_as_task, spawn_tool
-from effective.react import AssistantTurn, ToolRequest, ToolResult, run_agent
+from effective.interpreters.tools import (
+    _adapt_ctx,
+    make_tool_runner,
+    run_subagent_as_task,
+    spawn_tool,
+)
+from effective.react import (
+    AssistantTurn,
+    Escaped,
+    ToolRequest,
+    ToolResult,
+    load_ending,
+    run_agent,
+)
+from effective.spawning import ChildAnswer, Returned, join_answer, run_child, spawn_child
 
 pytestmark = [
     pytest.mark.spine,
@@ -68,7 +82,8 @@ def _register_parent(
     def parent(params, ctx):
         mid = params["mid"]
 
-        def decide(messages, level):
+        def decide(request):
+            messages, level = request.messages, request.level
             yield from ()
             if level.depth == 0:
                 return AssistantTurn(thought="go", tool=ToolRequest(name="delegate", args={}))
@@ -115,7 +130,9 @@ def test_spawned_child_is_its_own_task_and_the_parent_awaits_it():
         child_snap = app.fetch_task_result(UUID(child_id))
         assert child_snap is not None
         assert child_snap.state == "completed"
-        assert child_snap.result["answer"] == "42"
+        assert child_snap.result == ChildAnswer(answer=Returned(value="42")).model_dump(
+            mode="json"
+        )
     finally:
         app.close()
         spawner_app.close()
@@ -172,6 +189,87 @@ def test_the_depth_ceiling_holds_on_the_engine(depth, answered, children):
         assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
         assert answered in snap.result["answer"]
         assert len(ids) == children
+    finally:
+        app.close()
+        spawner_app.close()
+
+
+def test_a_spawned_subagent_that_escapes_is_joined_as_a_cancel_with_its_partial():
+    """The child's model call is cancelled mid-answer: the child completes with `Cancelled`, and
+    the parent's action is cancelled with the child's partial text."""
+    app, spawner_app = absurd(), absurd()
+    try:
+        mid = f"escape-{uuid4().hex[:8]}"
+        pname, cname = f"p-{mid}", f"c-{mid}"
+        ids: list[str] = []
+
+        @app.register_task(cname)
+        def child(params, ctx):
+            domain = MeteredInterpreter(
+                llm=lambda _op: (Cancelled(partial="half"), U), tools=make_tool_runner({})
+            )
+            return run_subagent_as_task(params, ctx, domain=domain, max_iters=3)
+
+        _register_parent(app, pname, cname, absurd_spawner(spawner_app, IMMEDIATE_RETRY, ids))
+        snap = app.run_until_result(app.spawn(pname, {"mid": mid}))
+
+        assert snap is not None
+        assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
+        ending = load_ending(snap.result)
+        assert isinstance(ending, Escaped)
+        assert (ending.origin, ending.partial) == ("action", "half")
+        child_snap = app.fetch_task_result(UUID(ids[0]))
+        assert child_snap is not None
+        assert child_snap.state == "completed"
+        assert child_snap.result == ChildAnswer(answer=Cancelled(partial="half")).model_dump(
+            mode="json"
+        )
+    finally:
+        app.close()
+        spawner_app.close()
+
+
+def test_a_parent_that_needs_the_escape_spawns_a_child_returning_its_ending():
+    """A child whose program is `run_agent` itself returns its ending as its value, so the parent
+    reads the escape's origin and name, which `run_subagent_as_task` keeps with the child."""
+    app, spawner_app = absurd(), absurd()
+    try:
+        mid = f"ending-{uuid4().hex[:8]}"
+        pname, cname = f"p-{mid}", f"c-{mid}"
+
+        @app.register_task(cname)
+        def child(params, ctx):
+            ctx = _adapt_ctx(ctx)
+            domain = MeteredInterpreter(
+                llm=lambda _op: (Cancelled(partial="half"), U), tools=make_tool_runner({})
+            )
+            handler = DurableHandler(ctx, domain, params=params)
+            return run_child(ctx, params, handler, lambda: run_agent(params["task"], max_iters=3))
+
+        @app.register_task(pname)
+        def parent(params, ctx):
+            def reads_the_ending():
+                spawned = yield from spawn_child(cname, mid, {"task": "double 21"})
+                return (yield from join_answer(spawned))
+
+            domain = MeteredInterpreter(
+                llm=_boom_llm,
+                tools=make_tool_runner(
+                    {},
+                    agents={
+                        SPAWN_TOOL: spawn_tool(absurd_spawner(spawner_app, IMMEDIATE_RETRY, []))
+                    },
+                ),
+            )
+            return DurableHandler(ctx, domain, params=params).run(reads_the_ending)
+
+        snap = app.run_until_result(app.spawn(pname, {"mid": mid}))
+
+        assert snap is not None
+        assert snap.state == "completed", f"state={snap.state} failure={snap.failure}"
+        ending = load_ending(snap.result)
+        assert isinstance(ending, Escaped)
+        assert (ending.origin, ending.partial) == ("decide", "half")
     finally:
         app.close()
         spawner_app.close()

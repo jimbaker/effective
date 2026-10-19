@@ -31,8 +31,9 @@ from effective.react import (
     bad_arguments,
     default_act,
     run_agent,
+    unwrap,
 )
-from effective.spawning import join_child, spawn_child
+from effective.spawning import join_answer, spawn_child
 
 ASK_HUMAN = "ask_human"
 
@@ -147,19 +148,24 @@ def spawn_subagent(
         compose_key(t"sub:{Name(name)}"),
         lambda: run_agent(task, max_iters=max_iters, decide=decide, act=act, interrupt=interrupt),
     )
-    return ToolResult(content=traj.answer)
+    return ToolResult(content=unwrap(traj))
 
 
 # --- the spawned subagent: a child Absurd *task* (opaque AND durable) ------------------
 # `SPAWN_TOOL`/`SpawnResult` (the tool's wire protocol, shared with `effective.fork`) live
-# in `effective.domain` beside the `CallTool` they type; `ChildResult` is this caller's own
-# done-event payload (a fork child answers on `effective.spawning.ChildAnswer`).
+# in `effective.domain` beside the `CallTool` they type; the child answers on
+# `effective.spawning.ChildAnswer`, as every spawned child does.
 
 
-class ChildResult(BaseModel):
-    """The child's completion event payload (its final answer), awaited by the parent."""
+def subagent_task(task: str, max_iters: int = 4) -> Effect[str]:
+    """The spawned subagent's own program: its answer, or the cancel its escape raises, which
+    `run_child` answers its parent with.
 
-    answer: str
+    The parent hears the ending in its own kind, `Returned` or `Cancelled` with the partial text,
+    so the escape's origin, name and steps stay with the child. A parent that needs them spawns a
+    program that returns `run_agent`'s ending as its value, and reads what `join_answer` hands it
+    with `load_ending`."""
+    return unwrap((yield from run_agent(task, max_iters=max_iters)))
 
 
 def spawn_subagent_task(
@@ -184,8 +190,8 @@ def spawn_subagent_task(
     performs the spawn.
 
     The handler holds the spawn to this task's depth, refuses one past it with `Refused`, and
-    gives the child one level less.
+    gives the child one level less. A child that escaped raises `OpCancelled` with its partial
+    text, as a cancelled step raises.
     """
     spawned = yield from spawn_child(child_task, correlation, {"task": task}, queue=queue)
-    child = yield from join_child(spawned, ChildResult)
-    return ToolResult(content=child.answer)
+    return ToolResult(content=(yield from join_answer(spawned)))

@@ -20,9 +20,10 @@ class ParkReason(StrEnum):
     | `exhausted`  | the visit budget            | the tree the last visit left           |
     | `broken-env` | the environment             | a tree the predicate has yet to judge  |
     | `refused`    | a governed boundary         | the tree before the refused visit      |
+    | `cancelled`  | a cancel, or an escape      | the tree before the cancelled visit    |
 
-    A transition returns the first three. The walk mints `refused` itself, when a visit raises a
-    refusal, and `RunRefused` carries that run to its caller."""
+    A transition returns the first three. The walk mints the last two itself, when a visit raises a
+    refusal or a cancel, and `RunRefused` or `RunCancelled` carries that run to its caller."""
 
     EXHAUSTED = "exhausted"
     REJECTED = "rejected"
@@ -32,6 +33,7 @@ class ParkReason(StrEnum):
     A re-draft answers bad work, and this is an infrastructure fault: the prose machine's VERIFY
     reads gates whose container can vanish between runs, which is a named AGENTS.md hazard."""
     REFUSED = "refused"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True)

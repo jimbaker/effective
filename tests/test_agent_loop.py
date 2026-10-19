@@ -8,7 +8,13 @@ still drives them to a `Trajectory`.
 """
 
 from effective import RecordingHandler, call_tool
-from effective.react import AssistantTurn, ToolRequest, ToolResult, Trajectory, run_agent
+from effective.react import (
+    AssistantTurn,
+    ToolRequest,
+    ToolResult,
+    Trajectory,
+    run_agent,
+)
 
 
 def test_loop_drives_a_pure_python_step():
@@ -21,7 +27,7 @@ def test_loop_drives_a_pure_python_step():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()  # a pure step: re-derives on replay, yields no op
         return next(script)
 
@@ -44,7 +50,7 @@ def test_custom_act_rewrites_tool_dispatch():
         ]
     )
 
-    def decide(messages, tag):
+    def decide(request):
         yield from ()
         return next(script)
 

@@ -1,11 +1,13 @@
-# f-string baseline — sites recorded as accepted, so the gate can fail on GROWTH.
+# f-string baseline: sites recorded as accepted, so the gate can fail on GROWTH.
 #
 # Format:  <path> :: <statics, as a Python literal> :: <which processor should own it>
+#          [:: <how many sites share the key, when more than one>]
 #
-# An f-string is for a t-string processor's RENDER BACKEND, and (for now) creating an
-# exception. Those two are DESIGNATED in fstring_sweep.py and never appear here.
-# Everything below is a finding waiting for its processor. The gate fails on a finding
-# NOT listed, and on an entry nothing produces — so this file can only shrink.
+# An f-string is for a t-string processor's RENDER BACKEND and a structured exception's
+# `__str__`. Those two are DESIGNATED in fstring_sweep.py and never appear here.
+# Everything below is a finding waiting for its processor, and a raise is waiting for a
+# structured exception. The gate fails on a site NOT counted, and on a count nothing
+# produces, so this file can only shrink.
 #
 # Keyed on (path, statics), never a line number: an edit above a site keeps its entry.
 
@@ -15,7 +17,7 @@ src/agent/bank.py :: 'no  trial.json — the replay pin would be vacuous' :: tex
 src/agent/bank.py :: 'stamp banked  stores, found ' :: text
 src/agent/bank.py :: 'stamp says era , current era is ' :: text
 src/agent/bank.py :: 'stamp seed  != pinned seed ' :: text
-src/agent/bench_telemetry.py :: '' :: text
+src/agent/bench_telemetry.py :: '' :: text :: 2
 src/agent/bench_telemetry.py :: '  ! : : ' :: text
 src/agent/bench_telemetry.py :: ':' :: key -> compose_key
 src/agent/bench_telemetry.py :: '<' :: text
@@ -33,7 +35,7 @@ src/agent/contrastbench.py :: 'How many records have action= and amount > 250?' 
 src/agent/contrastbench.py :: 'How many records with action= have a note whose text expresses a ? Notes are free text, not labels — judge what each note MEANS (every note expresses a complaint, praise, or neutral routine content).' :: text
 src/agent/contrastbench.py :: 'LOG:\n\n\nQUESTION: ' :: text
 src/agent/contrastbench.py :: 'OUTPUT: ' :: text
-src/agent/contrastbench.py :: 'QUESTION: ' :: text
+src/agent/contrastbench.py :: 'QUESTION: ' :: text :: 5
 src/agent/contrastbench.py :: 'What is the total amount over all records with user= and action=?' :: text
 src/agent/contrastbench.py :: 'Which user has the most records with action= whose note text expresses a ? Notes are free text, not labels — judge what each note MEANS (every note expresses a complaint, praise, or neutral routine content).' :: text
 src/agent/contrastbench.py :: 'Which user has the most records with action=?' :: text
@@ -41,49 +43,52 @@ src/agent/contrastbench.py :: "You answer one question about an operations log b
 src/agent/contrastbench.py :: "You answer one question about an operations log by writing Python.\nThe log is ALREADY in the sandbox as `records`: a list of dicts with keys\nts (str), user (str), action (str), amount (int). Do NOT ask for the data;\nwrite code against `records`.\n\nEach turn reply with `thought` (brief) and EITHER `code` OR a final `answer`\n(a plain number or username, nothing else — give it as soon as you know it).\nYour code's final expression value is validated and returned to you IN FULL as\nJSON. Each turn's code runs fresh — no variables persist between turns. Plain\nPython only: str/list/dict/set methods, comprehensions, functions; no imports,\nclasses, yield, or match.\n\n" :: text
 src/agent/contrastbench.py :: 'You answer one question about an operations log, exactly.\nThe log and the question are in the user message. Reply in ONE turn: `thought`\n(brief), `code` always null, and `answer` — a plain number or username, nothing else.\n\n' :: text
 src/agent/contrastbench.py :: 'attempt-' :: key -> compose_key
-src/agent/contrastbench.py :: 'error: ' :: text
+src/agent/contrastbench.py :: 'error: ' :: text :: 3
+src/agent/contrastbench.py :: 'format example not found in  prompt — template drift' :: raise -> structured exception
+src/agent/contrastbench.py :: 'generator could not make 2  questions at ' :: raise -> structured exception
+src/agent/contrastbench.py :: 'llm_query cap () exceeded' :: raise -> structured exception
 src/agent/contrastbench.py :: 'log::' :: key -> compose_key
+src/agent/contrastbench.py :: 'no  records under any action at ' :: raise -> structured exception
+src/agent/contrastbench.py :: 'no unique  argmax under any action at ' :: raise -> structured exception
 src/agent/contrastbench.py :: 'notes::' :: key -> compose_key
 src/agent/contrastbench.py :: 'q:::' :: key -> compose_key
+src/agent/contrastbench.py :: 'replay_combinator expects one task in , found ' :: raise -> structured exception
+src/agent/contrastbench.py :: 'replay_structured expects one task in , found ' :: raise -> structured exception
 src/agent/contrastbench.py :: 'sem-argmax--' :: key -> compose_key
 src/agent/contrastbench.py :: 'sem-count--' :: key -> compose_key
 src/agent/contrastbench.py :: 'semq::' :: key -> compose_key
+src/agent/contrastbench.py :: 'unexpected tool in contrast trial: ' :: raise -> structured exception
+src/agent/contrastbench.py :: 'unknown arm  (use )' :: raise -> structured exception
 src/agent/debug.py :: '\n\nFile :\n' :: text
 src/agent/debug.py :: 'applied to ' :: text
+src/agent/debug.py :: 'unknown code tool: ' :: raise -> structured exception
 src/agent/eval.py :: '[error: ]' :: text
 src/agent/gsm8k.py :: 'gsm8k_' :: text
-src/agent/hotpotqa.py :: '  ' :: text
+src/agent/hotpotqa.py :: '  ' :: text :: 2
 src/agent/hotpotqa.py :: "() — read the paragraph titled ''" :: text
 src/agent/hotpotqa.py :: 'hotpot_' :: text
 src/agent/hotpotqa.py :: 'p' :: key -> compose_key
 src/agent/permit_tuning.py :: ' (human: deny)' :: text
-src/effective/interpreters/precise_edit.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
-src/effective/interpreters/tools.py :: 'error: ' :: text
-src/effective/interpreters/tools.py :: 'unknown tool: ' :: text
-src/effective/session_telemetry.py :: '  cache-read tokens  : ' :: text
-src/effective/session_telemetry.py :: '  cache_hit_ratio    :    <- same dial as the GSM8K bench' :: text
-src/effective/session_telemetry.py :: '  est. cost (Opus)   : $' :: text
-src/effective/session_telemetry.py :: '  output tokens      : ' :: text
-src/effective/session_telemetry.py :: '  sidecar ->   (, OTLP)' :: text
-src/effective/session_telemetry.py :: '  total input tokens : ' :: text
-src/effective/session_telemetry.py :: ' violation(s)' :: text
-src/effective/session_telemetry.py :: 'LM.' :: text
-src/effective/session_telemetry.py :: 'session:   ( LLM turns)' :: text
 src/agent/skillsbench.py :: '\n...[ chars elided]...\n' :: prompt -> channels
 src/agent/skillsbench.py :: '\n[exit code: ]' :: prompt -> channels
 src/agent/skillsbench.py :: '### Skill: \n\n' :: prompt -> channels
 src/agent/skillsbench.py :: '--cpus=' :: prompt -> channels
 src/agent/skillsbench.py :: '--memory=m' :: prompt -> channels
 src/agent/skillsbench.py :: ':' :: key -> compose_key
-src/agent/skillsbench.py :: ': ' :: prompt -> channels
+src/agent/skillsbench.py :: ': ' :: prompt -> channels :: 2
+src/agent/skillsbench.py :: ': task.md has no frontmatter' :: raise -> structured exception
 src/agent/skillsbench.py :: '::' :: key -> compose_key
 src/agent/skillsbench.py :: '[command timed out after s]' :: prompt -> channels
 src/agent/skillsbench.py :: 'agent timeout (s, their protocol cap)' :: prompt -> channels
 src/agent/skillsbench.py :: 'attempt-' :: key -> compose_key
+src/agent/skillsbench.py :: 'build failed for : ' :: raise -> structured exception
 src/agent/skillsbench.py :: 'docker.io/library/' :: prompt -> channels
 src/agent/skillsbench.py :: 'effective:' :: key -> compose_key
+src/agent/skillsbench.py :: 'run failed for : ' :: raise -> structured exception
 src/agent/skillsbench.py :: 'sb-' :: key -> compose_key
+src/agent/skillsbench.py :: 'unknown arm  (use )' :: raise -> structured exception
 src/agent/skillsbench.py :: 'unknown skill ; available: ' :: prompt -> channels
+src/agent/skillsbench.py :: 'unresolvable turn: ' :: raise -> structured exception
 src/agent/tape_bank.py :: '  ' :: text
 src/agent/tape_bank.py :: ' missing or unreadable — not banked by the tape writer' :: text
 src/agent/tape_bank.py :: 'no  in ' :: text
@@ -94,17 +99,24 @@ src/agent/tape_bank.py :: 'tape is vacuous for the walk:  turn(s) and  action(s)
 src/agent/tape_bank.py :: 'the fresh tape VIOLATES the transcript property ( violation(s) over  witnessed turn(s)):\n\n\nThat is a defect in the loop, not in the run — banking it would install a fixture that agrees with the bug. Nothing was displaced.' :: text
 src/agent/tape_bank.py :: 'this tape is vacuous for the walk ( turns,  actions; need /). The model gave up rather than working the problem, which happens. Re-run to try again; nothing was displaced.' :: text
 src/agent/tasks.py :: '(?<!\\d)(?!\\d)' :: text
-src/effective/voi.py :: 'probe+' :: text
-src/effective/voi.py :: 'probe+$' :: text
-src/effective/bridge_absurd.py :: 'c_' :: text
+src/agent/tasks.py :: "bench task id  is not a well-formed atom, so it cannot name a trial's scope. Bench ids are kept RAW for legibility on the promise that they are in language; this one breaks it. Either normalize the id in the dataset loader, or digest it here (`handlers.base.digest_atom`) and accept an unreadable frame: " :: raise -> structured exception
+src/effective/api.py :: 'questions  != fields ' :: raise -> structured exception
+src/effective/bridge_absurd.py :: 'c_' :: text :: 3
+src/effective/bridge_absurd.py :: 'checkpoints  and  of task  share (attempt, updated_at)= in absurd., which has no ordinal — their commit order is unrecoverable, and  would be silently wrong. Is `absurd.fake_now` set?' :: raise -> structured exception
 src/effective/bridge_absurd.py :: 'e_' :: text
-src/effective/bridge_absurd.py :: 'r_' :: text
-src/effective/bridge_absurd.py :: 't_' :: text
+src/effective/bridge_absurd.py :: 'r_' :: text :: 2
+src/effective/bridge_absurd.py :: 't_' :: text :: 2
 src/effective/budget.py :: ' for this generation' :: text
 src/effective/budget.py :: ' overall' :: text
 src/effective/budget.py :: '%' :: text
 src/effective/budget.py :: ':' :: key -> compose_key
+src/effective/budget.py :: "MeasuredBudget: per_generation= exceeds overall=, so it can never bind — the run's cap trips first, every time. That reads like a limit and is a no-op; drop it, or raise `overall`." :: raise -> structured exception
+src/effective/budget.py :: 'a budget grant answer must be a Grant, a mapping, or a dollar amount; got ' :: raise -> structured exception
+src/effective/budget.py :: "a handler `budget=` and the gate policy  both drive run 's budget, with two grant books. Keep one: pass `budget=None` to the handler, or drop the budget policy from the gate." :: raise -> structured exception
+src/effective/budget.py :: 'budget policy  gates a run that does not meter. Run it on a durable handler over a `MeteredDomain`.' :: raise -> structured exception
 src/effective/budget.py :: 'grant more budget? spent $ of $' :: text
+src/effective/cache.py :: ' is not a container' :: raise -> structured exception
+src/effective/cache.py :: 'op_digest has no encoding for ' :: raise -> structured exception
 src/effective/cards/render_markdown.py :: '\n' :: text
 src/effective/cards/render_markdown.py :: '\n**Actions:** ' :: text
 src/effective/cards/render_markdown.py :: '\n> ' :: text
@@ -118,18 +130,55 @@ src/effective/cards/render_shiny.py :: 'act______' :: text
 src/effective/cards/render_shiny.py :: 'action-button ev-action ev-action--' :: text
 src/effective/cards/render_shiny.py :: 'ev-badge ev-badge--' :: text
 src/effective/cards/render_shiny.py :: 'ev-metric ev-metric--' :: text
-src/effective/cards/spec.py :: '' :: text
-src/effective/cards/spec.py :: ' ' :: text
-src/effective/cards/spec.py :: '#' :: key -> compose_key
+src/effective/cards/spec.py :: '' :: text :: 2
+src/effective/cards/spec.py :: ' ' :: text :: 2
+src/effective/cards/spec.py :: '#' :: key -> compose_key :: 2
 src/effective/cards/spec.py :: '$' :: text
 src/effective/cards/spec.py :: '–' :: text
+src/effective/cards/tstring.py :: 'unexpected card hole :  (every hole must be a typed card channel)' :: raise -> structured exception
+src/effective/channels.py :: ' is not a directive, and this spec already carries one; mixing them would drop the directives silently. Format the value before interpolating it.' :: raise -> structured exception
 src/effective/channels.py :: '<<>>' :: text
+src/effective/channels.py :: 'cached segment after a volatile one in role : ' :: raise -> structured exception
+src/effective/channels.py :: 'channels  != fields of   (missing channels ; extra channels )' :: raise -> structured exception
+src/effective/channels.py :: 'duplicate channel name ' :: raise -> structured exception
+src/effective/channels.py :: 'interpolation  renders a  — a prior resolution re-entering a render breaches independence (a turn boundary, not composition)' :: raise -> structured exception
 src/effective/channels.py :: 'invalid : ' :: text
 src/effective/channels.py :: 'missing field: ' :: text
 src/effective/channels.py :: 'output : ' :: text
+src/effective/channels.py :: 'pin for skill  threaded into skill ' :: raise -> structured exception
+src/effective/channels.py :: 'skill  discloses itself (via )' :: raise -> structured exception
+src/effective/channels.py :: 'skill  interpolated but render() got no registry' :: raise -> structured exception
+src/effective/channels.py :: 'unknown role directive  (use system|user|assistant)' :: raise -> structured exception
+src/effective/channels.py :: '{:} marks , which the prompt composes rather than quotes. Drop the : spec.' :: raise -> structured exception
+src/effective/checkpoints.py :: ' is occurrence  of , and the prefix holds  before it: an earlier ask was refused and left no checkpoint, so a positional replay would bind the wrong answer' :: raise -> structured exception
 src/effective/checkpoints.py :: 'file:?mode=ro' :: text
-src/effective/code.py :: '[]' :: text
+src/effective/choice.py :: 'branch  ended with a value, and this attempt stopped it before it returned one: its value rests on an op its record does not hold' :: raise -> structured exception
+src/effective/choice.py :: 'not a stored choice: ' :: raise -> structured exception
+src/effective/choice.py :: 'not a stored ending: ' :: raise -> structured exception
+src/effective/code.py :: ' paused without an action request' :: raise -> structured exception
+src/effective/code.py :: ': requested more than  actions; runaway action loop (raise MAX_ACTIONS deliberately if real)' :: raise -> structured exception
+src/effective/code.py :: '[]' :: text :: 2
 src/effective/code.py :: 'inputs[]' :: text
+src/effective/code.py :: 'run_code input  has a non-str key ' :: raise -> structured exception
+src/effective/code.py :: 'run_code input  is , not a JSON value — convert explicitly (e.g. sorted(a_set), list(a_tuple), dt.isoformat())' :: raise -> structured exception
+src/effective/code.py :: 'run_code input  is non-finite (); not a JSON value' :: raise -> structured exception
+src/effective/code.py :: "run_code name  contains '/', the key grammar's path delimiter; wrap the call in `scoped(...)` to namespace it" :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: ' does not resolve: ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: ' has  arm(s) defined outside the project' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: ' is not a Python identifier' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: ' is not defined in ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: ' is outside the project' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: 'could not infer arms of : ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: 'could not rename at ::: ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: 'could not resolve references at ::: ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: 'no such file: ' :: raise -> structured exception
+src/effective/coding/edits/semantic.py :: 'renaming at :: would change  file(s) outside the project' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'Could not find edits[].old in . It must match exactly, including whitespace and newlines.' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'Found  occurrences of edits[].old in . It must be unique; include more of the surrounding text.' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'No changes made to : the replacements give identical content.' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'No edits for ; give at least one replacement.' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'edits[] and edits[] overlap in . Merge them into one edit or target disjoint regions.' :: raise -> structured exception
+src/effective/coding/edits/text.py :: 'edits[].old is empty in .' :: raise -> structured exception
 src/effective/coding/gate.py :: ': ' :: text
 src/effective/coding/gate.py :: 'lint [] ' :: text
 src/effective/coding/gate.py :: 'lint [fidelity] non-printable character U+ at line ' :: text
@@ -139,60 +188,285 @@ src/effective/coding/gate.py :: 'lint [syntax]  (line )' :: text
 src/effective/coding/runners.py :: ' reference(s): ' :: text
 src/effective/coding/runners.py :: '::' :: key -> compose_key
 src/effective/coding/runners.py :: 'exit ; failing: ' :: text
+src/effective/coding/runners.py :: 'no rule matched anything in  — the pattern hit 0 sites' :: raise -> structured exception
+src/effective/coding/runners.py :: 'no runner for ; the table serves ' :: raise -> structured exception
+src/effective/coding/runners.py :: 'no such file in the workspace: ' :: raise -> structured exception :: 2
+src/effective/coding/runners.py :: 'run_suite was given a `tree` that is not a mapping of path to content — refusing rather than measuring the workspace, which would answer about a different tree than the one you named: ' :: raise -> structured exception
+src/effective/coding/runners.py :: 'the content of  has no bytes to write' :: raise -> structured exception
+src/effective/coding/runners.py :: 'the rewrite does not merge: ' :: raise -> structured exception
 src/effective/coding/runners.py :: 'the suite could not collect: ' :: text
 src/effective/coding/runners.py :: 'wrote the file; the workspace now holds  file(s): ' :: text
 src/effective/coding/specs.py :: ' steps, stopped: ' :: text
 src/effective/coding/specs.py :: '; tools: ' :: text
+src/effective/coding/tier.py :: ' is not built, so container execution is unavailable. Build it with `podman build -t  -f infra/code-agent/Dockerfile infra/code-agent`; this refuses rather than running on the host, because a caller asking for the container tier is asking not to execute model-written code beside its own files.' :: raise -> structured exception
+src/effective/coding/tier.py :: "= is not a tier: use 'host' or 'container'" :: raise -> structured exception
+src/effective/coding/tier.py :: 'a tree key of  bytes is longer than ' :: raise -> structured exception
+src/effective/coding/tier.py :: 'tree key  has no bytes to name a file by' :: raise -> structured exception
+src/effective/coding/tier.py :: 'tree key  is both a file and the directory of ' :: raise -> structured exception
+src/effective/coding/tier.py :: "tree key  is not one file's canonical path in the tree" :: raise -> structured exception
+src/effective/coding/tier.py :: 'tree key  is outside the tree' :: raise -> structured exception
+src/effective/coding/tier.py :: 'tree keys  and  can be written as one file' :: raise -> structured exception
+src/effective/coding/transition.py :: '. belongs to , but the machine was in  — one of the cells the dependent sum excludes, refused rather than routed' :: raise -> structured exception
+src/effective/coding/verdicts.py :: ' has a mechanical judge but its worker returned no measurement — a worker for a mechanical state must run the predicate and carry the `CommandRun` forward in `Evidence.measured`' :: raise -> structured exception
+src/effective/combinators.py :: 'mutual:  is handed a value and is not a role; the roles are ' :: raise -> structured exception
+src/effective/combinators.py :: 'mutual: role  cannot be a key: ' :: raise -> structured exception
+src/effective/combinators.py :: 'recurse fanin must be >= 2 (got )' :: raise -> structured exception
+src/effective/combinators.py :: 'respawn: the step returned Again at generation , which is final — the chain cannot go round again, so this turn had to answer with Done. Check `turn.final` before returning Again (the same loud error `descend` raises for Deeper past an exhausted budget).' :: raise -> structured exception
+src/effective/combinators.py :: 'route: classifier chose , not a handler (has )' :: raise -> structured exception
+src/effective/combinators.py :: 'tree_search iterations must be >= 1 (got )' :: raise -> structured exception
+src/effective/combinators.py :: 'unfold budget must be >= 0 (got )' :: raise -> structured exception
+src/effective/combinators.py :: 'unfold: the node descended past an exhausted budget at depth ' :: raise -> structured exception
+src/effective/combinators.py :: "unfold_task: the task's params carry no " :: raise -> structured exception
+src/effective/config.py :: '[tool.effective.]. has the wrong shape' :: raise -> structured exception
+src/effective/contexts.py :: 'LocalCtx: ' :: raise -> structured exception :: 2
+src/effective/contexts.py :: 'RecordingCtx: ' :: raise -> structured exception
+src/effective/contexts.py :: 'ReplayCtx: ' :: raise -> structured exception
+src/effective/contexts.py :: 'ResumeCtx: ' :: raise -> structured exception
+src/effective/cost.py :: 'a Judge op reached an interpreter with no judge caller (); pass judge= to MeteredInterpreter' :: raise -> structured exception
+src/effective/cost.py :: 'a run spawned under recorded format , which this release does not read; finish it under the release that spawned it' :: raise -> structured exception
+src/effective/cost.py :: 'a run whose params mark no , which this release does not read; finish it under the release that spawned it' :: raise -> structured exception
+src/effective/cost.py :: 'a serve service must thread the metered (result, usage) pair; the stack returned . Unwrapping to a bare value corrupts the pipe.' :: raise -> structured exception
 src/effective/cost.py :: 'cost budget exceeded: spent $ >= limit $' :: text
+src/effective/cost.py :: 'serve composes DOMAIN-seam services, but  is an @op_layer (it may park/suspend). Did you mean `retry_domain` (the domain twin of `retry`)? The rule: park ⇒ govern; transform-a-call ⇒ serve.' :: raise -> structured exception
 src/effective/counterfactual.py :: "a fork reached a wait on  bounded by : a counterfactual explores a decision, not a clock, so there is no honest answer to 'did it arrive in time' in a branch that spends no time. Fork a region whose waits name no deadline, or await it before the fork point and fork on the outcome." :: text
 src/effective/counterfactual.py :: 'a fork reached sleep_until(): a counterfactual explores a decision, not a clock, so a fork never sleeps. Fork a region with no durable sleep, or move the sleep out of the forked tail.' :: text
 src/effective/counterfactual.py :: "a fork's replayed prefix awaited , which is not the fork point . The child would park on , its own event namespace, where the base's recorded answer does not exist; nothing emits there, so the task would wait forever with no error, no failure and no attempt burned. Fork AT this await instead (`fork_point=`), or fork a region that does not contain it; if you have delivered the base's answer into the child's namespace, name  in `transplanted`." :: text
 src/effective/dashboard.py :: '/tasks/' :: url -> no processor yet
 src/effective/dashboard.py :: 'Run ' :: text
+src/effective/dashboard.py :: 'no task  in this engine' :: raise -> structured exception
+src/effective/dashboard.py :: 'payload is not JSON (): ' :: raise -> structured exception
+src/effective/dashboard.py :: 'task  is not parked on an event' :: raise -> structured exception
+src/effective/engines/__init__.py :: 'a SQLite URL names a file path and nothing else: ' :: raise -> structured exception
+src/effective/engines/__init__.py :: 'no engine driver for  URLs' :: raise -> structured exception
+src/effective/engines/absurd.py :: '$awaitEvent:' :: text
+src/effective/engines/absurd.py :: '_' :: text
+src/effective/engines/absurd.py :: 'a task runs at least once; max_attempts was ' :: raise -> structured exception
+src/effective/engines/absurd.py :: 'checkpoint  was written and then not found' :: raise -> structured exception
+src/effective/engines/absurd.py :: 'no task ' :: raise -> structured exception
+src/effective/engines/absurd.py :: 'no task  in queue  to read params from' :: raise -> structured exception
+src/effective/engines/absurd.py :: 'the SDK checkpoints  as : a step of this name began in this claim outside this ctx' :: raise -> structured exception
+src/effective/engines/sqlite.py :: ' refused WAL and stayed in  journal mode. The read-only observers open a second connection to this file and a rollback journal locks them out; check the filesystem supports shared memory, or pass `require_wal=False` to accept a rollback journal on this store.' :: raise -> structured exception
+src/effective/engines/sqlite.py :: ' was written by an older engine — task ids were composed strings (`name-seq`) and at-most-once rode the id instead of its own `idempotency_key` column. It opens READ-ONLY (replaying a banked run works), but it cannot be spawned into: the two shapes cannot be migrated between (see `_is_pre_uuid7_store`). Spawn into a fresh file.' :: raise -> structured exception
+src/effective/engines/sqlite.py :: ': in ' :: text
+src/effective/engines/sqlite.py :: 'a task runs at least once; max_attempts was ' :: raise -> structured exception
+src/effective/engines/sqlite.py :: 'no task ' :: raise -> structured exception
+src/effective/engines/sqlite.py :: 'no task  in this store to read an attempt from' :: raise -> structured exception
+src/effective/engines/sqlite.py :: 'no task  in this store to read params from' :: raise -> structured exception
+src/effective/engines/sqlite.py :: 'task  is no longer running as attempt , so  was not settled' :: raise -> structured exception
+src/effective/engines/sqlite.py :: 'task  is no longer running as attempt , so its checkpoint  was not written' :: raise -> structured exception
 src/effective/envelope.py :: '""' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
 src/effective/envelope.py :: 'Respond in labeled sections, each opened by its marker on its own line, exactly in this shape:\n\n\n[[ ##  ## ]]\n\nWrite each value as plain text on the lines after its marker — no quoting or escaping, multi-line values are fine. Omit a section that does not apply this turn. Always end with the [[ ##  ## ]] marker.' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
 src/effective/envelope.py :: 'Respond with a single JSON object containing exactly these keys: . Use null for keys that do not apply this turn.' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
 src/effective/envelope.py :: '[[ ##  ## ]]\n<>' :: prompt -> channels; needs a ruling: `Envelope.instructions` is a Protocol returning str, spliced by two benches
+src/effective/envelope.py :: 'expected an object, got ' :: raise -> structured exception
+src/effective/envelope.py :: 'unparseable JSON object: ' :: raise -> structured exception
+src/effective/fork.py :: 'cannot fork at a : `fork_at` replays one sequential schedule and cannot interpret a concurrent op. Fork at a decision before or after it, or use the durable driver (`run_fork`), which runs a `Gather` in its forked tail.' :: raise -> structured exception
+src/effective/fork.py :: "fork boundary  not among the base's  ckpts" :: raise -> structured exception
+src/effective/fork.py :: 'fork completed without crossing fork_point  — it never fired (wrong fork_point, or the workflow does not await it).' :: raise -> structured exception
+src/effective/fork.py :: 'fork index  out of range [0, ]' :: raise -> structured exception
+src/effective/fork.py :: 'fork point :  != ' :: raise -> structured exception
+src/effective/fork.py :: 'fork seed had unconsumed keys ' :: raise -> structured exception
+src/effective/fork.py :: "fork_point  names an await INSIDE a  region. The fork point is a boundary on `await_event`, but a gather branch's await resolves by `peek_event` on every replay, so the phase would cross once and never again. A gather is ONE node in the fork's order: fork at an await before it, or after the whole region." :: raise -> structured exception
+src/effective/fork.py :: 'measured prefix divergence at : ' :: raise -> structured exception
+src/effective/fork.py :: 'prefix divergence at :  != ' :: raise -> structured exception :: 2
 src/effective/govern.py :: '. [] ' :: prompt -> channels
+src/effective/govern.py :: ': the ruling by  rules on , and the effect is ' :: raise -> structured exception
+src/effective/govern.py :: "a govern park resolution must be a Resolution or a mapping of policy-name -> answer; got . If a policy needs a custom payload type, put it UNDER its own key: {'<policy>': payload}." :: raise -> structured exception
+src/effective/govern.py :: 'a govern resolution holds `answers` alone or the answers themselves; got `answers` beside ' :: raise -> structured exception
+src/effective/govern.py :: 'gate  did not settle after  resolutions' :: raise -> structured exception
+src/effective/govern.py :: 'govern(gate=) needs at least one Policy — a gate with no policies permits every op. Pass a policy (e.g. permission.as_policy(...) or budget.as_policy(...)), or do not install the gate.' :: raise -> structured exception
 src/effective/govern.py :: 'measured budget exceeded: spent $ >= $' :: text
+src/effective/govern.py :: 'no policy asks under , the key that wraps the answers' :: raise -> structured exception
 src/effective/graphlayout/demo.py :: '#' :: key -> compose_key
 src/effective/graphlayout/demo.py :: '.svg' :: text
 src/effective/graphlayout/demo.py :: 'wrote  graphs to / — open ' :: text
+src/effective/graphlayout/elkjs.py :: 'elkjs layout failed: ' :: raise -> structured exception :: 2
+src/effective/graphlayout/elkjs.py :: 'elkjs response out of order: wanted , got ' :: raise -> structured exception
+src/effective/graphlayout/elkjs.py :: 'elkjs worker broke protocol: ' :: raise -> structured exception
+src/effective/graphlayout/elkjs.py :: 'elkjs worker exited: ' :: raise -> structured exception
 src/effective/graphlayout/prepare.py :: 'e-' :: key -> compose_key
 src/effective/graphlayout/prepare.py :: '…' :: text
 src/effective/graphlayout/svg.py :: '  ' :: text
-src/effective/graphlayout/svg.py :: ',' :: key -> compose_key
+src/effective/graphlayout/svg.py :: ',' :: key -> compose_key :: 2
 src/effective/graphlayout/svg.py :: 'ev-g-node ev-g-node-- ev-g-node--' :: text
 src/effective/graphlayout/svg.py :: 'ms' :: key -> compose_key
-src/effective/graphview.py :: '' :: text
+src/effective/graphlayout/validate.py :: 'duplicate edge id ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'duplicate node id ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'edge  has a non-finite point ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'edge  names unknown node ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'geometry names unknown nodes ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  at  escapes the graph bounds ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  has a negative rect ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  has a non-finite rect ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  has a non-finite size' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  has a non-positive size ' :: raise -> structured exception
+src/effective/graphlayout/validate.py :: 'node  has no geometry' :: raise -> structured exception
+src/effective/graphview.py :: '' :: text :: 2
 src/effective/graphview.py :: '  ' :: text
 src/effective/graphview.py :: '  ""' :: text
 src/effective/graphview.py :: '  ()' :: text
 src/effective/graphview.py :: ' -->|"x"| ' :: text
 src/effective/graphview.py :: ' x' :: text
-src/effective/graphview.py :: '$' :: text
+src/effective/graphview.py :: '$' :: text :: 2
 src/effective/graphview.py :: '---\ntitle: \n---' :: text
 src/effective/graphview.py :: ':  nodes,  edges,  executions' :: text
 src/effective/graphview.py :: '<br/>' :: mermaid -> no processor yet
 src/effective/graphview.py :: '<br/>()' :: mermaid -> no processor yet
 src/effective/graphview.py :: '^(\\d+)(\\d+)' :: text
 src/effective/graphview.py :: 'graph ' :: text
-src/effective/graphview.py :: 'ms' :: key -> compose_key
+src/effective/graphview.py :: 'ms' :: key -> compose_key :: 2
 src/effective/graphview.py :: 'n' :: key -> compose_key
 src/effective/graphview.py :: 'x' :: key -> compose_key
-src/effective/handlers/durable.py :: '' :: text
-src/effective/engines/absurd.py :: '$awaitEvent:' :: text
-src/effective/engines/absurd.py :: '_' :: text
-src/effective/handlers/durable.py :: 'epoch-' :: key -> compose_key
+src/effective/handlers/admission.py :: 'no stable witness for a ' :: raise -> structured exception :: 3
+src/effective/handlers/base.py :: 'Step name  carries a separator, so it is read as a KEY — and it is not one: . A term is `tag:arg,arg`, and a nested name is its own term after  — so `a:b:c` is two separators in one term: write `a:b;c` if `c` is a nested name, or `a:b,c` if it is a second coordinate.' :: raise -> structured exception
+src/effective/handlers/base.py :: 'Step name  is not one well-formed atom, so it cannot be a coordinate of the `step` arm: . Give the step a name in an author namespace instead (`tool:`), which composes as `step;tool:`.' :: raise -> structured exception
+src/effective/handlers/base.py :: 'StoreArtifact content_type  is not `type/subtype`. An artifact key carries the media type as a two-atom PATH (RFC 2045), so the shape of the key cannot depend on the value.' :: raise -> structured exception
+src/effective/handlers/base.py :: "a  has no standalone op key: its identity is positional (the g-th gather or r-th race, branch i), the `gather:{g},{i};` or `race:{r},{i};` frame a handler assigns while walking the execution tree, not a content function of one op. Every handler keys a branch's leaf by that path; the gather or race itself is pure structure." :: raise -> structured exception
+src/effective/handlers/base.py :: 'a race cannot run under : its choice is a settled checkpoint, which the fork can neither seed nor steer. Run the race outside the fork.' :: raise -> structured exception
+src/effective/handlers/base.py :: 'an await name is a `Key`, not text: mint it with `event_name()`, the door that refuses an occurrence an author wrote.' :: raise -> structured exception
+src/effective/handlers/base.py :: 'an idempotency key is minted by the handler, not by its args: ' :: raise -> structured exception
+src/effective/handlers/base.py :: 'an idempotency key is minted by the handler, not supplied: ' :: raise -> structured exception
+src/effective/handlers/base.py :: 'an idempotency key reaches a tool through its args, and  has none' :: raise -> structured exception
 src/effective/handlers/base.py :: 'sha256-' :: key -> compose_key
+src/effective/handlers/durable.py :: '' :: text :: 3
+src/effective/handlers/durable.py :: " arrived from an op a layer refused on an earlier attempt: a race branch's gates must decide the same way on every attempt" :: raise -> structured exception :: 2
+src/effective/handlers/durable.py :: " was refused by a layer on an earlier attempt and answered on this one: a race branch's gates must decide the same way on every attempt" :: raise -> structured exception
+src/effective/handlers/durable.py :: " was refused by a layer while its loser replayed: a race branch's gates must decide the same way on every attempt" :: raise -> structured exception
+src/effective/handlers/durable.py :: "a model call's step records {result, usage}; this one is a bare " :: raise -> structured exception
+src/effective/handlers/durable.py :: 'a race needs a ctx that can peek and settle a checkpoint, and  cannot: run it on SQLite, or on Absurd through `SdkCtx` or `ConcurrentAbsurdCtx`' :: raise -> structured exception
+src/effective/handlers/durable.py :: 'a recorded value does not fit its schema: ' :: raise -> structured exception
+src/effective/handlers/durable.py :: 'a spawn is named by the handler, not by its args: ' :: raise -> structured exception
+src/effective/handlers/durable.py :: 'branch  ended with a value on an earlier attempt, and this attempt handed it different inputs, or none it can verify' :: raise -> structured exception
+src/effective/handlers/durable.py :: 'epoch-' :: key -> compose_key
+src/effective/handlers/durable.py :: "gather:: every parked branch's wake condition was already satisfied at the re-arm; re-queueing so replay resolves the branches from the durable record (see GatherWakeRace)" :: raise -> structured exception
+src/effective/handlers/durable.py :: 'malformed spawn args: ' :: raise -> structured exception
+src/effective/handlers/durable.py :: 'no ledger is held to read ' :: raise -> structured exception
+src/effective/handlers/durable.py :: "seed key  matched a TAIL op (past the fork point ) — `fork_seed`'s `through` reached into the tail." :: raise -> structured exception
+src/effective/handlers/durable.py :: 'spawn depth exhausted: =' :: raise -> structured exception
+src/effective/handlers/durable.py :: "step  ran LIVE during the Seeding phase, before the fork point , where every op must come from the seed. One of three things is wrong: `fork_seed`'s `through` stopped SHORT of the fork point (so the gap between them is unseeded); the child diverged from the base prefix (a workflow edited between the two runs); or  never fires, so the phase never crossed and TAIL ops are being judged as prefix. Seeded so far: ." :: raise -> structured exception
+src/effective/handlers/durable.py :: 'this ctx () waits on an event alone, so it cannot answer the deadline  that  named. Await the event without a deadline, or run on an engine whose ctx offers `await_until` (the embedded SQLite engine and the Absurd SDK both do).' :: raise -> structured exception
+src/effective/handlers/durable.py :: "this spawn's checkpoint carries no done event (): it was recorded before the handler named done events, so its join cannot be re-bound. Drain runs parked on a child-done or fork-done join." :: raise -> structured exception
 src/effective/handlers/recording.py :: '' :: text
+src/effective/handlers/recording.py :: "RecordingHandler cannot suspend on a layer-injected event : the in-memory recorder holds the live generator and cannot park a mid-layer stack (no call/cc). Provide a canned response to test the layer's logic, or use DurableHandler for real durable suspend/resume." :: raise -> structured exception
+src/effective/handlers/recording.py :: 'RecordingHandler: no canned response for step ' :: raise -> structured exception
+src/effective/handlers/recording.py :: 'gather resume delivers to the lowest parked branch , not : the recorder wakes branches by POSITION, not name.' :: raise -> structured exception
+src/effective/handlers/recording.py :: 'resume delivers to the parked await , not : the recorder binds by POSITION, so naming a different event would silently swap payloads (the engines bind by name).' :: raise -> structured exception :: 2
+src/effective/handlers/recording.py :: 'the wait on  named a deadline, so it is answered by an `Arrived(payload)` or an `Expired()`. This delivered .' :: raise -> structured exception
+src/effective/handlers/recording.py :: 'unknown op: ' :: raise -> structured exception
 src/effective/handlers/replay.py :: '<, no placed key>' :: text
+src/effective/handlers/replay.py :: 'race  under  has no recorded choice' :: raise -> structured exception
+src/effective/handlers/replay.py :: 'replay divergence at position : recorded , workflow yielded ' :: raise -> structured exception
+src/effective/handlers/replay.py :: 'workflow ended after  ops but  were recorded' :: raise -> structured exception
+src/effective/handlers/replay.py :: 'workflow yielded an extra op  at position ' :: raise -> structured exception
+src/effective/interpreters/cli.py :: ' exited : ' :: raise -> structured exception
+src/effective/interpreters/cli.py :: ': output is not JSON: ' :: raise -> structured exception
+src/effective/interpreters/cli.py :: 'claude -p: : ' :: raise -> structured exception
+src/effective/interpreters/cli.py :: 'codex exec: ' :: raise -> structured exception
+src/effective/interpreters/cli.py :: 'codex exec: no single completed turn with an answer in ' :: raise -> structured exception
+src/effective/interpreters/openai.py :: ': ' :: raise -> structured exception :: 2
 src/effective/interpreters/openai.py :: 'Tool result: ' :: text
-src/effective/keys/frame.py :: '' :: text
+src/effective/interpreters/openai.py :: 'no profile for model  — add it to MODELS (known: )' :: raise -> structured exception
+src/effective/interpreters/openai.py :: 'responses reply carried neither a function_call nor a parsed turn; output kinds were ' :: raise -> structured exception
+src/effective/interpreters/openai.py :: 'the reply carried  function calls and this envelope performs one: . Taking the first would tell the model the rest ran.' :: raise -> structured exception
+src/effective/interpreters/openai.py :: 'unrecognized usage shape: expected a numeric `prompt_tokens` (Chat Completions) or `input_tokens` (Responses); the token-ish attributes present are ' :: raise -> structured exception
+src/effective/interpreters/precise_edit.py :: 'Rejected: . Re-emit the full corrected JSON object.' :: text
+src/effective/interpreters/tool_catalog.py :: 'tool :  contains itself, so it cannot inline' :: raise -> structured exception
+src/effective/interpreters/tool_catalog.py :: 'tool : a function name is up to 64 of [A-Za-z0-9_-]' :: raise -> structured exception
+src/effective/interpreters/tool_catalog.py :: 'tool : an object with no declared fields has no strict schema' :: raise -> structured exception
+src/effective/interpreters/tool_catalog.py :: 'tool : an open mapping has no strict schema; declare the fields' :: raise -> structured exception
+src/effective/interpreters/tool_catalog.py :: 'tool : field  has no description' :: raise -> structured exception
+src/effective/interpreters/tool_catalog.py :: 'tool : its argument model has no docstring' :: raise -> structured exception
+src/effective/interpreters/tools.py :: 'a spawn of  reached the tool unnamed by a handler' :: raise -> structured exception
+src/effective/interpreters/tools.py :: 'error: ' :: text
+src/effective/interpreters/tools.py :: 'the spawn capability answers only , not ' :: raise -> structured exception
+src/effective/interpreters/tools.py :: 'unknown tool: ' :: text
+src/effective/interpreters/web.py :: 'Brave answered  for ' :: raise -> structured exception
+src/effective/interpreters/web.py :: 'Brave returns 1 to 20 results a request, not ' :: raise -> structured exception
+src/effective/interpreters/web.py :: 'no search is kept for ' :: raise -> structured exception
+src/effective/judgment.py :: ':  is not one of ' :: raise -> structured exception
+src/effective/judgment.py :: ': a  question answered by ' :: raise -> structured exception
+src/effective/judgment.py :: '`each ` names no state field placed before it' :: raise -> structured exception
+src/effective/judgment.py :: '`each ` needs a non-empty list' :: raise -> structured exception
+src/effective/judgment.py :: 'a state hole must be a dotted name: ' :: raise -> structured exception
+src/effective/judgment.py :: 'answered , asked ' :: raise -> structured exception
+src/effective/judgment.py :: 'format spec  is not implemented' :: raise -> structured exception
+src/effective/judgment.py :: 'question  appears twice' :: raise -> structured exception
+src/effective/judgment.py :: 'question spec  is not implemented' :: raise -> structured exception
+src/effective/judgment.py :: 'state field  appears twice' :: raise -> structured exception
+src/effective/keys/frame.py :: '' :: text :: 2
 src/effective/keys/frame.py :: 'it is not in the language: ' :: text
+src/effective/keys/frame.py :: 'scope atom  carries occurrence : the suffix counts the uses of a whole key, and a frame fronts other terms, so it would land mid-key where the grammar has no place for it. Scope by the unnumbered atom.' :: raise -> structured exception
+src/effective/keys/frame.py :: 'scope atom  contains the frame delimiter : a frame cannot contain the character that separates frames, or this atom composes the same path as a real nesting and replay cannot tell them apart. Nest the scopes instead — `scoped(a, lambda: scoped(b, body))` — which is what expresses a path.' :: raise -> structured exception
 src/effective/keys/frame.py :: 'the payload of the  arm is , which opens with an op arm — an arm wraps an ADDRESS, and nothing emits an event named after a checkpoint, so no producer mints this' :: text
+src/effective/keys/grammar.py :: ' already carries occurrence , and a key has exactly one. Two counters reaching the same name is a counting bug — the three producers each apply once per name per attempt — so this refuses rather than minting a second suffix the grammar could not even represent.' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' ends in  followed by , which is not a count. The occurrence suffix is N with N an integer — and it is the only thing  means, in the only position it may appear.' :: raise -> structured exception
+src/effective/keys/grammar.py :: " is a , so it is an ATOM and not a tag. It names one thing rather than a namespace of things, which is a tag's job — so it belongs in a COORDINATE: `tag:`. (Some of these do match  as well; that overlap is why the kind is asked and not just the charset.)" :: raise -> structured exception
+src/effective/keys/grammar.py :: " is a foreign tag. Another grammar mints a foreign term, so it is read back from that grammar's bytes; a template heads its terms with tags of ours." :: raise -> structured exception
+src/effective/keys/grammar.py :: ' is an occurrence suffix with no key in front of it' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' is not a well-formed atom: an atom is an integer (no leading zero), a canonical lowercase uuid, an algorithm-prefixed digest (-…), or a name matching . It may not contain a separator — that is what makes arity countable without a registry.' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' is not a well-formed tag in a template' :: raise -> structured exception
+src/effective/keys/grammar.py :: " is not a well-formed tag: lower-kebab matching , or a foreign tag matching . A term's tag names a namespace, so a value belongs in a COORDINATE — `tag:` rather than ``." :: raise -> structured exception
+src/effective/keys/grammar.py :: ' is not a well-formed tag: lower-kebab, matching  — or a foreign tag matching .' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' is not one atom: a hole glued to literal text has no position in this grammar, because the value and the suffix cannot be told apart on the wire. Put a separator between them, or compose the value first.' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' reads as , not ' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' spells occurrence , which has no wire form. A first occurrence is the bare key, so 1 would be a second spelling of one identity; counts below 1 are a counting bug, not a name.' :: raise -> structured exception
+src/effective/keys/grammar.py :: ' subclasses a key structure. Equality compares the class, so a subclass instance never equals what `parse` reads back from its bytes.' :: raise -> structured exception
+src/effective/keys/grammar.py :: " with foreign= and wraps_payload=: a term is foreign exactly when its tag carries , and only a foreign term wraps a payload. Another grammar mints a foreign term, so it is read from that grammar's bytes, never composed." :: raise -> structured exception
+src/effective/keys/grammar.py :: 'Key: value is , not a ParsedKey. A key is composed by `compose_key` or read back by `Key.parse`; it holds the TERMS it was built from, so text has to come in through `parse`.' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'ProjectedKey has no string form: it is a quotient, not a name. Call `.display()` for the projected text, or `.source` for the key it was taken from. Got .' :: raise -> structured exception
 src/effective/keys/grammar.py :: '^(?:)-[0-9a-f]+$' :: text
-src/effective/keys/processor.py :: '' :: text
+src/effective/keys/grammar.py :: 'a Key field takes a Key, not : compose one, or read recorded text back with context={RECORDED: True}' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'a pickled  carries  fields, not ' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'a term carries at most one , and this one has  — which is the OLD flat grammar, where every field was separated by a colon. Coordinates of one term are separated by , and a nested key is its own term after .' :: raise -> structured exception
+src/effective/keys/grammar.py :: "a term's tag must be one static or one Tag hole, got " :: raise -> structured exception
+src/effective/keys/grammar.py :: "bare coordinate  follows a named one in : bare means REQUIRED and named means OPTIONAL, so every bare coordinate belongs to the fixed-width prefix. A bare one past the boundary would make the prefix's width depend on the value." :: raise -> structured exception
+src/effective/keys/grammar.py :: 'coordinate  given twice in ' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'coordinate  has no value in ' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'coordinate name  is empty or carries one of , so its rendering would not read back as this coordinate' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'empty coordinate in : a coordinate at its default is OMITTED, never written as a gap, so one identity keeps exactly one spelling.' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'empty coordinate name in ' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'empty term in ' :: raise -> structured exception
+src/effective/keys/grammar.py :: "foreign term 's payload reads as our tag, so it would read back as a wrapping term" :: raise -> structured exception
+src/effective/keys/grammar.py :: 'occurrence  has no wire form: a first occurrence is the bare key' :: raise -> structured exception
+src/effective/keys/grammar.py :: "occurrence() is not a count. Every producer here is 1-BASED (the SDK's `count = get(name, 0) + 1`, and both mirrors of it), so a value below 1 means a counter was never incremented — which silently returned the FIRST occurrence's key and served its committed value to a later op." :: raise -> structured exception
+src/effective/keys/grammar.py :: 'scope prefix  carries occurrence , which would land mid-key, where the grammar has no place for it' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'scope prefix  does not end in , so its last term would run into the key it fronts' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'term  ends in  with no coordinates. A term with no arguments is written as the bare tag .' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'term  has a bare coordinate after a named one: bare means required, and the required ones come first' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'term  names a coordinate twice: ' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'wrapping term  carries coordinates; the next term is its payload' :: raise -> structured exception
+src/effective/keys/grammar.py :: 'wrapping term  is followed by : its payload is one of our terms' :: raise -> structured exception
+src/effective/keys/marker.py :: '() is : a  is an int or a str' :: raise -> structured exception
+src/effective/keys/marker.py :: '() is a bool, which counts nothing' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the arity separator , which ends a COORDINATE. A `Segment` is ONE ATOM, so this value would either be refused later by the lexer or, in a position that skipped it, add a coordinate the template does not declare. Two coordinates are written as two holes.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the frame delimiter , which would forge a `scoped(...)` boundary inside a key. Use a -free value (e.g. ), or express the nesting as a real `scoped(...)`, which is what the frame is for.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the key delimiter : an interior key segment must be delimiter-free or the composed key is not injective. Use a -free value (e.g. ). A value that WANTS a separator is a nested key, so splice it as one, or a path, so compose its atoms.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the occurrence sigil , which marks a REPEAT of a whole key and may appear only at the very end. A `Segment` is ONE ATOM, so this value would forge an occurrence the producer never counted. Use `Key.occurrence(n)`, which is the one way to say it.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the path delimiter . A `Segment` is ONE ATOM, and every separator is refused for one reason: an atom that could hold one would make arity uncountable. A genuine path — a MIME type, a scope chain — is several atoms, composed as one.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() contains the projection sigil , which marks a coordinate a VIEW dropped. Only `KeyMap.project` writes one, and what it returns is a `ProjectedKey` with no durable form, so a `Segment` holding one would put a quotient into the record. Compose the value the run actually had; take the projection afterwards.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Segment() is , not a str. A `Segment` brands TEXT as delimiter-free, so a non-str would have to be flattened first — and for an opaque type that flatten yields the REPR, which would then be composed into an identity. A `Key` and an `int` each belong in the hole DIRECTLY (a `Key` splices by induction, an `int` cannot carry a delimiter), so wrap neither. Anything else: render it at the call site, where the flatten shows.' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Tag() is a , so it is an ATOM and not a tag. It names one thing rather than a namespace of things — pass it as a `Segment` in a COORDINATE instead: t"{Tag(\'ns\')}:{Segment(value)}".' :: raise -> structured exception
+src/effective/keys/marker.py :: 'Tag() is not a well-formed tag: lower-kebab matching , or a foreign tag matching . Write the colon as a static — t"{Tag(\'ns\')}:{…}" — and keep every separator out of the tag itself.' :: raise -> structured exception
+src/effective/keys/marker.py :: "Tag() takes a str, not . A `Key` here would render its REPR into the leading position of an identity — pass the tag's TEXT." :: raise -> structured exception
+src/effective/keys/marker.py :: "the name  carries occurrence , and an occurrence is not an author's to write — it is a use-index the RUNTIME assigns to a finished name, with exactly one producer. Writing one here would alias the walk's own count for that name and serve its committed value to a different op. Name the identity () and let the substrate count it." :: raise -> structured exception
+src/effective/keys/processor.py :: '' :: text :: 2
+src/effective/keys/processor.py :: "compose_key:  is the foreign tag . Another grammar mints a foreign term, so it is read back from that grammar's bytes; a key composed here heads its terms with tags of ours." :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key:  stands as a term\'s namespace and is a . A term head takes a `Tag`, which claims the text NAMES a namespace; `Segment` claims only that it carries no delimiter, which is a different thing to know about the same bytes. Write `Tag()` if it really is a namespace, or put the value in a coordinate — t"…:{}" — if it is data.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: a coordinate with a = is OPTIONAL, and an optional coordinate is named on the wire — write `name={value:=…}`. Bare means required, and a required coordinate cannot be omitted, so its default is unreachable.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: a defaulted coordinate is one atom, not a -atom path — a default has to be comparable to the whole coordinate to know whether to omit it.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: a key template must begin with a namespace TAG — a non-empty static (t"mytag:{...}") or a `Tag` interpolation (t"{Tag(MY_TAG)}:{...}") — but this one begins with . An untyped interpolation is invisible to the shape registry, which is what makes a key\'s position recoverable.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: coordinate  is named, so it is OPTIONAL, but declares no =. Without one there is no rule for when to omit it, so one identity would have two spellings and replay would miss.' :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: interpolation  carries a conversion (). The key DSL defines no conversion — a key's rendering is the atom kind's, not the call site's." :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: interpolation  carries the format spec . The key DSL defines two directives — ={value}, an OPTIONAL coordinate's fallback, and ={domain}, what a SPLICE admits. Render the value before composing; if a NAMESPACE needs canonical formatting, impose it in `compose_key`, never at the call site." :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: interpolation  declares =, but it fills a COORDINATE, not a splice. A domain says which keys may extend the sequence here; a coordinate holds one atom, whose kind the lexer reads from its bytes.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: interpolation  declares =, which is not a splice domain. The domains are  — an ADDRESS is what an emitter delivers to, an IDENTITY is what `op_key` mints, and `any` is the deliberate opt-out.' :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: interpolation  is , which may contain a separator — so the composed key would not be injective. Wrap it: Segment(). There is no last-position exemption: a value that WANTS delimiters is a nested key (splice it after ), or a path (compose its atoms with ) — never one flattened value.' :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: interpolations  and  are adjacent with no delimiter between them, so the key is not injective ({'p','q'} and {'pq',''} would collide). Put a static separator between them, or compose one of them into a single value first." :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: required coordinate at position  follows an optional one. The required prefix must be fixed-width — Python's own no-non-default-after-a-default rule, and for the same reason." :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: the splice  carries a =, which only an OPTIONAL COORDINATE can have. A splice contributes TERMS; omitting them at a default would change how many terms the key has, and arity is what makes it readable without a registry. Declare = instead.' :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: the splice  carries occurrence , and it is not the template's last element. The suffix qualifies a WHOLE key, so from here it would have to sit mid-sequence, where  is in no atom's charset. Splice it last, or splice the base key and apply `.occurrence()` to the result." :: raise -> structured exception
+src/effective/keys/processor.py :: "compose_key: the splice  declares no =. A splice takes a `Key`, and every key is the same type — only the POSITION says whether this one is an ADDRESS an emitter delivers to or an op's own IDENTITY, and only the template knows the position. Write `{:=}`, `…=`, or `…=` if it really is either." :: raise -> structured exception
+src/effective/keys/processor.py :: 'compose_key: the splice  is declared =, but  . Nothing mints the key this would compose, so nothing would ever look it up.' :: raise -> structured exception
 src/effective/keys/registry.py :: '\n    ! ' :: text
 src/effective/keys/registry.py :: '\n    inside ' :: text
 src/effective/keys/registry.py :: '  ()  ' :: text
@@ -203,7 +477,13 @@ src/effective/keys/registry.py :: 'a literal discriminator at term , coordinate 
 src/effective/keys/registry.py :: 'a splice at term  absorbs every remaining term' :: text
 src/effective/keys/registry.py :: 'different tags at term ' :: text
 src/effective/keys/registry.py :: 'disjoint arities at term , countable from the bytes' :: text
+src/effective/keys/registry.py :: 'key  has namespace , which is not registered. Regenerate the map (`just key-registry`), or this key was not minted by `compose_key`.' :: raise -> structured exception
+src/effective/keys/registry.py :: 'key  is well-formed and UNMINTABLE: . A source map that answered this would name a producer for a key no producer makes.' :: raise -> structured exception
+src/effective/keys/registry.py :: 'key  matches no registered variant of  (). Either the map is stale (`just key-registry`) or the key was composed by a different template.' :: raise -> structured exception
+src/effective/keys/registry.py :: 'no key source map at : it is DERIVED from the tree rather than committed, so a checkout builds it and an INSTALLED copy has none yet (packaging it is open work). In a checkout run `just key-registry`; anywhere else pass a `KeyMap` built with `from_shapes` and ignore the path above.' :: raise -> structured exception
 src/effective/keys/registry.py :: '{}' :: key -> compose_key
+src/effective/layers.py :: ' is marked `@_layer` and was installed at the  seam. A layer at the wrong seam is not an error at run time — it observes the live pass and silently sees nothing on replay — so it is refused here instead.' :: raise -> structured exception
+src/effective/lineage.py :: 'forked_at_event  is not in the base lineage ( rows: ) — the genesis names an address this base does not contain, so the two are not a fork pair.' :: raise -> structured exception
 src/effective/lint.py :: '\n  violation(s)' :: text
 src/effective/lint.py :: ' claims the production namespace , and . A literal under a tag production owns is a claim about what the substrate mints; ask the minter for it instead of spelling it, or use a tag of your own.' :: text
 src/effective/lint.py :: ' declares an `@op_layer`/`@domain_layer` but is not in `LAYER_ROLE_SRCS`, so the layer-authority lint never sees it. Add it, or add it to `NOT_LAYER_ROLE` with the reason it is not layer-role' :: text
@@ -214,13 +494,14 @@ src/effective/lint.py :: ' working note in a committed comment. Discharge it bef
 src/effective/lint.py :: ' yields an effect op but is not in `WORKFLOW_ROLE_SRCS`, so the determinism-boundary lint never sees it. Add it, or add it to `NOT_WORKFLOW_ROLE` with the reason it is not a workflow' :: text
 src/effective/lint.py :: '(...) is nondeterministic; pass the value in or yield an op' :: text
 src/effective/lint.py :: '*/src/' :: text
-src/effective/lint.py :: '.' :: text
+src/effective/lint.py :: '.' :: text :: 4
 src/effective/lint.py :: ':' :: key -> compose_key
 src/effective/lint.py :: ':  is filtered by the same predicate elsewhere in this file — build the enumeration once' :: text
 src/effective/lint.py :: ': dispatch on  over  — convert to `match` closed by `assert_never`' :: text
 src/effective/lint.py :: ':: []  — ' :: text
 src/effective/lint.py :: 'AuthorityTag()' :: text
 src/effective/lint.py :: 'AuthorityTag(, scope=Scope.QUALIFIED)' :: text
+src/effective/lint.py :: '[tool.effective.lint] names , which is absent' :: raise -> structured exception
 src/effective/lint.py :: '\\b()\\((\\d{4}-\\d{2}-\\d{2})\\)' :: text
 src/effective/lint.py :: '\\b()\\b' :: text
 src/effective/lint.py :: '`AuthorityTag()` declares no `scope`. State how far one answer in this namespace reaches: `Scope.SETTLEMENT` (one op-occurrence), `Scope.ACCRUAL` (a whole run/generation, on purpose) or `Scope.QUALIFIED` (it wraps another key)' :: text
@@ -231,6 +512,7 @@ src/effective/lint.py :: 'a `cache` segment follows a `nocache` one in role ; an
 src/effective/lint.py :: "a read FROM ledger does not mention `hypothetical`; a fork's row would join the canonical fold (the canonical view is `WHERE NOT hypothetical`). Add the predicate, or opt out with a `# : <reason>` comment" :: text
 src/effective/lint.py :: 'a refined `` arm sits  a broad `` at line  — ' :: text
 src/effective/lint.py :: 'an @op_layer must not yield a bare DomainOp (); it would bypass Step and the durable grain — forward `yield op`' :: text
+src/effective/lint.py :: 'an op union arm is a class, a union or an alias, not ' :: raise -> structured exception
 src/effective/lint.py :: 'escape category  carries no reason — the category says WHICH population, the reason says why this site is in it' :: text
 src/effective/lint.py :: 'escape category  is not one of  — an escape states a CLASSIFICATION, and free prose is how a preference and a schedule both passed as one' :: text
 src/effective/lint.py :: 'from  import' :: text
@@ -242,61 +524,221 @@ src/effective/lint.py :: "namespace  is production's (, minted at ), and this te
 src/effective/lint.py :: 'namespace  would own two variants whose languages are not provably disjoint:  at  and  here (). A key could satisfy both, so a decode cannot say which produced it, and an authorization under one name could answer the other. Separate them with a literal at a fixed coordinate (`tag:{a},seg,{b}` vs `tag:{a},action,{b}`), or give one its own tag' :: text
 src/effective/lint.py :: 'no registered production accounts for it ()' :: text
 src/effective/lint.py :: 'ordered-arms-' :: key -> compose_key
+src/effective/lint.py :: 'role-set entry  resolves to no file: it is neither a repo-relative path nor a workspace-member suffix under `examples/*/src/`. The gate would otherwise skip it silently. Fix the path, or drop the entry.' :: raise -> structured exception
 src/effective/lint.py :: 'the terminal hole {} is unwrapped, and this rule cannot see its type. Wrap it: Segment(). If it is already an `int` or a `Key`, it needs no wrapper; say so with a `# ` comment above. (The composer refuses a non-atom in EVERY position, so this is a marker discipline rather than the safety property.)' :: text
 src/effective/lint.py :: 'undated  in a comment. Date it `(YYYY-MM-DD):` so it can be triaged, then discharge it before committing' :: text
 src/effective/lint.py :: 'workflows must not import ; do I/O through a yielded op' :: text
-src/effective/lint.py :: '|' :: text
+src/effective/lint.py :: '|' :: text :: 2
 src/effective/machine/audit.py :: ': ' :: text
 src/effective/machine/audit.py :: 'cannot reach Finish from ' :: text
 src/effective/machine/audit.py :: 'no edge out of ' :: text
 src/effective/machine/audit.py :: 'undeclared= missing= — a route to Finish nobody declared ships unreviewed work, and a declared one that never fires is a dead claim' :: text
 src/effective/machine/audit.py :: 'unreachable from : ' :: text
 src/effective/machine/specs.py :: ' steps, stopped: ' :: text
+src/effective/machine/specs.py :: 'no worker/judge for  and no default supplied — a spec map must be total over `State`, because the trampoline indexes it directly' :: raise -> structured exception
 src/effective/machine/trampoline.py :: ' appended without declaring `canonical`' :: text
+src/effective/machine/trampoline.py :: 'no spec for  — a spec map must be total over , because the trampoline indexes it directly. `build_specs` iterates the state type and so cannot produce a partial map.' :: raise -> structured exception
+src/effective/machine/trampoline.py :: "run_id  is , not a `Run`. A machine's run identity addresses its ledger rows, so it is promoted at the boundary that knows it names an execution, before any op is performed." :: raise -> structured exception
+src/effective/markdown.py :: 'table: rows  are not  cells wide' :: raise -> structured exception
+src/effective/monty.py :: 'declared function  missing from the engine registry' :: raise -> structured exception
 src/effective/monty.py :: 'name  is not defined' :: text
+src/effective/monty.py :: 're-bind mismatch at host call #: recorded @, re-executed @: nondeterministic sandbox path, serde divergence, or the code changed mid-flight' :: raise -> structured exception
+src/effective/monty.py :: 'undefined name  in sandboxed code' :: raise -> structured exception
+src/effective/monty.py :: 'unsupported sandbox event: ' :: raise -> structured exception
+src/effective/ops.py :: ' cannot run inside the race branch : a race branch may not park, since a race over parked branches is not built yet. Await or sleep before the race, or race branches that do not wait.' :: raise -> structured exception
+src/effective/ops.py :: ' has a key with no UTF-8 bytes' :: raise -> structured exception
+src/effective/ops.py :: ' holds the string , which has no UTF-8 bytes or holds a NUL, so no store holds it alike' :: raise -> structured exception
+src/effective/ops.py :: ' is an ABSOLUTE event name, and this gather branch would prepend  to it — so the await would park forever on a name nothing produces. The task that emits it runs from its own params and has never seen a frame of ours, so it cannot complete a relative name. A cross-task fan-in does not need a gather: the children are already concurrent, each in its own task. Spawn them in a loop, then join them in a loop, as `effective.fork.marginal_sweep` does. NOTE: if this branch also spawned the task it is joining, that child is ALREADY enqueued and will run to completion detached — the refusal stops the join, not the spawn.' :: raise -> structured exception
+src/effective/ops.py :: " is an ABSOLUTE event name, and this run's event world would prepend  to it — so the await would park forever on a name nothing produces. The task that emits it composes the name from its OWN params and has never seen this rename. Spawn it from the run that owns the event world instead (the BASE run, not a child of it) — or, if you DO emit under the renamed form, name it in `transplanted`, which is the substrate's word for 'the caller has delivered this under the child's names'. NOTE: the task you are joining is ALREADY enqueued and will run to completion detached — the refusal stops the join, not the spawn." :: raise -> structured exception
+src/effective/ops.py :: ' is an absolute instant and a naive datetime is not one: it reads as the local time of whichever host converts it. Pass an aware datetime' :: raise -> structured exception
+src/effective/ops.py :: ' is no JSON value: ' :: raise -> structured exception
+src/effective/ops.py :: ' row already holds ' :: raise -> structured exception
+src/effective/ops.py :: 'a fact names what an effect is about, and  names an occurrence or an op: compose it from the business identities alone' :: raise -> structured exception
+src/effective/ops.py :: 'a race over  branches cannot want  winners: want between 1 and the number of branches' :: raise -> structured exception
+src/effective/ops.py :: 'a settled wait holds neither an arrival nor an expiry: ' :: raise -> structured exception
+src/effective/ops.py :: 'a wait naming a deadline cannot run inside the gather branch : a branch peeks rather than parking, and a peek reads the event alone. Wait on the deadline before the gather, or gather branches that wait on their events alone.' :: raise -> structured exception
+src/effective/ops.py :: 'an await name is a `str` or a composed `Key`, not .' :: raise -> structured exception
+src/effective/ops.py :: "await name  contains the frame delimiter , which forges a `scoped(...)` boundary: inside one scope this name parks where a real nested scope would, so two different parks share one name. Express nesting with `scoped(...)` and keep the await's own name flat." :: raise -> structured exception
+src/effective/ops.py :: 'await name  is in a reserved authority namespace () and carries no scope, so it was PARSED rather than composed. An event delivered by that name answers a substrate gate, and Absurd delivers first-emit-wins across the queue — so this await would consume the answer meant for it. Compose it through its `AuthorityTag` if you ARE the substrate; `Key.parse` is the READ boundary and confers no authority.' :: raise -> structured exception
+src/effective/ops.py :: 'await name  is in a reserved authority namespace (): an event delivered by that name answers a substrate gate — an approval, a grant, a park — and Absurd delivers by name first-emit-wins across the queue, so this await would consume the answer meant for it. Name the await on your own subject, or compose a `Key` if you ARE the substrate.' :: raise -> structured exception
+src/effective/ops.py :: "await name  opens with an op ARM (), so it is an op's own identity and not an ADDRESS. Nothing emits an event named after a checkpoint, so this await could never be answered. Await the name an emitter actually delivers to — an author subject, or a substrate authority key." :: raise -> structured exception
+src/effective/ops.py :: "respawn cannot nest inside another respawn: a generation boundary ends the whole TASK, so the inner chain would end the outer chain's task and continue under its own identity — the outer chain's next generation resuming with the inner chain's carry, silently. One task has one lifecycle, so one chain owns it (this one declared task=). If you want two loop axes, make ONE chain whose carry is a product and let the step decide which axis advanced. If the inner loop needs a task boundary of its OWN, it needs its own TASK: spawn a child that runs its own chain. Note you cannot JOIN one yet: the spawned handle completes at generation 0 with a boundary marker, so follow the child by its `workflow_run_id` in the ledger (a chain-done event is unbuilt)." :: raise -> structured exception
+src/effective/ops.py :: "respawn cannot run inside a fork child (this run's event world is ): a generation boundary ends the task, and every fence that makes this a counterfactual — the hypothetical ledger, the event rename, the DryRun sandbox — is built per TASK. The next generation would run as an ordinary  task: canonical ledger, unrenamed awaits, real world writes. A fork must also ANSWER, and a chain has no answer until its last generation. If you want this counterfactual to become a real long-lived run, that is a PROMOTION and it needs to be an explicit act — not a side effect of a generation boundary. Run the chain from the base run, or fork INSIDE one generation (`respawn` outside, `fork` inside) — that order composes." :: raise -> structured exception
+src/effective/ops.py :: "respawn cannot run inside the gather branch : a generation boundary ends the whole TASK, so a branch that respawns would end its siblings' task too — silently duplicating or skipping their work depending on branch order, and on the concurrent path killing the worker outright. respawn is the OUTER loop: put the gather inside a generation, not a generation inside a branch." :: raise -> structured exception
+src/effective/ops.py :: "scope atom  carries the reserved authority tag : every name in the scope would then read as a substrate park or lineage, and an answer to it as a principal's. Choose a tag of your own." :: raise -> structured exception
+src/effective/ops.py :: 'scope atom  names engine bookkeeping: the checkpoint readers set aside a name carrying it, so the steps in this scope would vanish from them. Choose a tag of your own.' :: raise -> structured exception
+src/effective/ops.py :: 'scope atom  opens with the op arm : a scope names a namespace, and the arms () name frames and ops the substrate mints. Choose a tag of your own.' :: raise -> structured exception
+src/effective/ops.py :: 'two placed ops in task  both appended the canonical event_id :  wrote it and  lost the conflict, so ITS ROW IS NOT ON THE RECORD. The ledger is UNIQUE(event_id) and append-only, so this cannot be repaired after the fact. An event_id is composed by the WORKFLOW and the frames are applied by the handler, so two branches of a gather — or two calls in sequence — author the same id without seeing that they collide. Give each write an id that says which one it is (the branch index, the item it is about); if you meant ONE row, write it once, above the fan-out.' :: raise -> structured exception
+src/effective/pareto.py :: 'objective  is  at point ' :: raise -> structured exception
+src/effective/pareto.py :: 'objective  is missing from point ' :: raise -> structured exception
+src/effective/pareto.py :: 'objective : direction  is min or max' :: raise -> structured exception
 src/effective/parked.py :: 'file:?mode=ro' :: text
 src/effective/parked.py :: 'r_' :: text
 src/effective/parked.py :: 't_' :: text
+src/effective/permission.py :: 'a cascade tier must return Allow / Deny / Escalate; got . A `rules(...)`/`allow_table(...)` tier is a GENERATOR — call it with `yield from`, or pass its bare `op -> Verdict` function to `as_policy`.' :: raise -> structured exception
+src/effective/permission.py :: 'a govern policy tier must not yield ops — the gate owns the single park, so drop the `human(...)` tier and let escalation BE the park (it yielded ). Deterministic tiers (`rules`, `allow_table`) are fine as-is.' :: raise -> structured exception
+src/effective/permission.py :: 'a govern policy tier must return Allow / Deny / Escalate (or be a deterministic `rules`/`allow_table` tier); got .' :: raise -> structured exception
 src/effective/permission.py :: 'approve ?' :: text
 src/effective/prose/runners.py :: '\n\ncallers:\n' :: text
+src/effective/prose/runners.py :: ':  answers refused in a row — the run stops rather than asking a sixth time' :: raise -> structured exception
+src/effective/prose/runners.py :: ':  is not one of ' :: raise -> structured exception
+src/effective/prose/runners.py :: ": answer needs a 'verdict' key, got " :: raise -> structured exception
+src/effective/prose/runners.py :: 'classify:  is not a destination; use one of ' :: raise -> structured exception
+src/effective/prose/runners.py :: "classify: a 'classified' answer needs `blocks`: a list of {'block': <name>, 'to': <destination>} naming EVERY block in the region. Destinations: " :: raise -> structured exception
+src/effective/prose/runners.py :: "classify: each block needs 'block' and 'to', got " :: raise -> structured exception
 src/effective/prose/runners.py :: 'gates exit ' :: text
-src/effective/react.py :: '\n' :: text
+src/effective/prose/transition.py :: ' belongs to  but arrived in  — refused rather than routed' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  has an unknown spec ' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  holds , not a host name' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  holds , not text' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  holds , not values' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  holds a bool, not text' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  takes an iterable of values, not a string' :: raise -> structured exception
+src/effective/query.py :: 'search_query: hole  takes no conversion' :: raise -> structured exception
+src/effective/react.py :: '\n' :: text :: 2
 src/effective/react.py :: ': ' :: text
 src/effective/react.py :: 'Action: ()' :: text
 src/effective/react.py :: '[denied] ' :: text
-src/effective/react.py :: '[interrupt] ' :: text
-src/effective/react.py :: '[interrupted] ' :: text
+src/effective/react.py :: '[interrupt] ' :: text :: 3
+src/effective/react.py :: '[interrupted] ' :: text :: 2
 src/effective/react.py :: '[summary of earlier turns]\nfacts: \ntried: \nopen_questions: ' :: text
 src/effective/react.py :: '[unusable tool name] ' :: text
+src/effective/react.py :: 'the tool name  cannot be composed into an op key, so this action has no durable identity and cannot be checkpointed: ' :: raise -> structured exception
+src/effective/ruling.py :: ' is no authority park, so no ruling answers it' :: raise -> structured exception
 src/effective/runread.py :: 'file:?mode=ro' :: text
 src/effective/runs.py :: 'file:?mode=ro' :: text
+src/effective/runs.py :: 'unmapped engine state  — add it to _SQLITE_STATES deliberately' :: raise -> structured exception
 src/effective/runview.py :: '\n**Actions:** ' :: text
 src/effective/runview.py :: '\n**Cost:**   ·  **Ops:** ' :: text
 src/effective/runview.py :: '\n**Ops:**   ·  cost unmeasured' :: text
 src/effective/runview.py :: ' ' :: text
 src/effective/runview.py :: '## ' :: text
 src/effective/runview.py :: '**** (`` → )' :: text
-src/effective/runview.py :: '``' :: text
+src/effective/runview.py :: '``' :: text :: 2
 src/effective/runview.py :: 'answer ' :: text
+src/effective/sandbox.py :: 'a counterfactual cannot interpret : the in-process fork drivers replay one sequential schedule and cannot interpret a concurrent op. Fork a sequential prefix, or use the durable driver (`run_fork`), which runs a `Gather` in its forked tail.' :: raise -> structured exception
+src/effective/sandbox.py :: "a counterfactual cannot read the ledger's row  in process: the in-process drivers hold no ledger. Use the durable driver (`run_fork`), whose ledger reads the child's own lineage." :: raise -> structured exception
 src/effective/sandbox.py :: 'a fork may not call the tool : it is not in the read-only allow-list (). A counterfactual must not mutate the world — add  to `allow` if it is genuinely read-only, or supply a canned result for it.' :: text
 src/effective/sandbox.py :: "cannot fork at a  inside the scope : the op is a decision, but a scoped body is driven as a sub-generator, so replay cannot hand back a generator positioned at an op inside it. Fork at a decision BEFORE the scope or AFTER it — a scope is one node in the fork's order." :: text
 src/effective/sandbox.py :: 'cannot fork at a : a fork substitutes a DECISION (a Step result or an AwaitEvent answer), not a write. Fork at the decision, not its consequence.' :: text
+src/effective/search.py :: 'beam width must be >= 1 (got )' :: raise -> structured exception
+src/effective/search.py :: 'node key  is not one term' :: raise -> structured exception
+src/effective/search.py :: 'node label  cannot be a key: ' :: raise -> structured exception
+src/effective/search.py :: 'pick named , outside a queue of ' :: raise -> structured exception
+src/effective/search.py :: 'pick named a position twice: ' :: raise -> structured exception
+src/effective/search.py :: 'pick named no position of a queue of ' :: raise -> structured exception
+src/effective/search.py :: 'two nodes in one step share the name ' :: raise -> structured exception
+src/effective/session_telemetry.py :: '  cache-read tokens  : ' :: text
+src/effective/session_telemetry.py :: '  cache_hit_ratio    :    <- same dial as the GSM8K bench' :: text
+src/effective/session_telemetry.py :: '  est. cost (Opus)   : $' :: text
+src/effective/session_telemetry.py :: '  output tokens      : ' :: text
+src/effective/session_telemetry.py :: '  sidecar ->   (, OTLP)' :: text
+src/effective/session_telemetry.py :: '  total input tokens : ' :: text
+src/effective/session_telemetry.py :: ' violation(s)' :: text
+src/effective/session_telemetry.py :: 'LM.' :: text
+src/effective/session_telemetry.py :: 'session:   ( LLM turns)' :: text
 src/effective/skills.py :: '- : ' :: text
+src/effective/skills.py :: ': frontmatter requires name and description' :: raise -> structured exception
+src/effective/skills.py :: ': name  != directory ' :: raise -> structured exception
+src/effective/skills.py :: ': name  breaches the spec grammar (lowercase alphanumerics and inner hyphens)' :: raise -> structured exception
+src/effective/skills.py :: ': script is not valid UTF-8: ' :: raise -> structured exception
+src/effective/skills.py :: ': symlinks are not allowed in a skill pack (the content hash could not cover what the pin claims)' :: raise -> structured exception
+src/effective/skills.py :: ': undecodable filename in skill pack: ' :: raise -> structured exception
+src/effective/skills.py :: 'frontmatter field : a flow list must close on its own line (a truncated value would silently mis-parse)' :: raise -> structured exception
+src/effective/skills.py :: 'no */SKILL.md under  — not a skill pack' :: raise -> structured exception
+src/effective/skills.py :: 'pin  has no activation key, so a script from it cannot be scoped to the pack that pinned it. Obtain the pin from `activate_skill`/`refresh_skill` rather than constructing one.' :: raise -> structured exception
+src/effective/skills.py :: 'pin  has no script  (has )' :: raise -> structured exception
+src/effective/skills.py :: 'skill  has a native (channel-bearing) body; pinning covers standard markdown bodies, since a channel-bearing body cannot ride a checkpoint as text' :: raise -> structured exception
+src/effective/skills.py :: 'skill name  breaches the spec grammar' :: raise -> structured exception
+src/effective/skills.py :: 'skill pack root is not a directory: ' :: raise -> structured exception
+src/effective/skills.py :: 'unknown skill  (registry has )' :: raise -> structured exception
+src/effective/skills.py :: 'unparseable frontmatter line: ' :: raise -> structured exception
+src/effective/spawning.py :: ': ' :: raise -> structured exception :: 2
+src/effective/spawning.py :: 'child task  failed of : ' :: raise -> structured exception
+src/effective/spend.py :: ' of  tokens spent ()' :: raise -> structured exception
 src/effective/sql.py :: 'inside a "quoted identifier". Interpolate the identifier itself with the identifier spec — t"… FROM {table:}", which quotes it for you — not inside the quotes' :: text
-src/effective/engines/sqlite.py :: ': in ' :: text
+src/effective/sql.py :: 'interpolation {!} carries a conversion. A parameter is passed to the driver as a Python value, so converting it to text here would bind a different value than the template says. Convert it before composing.' :: raise -> structured exception
+src/effective/sql.py :: 'interpolation {:} carries a format spec this DSL does not define. The slot belongs to the processor:  means a quoted identifier, and a bare hole is a bound parameter. Render the value before composing.' :: raise -> structured exception
+src/effective/sql.py :: 'interpolation {} is .' :: raise -> structured exception
+src/effective/sql.py :: 'interpolation {} is a  — a driver binds one scalar per placeholder. For an IN list, compose one hole per element (the arity has to reach the SQL); for a JSON column, serialize it first.' :: raise -> structured exception
+src/effective/sql.py :: 'the SQL carries a manual  placeholder () — mixing hand-written placeholders with interpolations permutes the parameter order silently. Write the value as an interpolation instead.' :: raise -> structured exception
+src/effective/sql.py :: '{:} contains a NUL, which cannot be quoted.' :: raise -> structured exception
+src/effective/sql.py :: '{:} is a , not a str — an identifier is a name. Drop the : spec to bind it as a value.' :: raise -> structured exception
+src/effective/sql.py :: '{:} is empty — not an identifier.' :: raise -> structured exception
+src/effective/tape.py :: '  ' :: raise -> structured exception
+src/effective/tape.py :: ' violation(s) over  witnessed site(s):\n' :: raise -> structured exception
 src/effective/tape.py :: ': ' :: text
+src/effective/tape.py :: 'at_least must be positive;  would assert nothing' :: raise -> structured exception
 src/effective/tape.py :: 'cannot see the action it chose — ' :: text
 src/effective/tape.py :: 'replay and the wire disagree at message(s) ' :: text
 src/effective/tape.py :: 'replay rebuilt  message(s), the wire recorded ' :: text
+src/effective/tape.py :: 'the property witnessed  site(s), fewer than the  required — it returned no violations because it never got to look, not because the tape was clean' :: raise -> structured exception
 src/effective/telemetry.py :: '\n OTLP problem(s)' :: text
-src/effective/telemetry.py :: '/' :: url -> no processor yet
+src/effective/telemetry.py :: ' holds  runs () and checkpoint keys are not task-scoped, so folding them together would sum different runs onto one node — pass `session_id=` to name the one you want' :: raise -> structured exception
+src/effective/telemetry.py :: " holds  runs (); another run's transcript at the same key would be compared against this run's replay — pass `session_id=` to name the one you want" :: raise -> structured exception
+src/effective/telemetry.py :: ' holds  runs (); pass `session_id=` to name the one you want' :: raise -> structured exception
+src/effective/telemetry.py :: ' holds spans in a format older than OTLP; re-run to write it again' :: raise -> structured exception
+src/effective/telemetry.py :: '/' :: url -> no processor yet :: 2
 src/effective/telemetry.py :: '//' :: url -> no processor yet
 src/effective/telemetry.py :: ':: ' :: text
 src/effective/telemetry.py :: 'LM.' :: text
 src/effective/telemetry.py :: 'tool..' :: text
+src/effective/viewing.py :: ' has no `peek_event`, so this viewer cannot tell a delivered event from a park without suspending the run it is reading' :: raise -> structured exception
+src/effective/viewing.py :: ' has no `peek_step`, so this viewer cannot tell a settled wait from a park without deciding  itself' :: raise -> structured exception
+src/effective/viewing.py :: ' is not delegated by a viewing ctx: only  pass through, because a member that is not a read may write to a run this process does not own' :: raise -> structured exception
+src/effective/viewing.py :: 'a viewer may not emit : answer a park with `effective.parked.answer`, which settles the name a reader read rather than one composed here' :: raise -> structured exception
 src/effective/viewing.py :: 'the run is parked at ' :: text
 src/effective/viewing.py :: "the tape has no record of : a replay must not outrun the tape's frontier, so this viewer stops rather than committing the op" :: text
+src/effective/voi.py :: 'probe+' :: text
+src/effective/voi.py :: 'probe+$' :: text
+src/examples/agent_firm/__main__.py :: 'the run ended ' :: raise -> structured exception
+src/examples/agent_firm/ar.py :: ' is not ' :: raise -> structured exception
+src/examples/agent_firm/ar.py :: 'an ending the ledger cannot hold: ' :: raise -> structured exception
+src/examples/agent_firm/ar.py :: "the round's approval bound plan , and its settlement now plans " :: raise -> structured exception
+src/examples/agent_firm/ar.py :: "the round's claim recorded plan , and its settlement now plans " :: raise -> structured exception
+src/examples/agent_firm/ar.py :: 'the shortfall  is not in whole cents' :: raise -> structured exception
+src/examples/agent_firm/ar.py :: 'the statement of  reads as ' :: raise -> structured exception
+src/examples/agent_firm/critic.py :: 'the run ended ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: '.: ' :: raise -> structured exception :: 2
 src/examples/agent_firm/erp/odoo.py :: 'k_' :: key -> Odoo's external-id grammar, which no processor owns: an `ir.model.data` name
+src/examples/agent_firm/erp/odoo.py :: 'key  names ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'key  was not claimed' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'line  reads as ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'load answered ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'move  did not post: ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'move  is still matched against : , ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'move  reads as ' :: raise -> structured exception :: 3
+src/examples/agent_firm/erp/odoo.py :: 'move  was not matched against : ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'no document or entry ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'the fence answered ' :: raise -> structured exception
+src/examples/agent_firm/erp/odoo.py :: 'the load was aborted: ' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: '  does not exist' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'Key (module, name)=(, ) already exists.' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'Record does not exist or has been deleted: ' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'The entry (id ) must be in draft.' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'the scripted Odoo answers in id order only, not ' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'the scripted Odoo does not answer .' :: raise -> structured exception :: 2
+src/examples/agent_firm/erp/scripted.py :: 'the scripted Odoo has no domain operator ' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'the scripted Odoo has no model ' :: raise -> structured exception
+src/examples/agent_firm/erp/scripted.py :: 'the scripted Odoo runs no code but FENCE, and action  holds other' :: raise -> structured exception
+src/examples/agent_firm/factors.py :: "a run pins , neither arm's snapshot" :: raise -> structured exception
+src/examples/agent_firm/factors.py :: 'no outcome in the cells ' :: raise -> structured exception
+src/examples/agent_firm/factors.py :: 'two outcomes in the cell ' :: raise -> structured exception
+src/examples/agent_firm/knowledge.py :: 'the snapshot read as , admitted as ' :: raise -> structured exception
+src/examples/agent_firm/manifest.py :: 'height  adopts from ' :: raise -> structured exception
+src/examples/agent_firm/saga.py :: 'a compensable leg and only a compensable leg has an undo: ' :: raise -> structured exception
+src/examples/agent_firm/saga.py :: 'a saga continues at one of its retriable legs, not ' :: raise -> structured exception
+src/examples/agent_firm/saga.py :: 'compensable, then at most one pivot, then retriable: ' :: raise -> structured exception
+src/examples/agent_firm/saga.py :: 'the undo of  was rejected: ' :: raise -> structured exception
+src/examples/agent_firm/world.py :: 'an unreadable tool call: ' :: raise -> structured exception
+src/examples/coder/tools.py :: ' was left unchanged: ' :: raise -> structured exception
+src/examples/coder/tools.py :: 'There is no file . The project has: .' :: raise -> structured exception
+src/examples/coder/tools.py :: 'offset  and limit  select nothing in , which has  lines.' :: raise -> structured exception
+src/examples/deep_research/__main__.py :: 'a cell is name="what it asks", not ' :: raise -> structured exception
+src/examples/deep_research/__main__.py :: 'the research did not complete: ' :: raise -> structured exception
+src/examples/deep_research/compare.py :: 'the corpus answers search and fetch, not ' :: raise -> structured exception
+src/examples/startup/engine.py :: 'the run ended ' :: raise -> structured exception
+src/examples/startup/engine.py :: 'the run is  with no event to answer' :: raise -> structured exception
 src/tui/app.py :: '\n\n**``**\n\n' :: text
 src/tui/app.py :: '  ()' :: text
 src/tui/app.py :: '  ·    ·   ops  ·    ·    ·   parked' :: text

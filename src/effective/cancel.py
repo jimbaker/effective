@@ -29,16 +29,19 @@ CANCELLED = "__cancelled__"
 
 
 class Cancelled(BaseModel):
-    """Work stopped from outside before it finished: an op an interpreter stopped, with the output
-    it produced first, or a spawned task its engine cancelled, as its parent receives it."""
+    """Work stopped before it finished, with the output it produced first: an op an interpreter
+    stopped, or a spawned task its engine cancelled or whose program stopped at a cancel, as its
+    parent receives it."""
 
     kind: Literal["cancelled"] = "cancelled"
     partial: str = ""
 
 
 class OpCancelled(Unretryable):
-    """The step named `name` was cancelled while it ran. A retry replays the recorded cancel and
-    raises it again, so an uncaught one fails its task on the attempt that raised it."""
+    """The step named `name` was cancelled while it ran, or an agent run escaped and `unwrap`
+    was asked for its answer. A retry replays the recorded cancel and raises it again. A task
+    body under `run_child` completes with it as `Cancelled`; any other body fails its task on the
+    attempt that raised it."""
 
     def __init__(self, name: str, partial: str) -> None:
         super().__init__("a step was cancelled while it ran", name)
