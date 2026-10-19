@@ -2,9 +2,9 @@
 
 The same ideas appear under different names in each framework. This page maps each framework's
 terms onto Effective's, so a reader who knows one can port a program and see what changes. The
-rows were checked against each framework's documentation at DSPy 3.4.1, Pydantic AI 2.56.0,
-LangGraph 1.2.15 and LangChain 1.4.6. All four release often, so check a row against a newer
-release before relying on it.
+rows were checked against each framework's documentation, and the behaviors under "Measured" were
+run on the versions [`examples/rosetta/uv.lock`](../../examples/rosetta/uv.lock) pins. All four release often, so check a row
+against a newer release before relying on it.
 
 ## What a run's record is
 
@@ -22,6 +22,26 @@ composed name. LangGraph's Functional API is close too, and identifies a task by
 call order. A graph node is the unit LangGraph re-executes on resume, so code in a node before an
 `interrupt` runs again, model calls included. Effective re-runs the plain code before a wait too,
 which is why it must be pure, and serves every op before the wait from the tape.
+
+## Measured
+
+[`examples/rosetta/`](../../examples/rosetta/) ports one retrieval program to each framework, a search and then a model
+call whose citation must index a passage, and drives each port with offline fakes that count their
+calls. It is a uv project of its own, so none of the three frameworks enters Effective's
+environment. `uv run --project examples/rosetta python examples/rosetta/compare.py` prints:
+
+| question | Effective | Pydantic AI | DSPy | LangGraph |
+|---|---|---|---|---|
+| a bad citation, then a good one: calls to a valid answer | the workflow receives `Repair`; with the author's re-prompt, 2 model, 1 search | `ModelRetry`: 2 answering requests, 3 in all, since choosing the search is a request; 1 search | `Refine`: 3 model, one of them feedback, and 2 searches, since a retry re-runs the whole module; `BestOfN`: 2 and 2 | a conditional edge: 2 model, 1 search |
+| a crash after the model answered: what the resume asks again | nothing: the answer was recorded when its op returned | `StepPersistence` on SQLite: the model, once | the whole program, unless the LM cache holds the answer | the model, when the crash is inside the node or task that called it; nothing after it |
+| a side effect before an approval: how often it runs | once, as an op; plain code there runs again | twice, as code before `ApprovalRequired` in the same tool | no wait primitive | twice, as code before `interrupt` in the same node |
+| a fork with the search result changed: what the fork asks | the model, once | the model, once, from an edited snapshot | the whole program | the model, once, after `update_state` |
+
+The unit each framework records explains most of the table: an op in Effective, a node or a task in
+LangGraph, a model request or a tool call in Pydantic AI, and nothing in DSPy. A side effect in its
+own recorded unit runs once in each of them, so the third row measures what an author writes inside
+one unit. The crash is an exception raised in the process, and Pydantic AI's Temporal, DBOS and
+Absurd engines need a service and were not run.
 
 ## DSPy
 

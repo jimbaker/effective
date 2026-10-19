@@ -234,6 +234,7 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "examples/dashboard_demo.py",
     "examples/first_workflow.py",
     "examples/port_dspy_module.py",
+    "examples/rosetta/effective_rag.py",
     "examples/smol_door.py",
     "examples/tui_demo.py",
 )

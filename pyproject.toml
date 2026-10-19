@@ -107,8 +107,13 @@ python-version = "3.14"
 root = ["src", "tests", "."]
 
 [tool.ty.src]
-# The coder fixture's test imports `mod` by its in-sandbox name.
-exclude = ["src/examples/coder/fixture/test_mod.py"]
+exclude = [
+    # The coder fixture's test imports `mod` by its in-sandbox name.
+    "src/examples/coder/fixture/test_mod.py",
+    # A uv project of its own: DSPy, Pydantic AI and LangGraph resolve only in the environment
+    # `uv run --project examples/rosetta` builds, so the root checker cannot see them.
+    "examples/rosetta",
+]
 
 [tool.ruff]
 target-version = "py314"

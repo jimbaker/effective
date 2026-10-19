@@ -197,14 +197,17 @@ Each place a workflow meets a model is a named, typed seam that a deployment can
 | keys and projections | every op's name composed by one grammar; views folded from the append-only ledger | [`wiki/concepts/tapes.md`](wiki/concepts/tapes.md), [`wiki/concepts/graph.md`](wiki/concepts/graph.md) |
 | telemetry | OTLP spans under the OpenTelemetry GenAI conventions, each placed span carrying the key that joins it to the run | [`wiki/concepts/tapes.md`](wiki/concepts/tapes.md) |
 
-## Built with coding agents
+## Building with a coding agent
 
-This repository was built with coding agents, and a workflow on Effective is meant to be built the
-same way. An agent writes the code; tests, the type checker, lints for the rules it cannot see, and
-reviews decide; a person merges. A workflow that performs no I/O can be driven offline with canned
-answers, so an agent checks its work with no key and no spend.
+Effective is for building repeatable agentic workflows with a highly capable coding agent such as
+Claude Code, often from a one-off: a task the agent has done once, whose session telemetry shows
+the steps to make repeatable. The agent writes the workflow and its tests; a workflow that performs no I/O runs offline against canned answers, and every seam has a
+backend that runs in the agent's own sandbox (SQLite for the engine, Monty for sandboxed code), so
+the agent checks its own work with no container, no key and no spend. The person decides what the workflow may do: which calls
+need approval, what a run may spend, and what an answer must satisfy. Each of those is a value in
+the code, and a recording or a fork shows the person what the workflow does.
 [`docs/co-development.md`](docs/co-development.md) walks through the three stages, from a first version to a deployment, and
-the gate that closes each.
+the check that closes each.
 
 ## What's in the box
 

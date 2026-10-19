@@ -161,3 +161,16 @@ tests/test_sqlite_concurrency.py :: compose :: gather:0,9;step;tool:t{i} :: unre
 tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};ev:e{i} :: unreviewed — bootstrapped, replace with the judgement
 tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};reply:e{i} :: unreviewed — bootstrapped, replace with the judgement
 tests/test_sqlite_concurrency.py :: compose :: gather:0,{branch};step;tool:t{i} :: unreviewed — bootstrapped, replace with the judgement
+src/effective/graphview.py :: prose :: review, review#2, review#3(parked) :: unreviewed — bootstrapped, replace with the judgement
+tests/_coding.py :: compose :: review:{run_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/_funnel.py :: compose :: review:{run_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_conformance.py :: compose :: {{{{"event;review:{run_id}<br/>(parked)"}}}} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_durable_absurd.py :: compose :: review:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_ledger.py :: compose :: review:{mid} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep.py :: compose :: review:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_absurd.py :: compose :: review:{first} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_absurd.py :: compose :: review:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_absurd.py :: compose :: review:{second} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_fork_sweep_cost.py :: compose :: review:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: compose :: review:{message_id} :: unreviewed — bootstrapped, replace with the judgement
+tests/test_graphview.py :: prose :: review, review#2, review#3(parked) :: unreviewed — bootstrapped, replace with the judgement
