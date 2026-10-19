@@ -17,7 +17,7 @@ another, and that governs all three. Durability governs the first two only: the 
 discipline does not govern the span stream, and telemetry's side of the bargain is the join column. A truncated final span line is an ordinary outcome, because the process
 writing it is one this repo kills at every op. The ledger would never tolerate that.
 
-`CLAUDE.md` names two durable bookkeepers and a third that is not; the third is also named in
+`AGENTS.md` names two durable bookkeepers and a third that is not; the third is also named in
 source (`dashboard.py`).
 
 ## Why they can be joined at all
@@ -79,6 +79,24 @@ The live exposure is **cross-task rather than gather**: a projection reading eve
 events from independent tasks, which are incomparable by construction and never claimed an order. A
 revision is the exception, spawned only after the decision it revises committed, so those two are
 causally ordered, and a last-write-wins fold over revisions is sound by exactly that order.
+
+## The telemetry format
+
+A span file is OTLP/JSON: each line is one complete `TracesData` object, the format the OTLP file
+exporter writes, so a run needs no collector to leave a readable trace. `otlp_jsonl_sink` appends
+the lines and `check_otlp_line` says how a line fails to be one
+([`src/effective/telemetry.py`](../../src/effective/telemetry.py)).
+
+| attribute | names |
+|---|---|
+| `gen_ai.*` | what the OpenTelemetry GenAI semantic conventions define: the operation, the conversation, the agent, the tool, the messages ([references](../references.md)) |
+| `effective.*` | what is Effective's own, such as the iteration and the cost of a reused answer |
+| `effective.key` | the placed key, the join column to the other two tapes, flattened once at the sink |
+
+A span whose op the engine placed carries `effective.key`; the recording/replay core places
+nothing, so its spans carry none. The core imports no vendor SDK. The readers this format targets
+are backends that ingest OTLP, such as LangSmith, Pydantic Logfire and MLflow tracing; an exporter
+that sends spans to a collector is not built.
 
 ## See also
 

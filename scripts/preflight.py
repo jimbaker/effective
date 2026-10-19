@@ -157,7 +157,7 @@ def check_lock_is_current() -> list[str]:
 
     `uv run` re-locks in silence when the two disagree, so a dependency edit can first
     take effect in CI, on a resolution nobody reviewed — the same shape as an ungoverned
-    tool one layer down. `npm ci` is the discipline CLAUDE.md's supply-chain policy names
+    tool one layer down. `npm ci` is the discipline AGENTS.md's supply-chain policy names
     for the npm side; this is its Python equivalent, and the repo had none.
     """
     out = subprocess.run(["uv", "lock", "--check"], cwd=REPO, capture_output=True, text=True)

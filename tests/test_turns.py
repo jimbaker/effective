@@ -37,6 +37,35 @@ def test_every_run_is_a_distinct_order_of_the_calls(n):
     assert runs == len(orders) == comb(2 * n, n)
 
 
+def _runs(lengths: tuple[int, int], switches: int) -> int:
+    """How many runs `schedules` makes for two attempts of the given numbers of calls."""
+    runs = 0
+    for turns in schedules(["a", "b"], switches):
+
+        def calls(name: str, n: int, turns: Turns = turns) -> None:
+            for _ in range(n):
+                turns.wait(name)
+
+        turns.run({name: partial(calls, name, n) for name, n in zip("ab", lengths, strict=True)})
+        runs += 1
+    return runs
+
+
+def _counted(m: int, n: int, k: int) -> int:
+    """Two attempts of m and n calls, with s switches cutting the first's calls into ceil(s/2) + 1
+    runs and the other's into floor(s/2) + 1, either one first, summed over s up to k."""
+    return sum(
+        comb(m - 1, -(-s // 2)) * comb(n - 1, s // 2)
+        + comb(n - 1, -(-s // 2)) * comb(m - 1, s // 2)
+        for s in range(k + 1)
+    )
+
+
+@pytest.mark.parametrize("lengths", [(1, 1), (1, 3), (2, 3), (3, 3)], ids=str)
+def test_the_runs_up_to_k_switches_are_the_closed_count(lengths: tuple[int, int]):
+    assert [_runs(lengths, k) for k in range(5)] == [_counted(*lengths, k) for k in range(5)]
+
+
 def test_a_prefix_choosing_an_attempt_that_is_not_waiting_fails_at_once():
     turns = Turns(["a", "b"], prefix=["c"])
     with pytest.raises(ValueError, match="'c'"):

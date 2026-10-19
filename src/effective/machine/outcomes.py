@@ -30,7 +30,7 @@ class ParkReason(StrEnum):
     """The environment failed to run the predicate, so the run waits for an operator.
 
     A re-draft answers bad work, and this is an infrastructure fault: the prose machine's VERIFY
-    reads gates whose container can vanish between runs, which is a named CLAUDE.md hazard."""
+    reads gates whose container can vanish between runs, which is a named AGENTS.md hazard."""
     REFUSED = "refused"
 
 

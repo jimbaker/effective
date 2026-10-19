@@ -18,7 +18,7 @@ engine: podman 4.9.3 (rootless)
 # CORROBORATION, and its scope. Two INDEPENDENT PATHS agree on the index digest: podman's
 # local content store after a pull, and a HEAD against registry-1.docker.io with a token
 # fetched directly. The amd64 child was then read out of the index and matches what podman
-# stored. That is two paths on ONE machine. CLAUDE.md's supply-chain rule asks for two
+# stored. That is two paths on ONE machine. AGENTS.md's supply-chain rule asks for two
 # independent MACHINES, and the second is not done: run the block below on another machine and add its
 # line before treating this pin as verified.
 #

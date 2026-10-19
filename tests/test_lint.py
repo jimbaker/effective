@@ -10,6 +10,7 @@ from effective.domain import AsksModel, CallTool, ModelCall
 from effective.lint import (
     DOMAIN_OP_CTORS,
     WORKFLOW_OP_CTORS,
+    _expanded,
     _import_root,
     _members,
     check_channel_source,
@@ -738,8 +739,7 @@ def test_a_schema_loads_only_from_what_it_is_handed():
 def test_shipped_schemas_pass_the_schema_lint():
     roots = ["src", "examples"]
     roots += configured_roots("--schemas", roots)
-    files = [path for root in roots for path in Path(root).rglob("*.py")]
-    assert [str(v) for f in files for v in check_schema_file(f)] == []
+    assert [str(v) for f in _expanded(roots) for v in check_schema_file(f)] == []
 
 
 def test_channel_lint_flags_nocache_before_cache_in_one_literal():
@@ -2334,3 +2334,12 @@ def test_the_sdk_private_rule_refuses_the_private_surface_outside_the_engine(
     found = check(source, filename)
     assert [v.text for v in found] == hits
     assert {v.rule for v in found} <= {"sdk-private"}
+
+
+def test_a_directory_walk_skips_a_virtual_environment(tmp_path):
+    (tmp_path / "ours.py").write_text("")
+    venv = tmp_path / ".venv"
+    (venv / "lib" / "site-packages").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    (venv / "lib" / "site-packages" / "installed.py").write_text("")
+    assert _expanded([tmp_path]) == [tmp_path / "ours.py"]

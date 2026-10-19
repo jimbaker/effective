@@ -245,6 +245,49 @@ The count and the ending are two layers. With rounds waiting for the earlier end
 rounds continued, an uncounted Unapply still keeps every live claim's match, since no two rounds'
 claims are ever live at once; the count is what keeps the match when they are.
 
+**v8: `plan_license.qnt`** (an approval licenses what a settlement sends): one case in up to two
+rounds, resolved by two workers. A worker derives its terms under the code its process runs, which
+carry the plan's digest, and parks on the round's approval; the approver rules once per round, on
+the plan shown, another plan, no plan, a denial, or the proposer's own approval. The gate passes an
+approval naming the plan the worker derived; the first worker past it claims the round and records
+its plan, and the other finds the round claimed. The holder sends the memo and its apply, each with
+an undo, the notice, past which nothing compensates, and the reminder, which can run out and leave
+the round unlanded for one later continuation. A crash drops a worker's place, keeps the round's
+checkpoints, and restarts the worker on whatever code is deployed, which derives and passes the gate
+again; the other worker keeps the code it started with. A deploy can find the case clean: its terms
+ask nobody and pass the gate unasked, so the claim, which records the plan it was taken for, is the
+check that stands between the clean plan and the exception's approved round. Assumed: a leg and its
+answer are one step, and a leg sent twice across a crash is `erp_claim.qnt`'s question. TLC
+enumerates the whole graph, 608,429 distinct states of diameter 32; `quint verify plan_license.qnt
+--invariant=licensed --max-steps=40 --backend=tlc` recounts them.
+
+| Invariant | the rule it checks |
+|---|---|
+| `licensed` | every act, undo and continuation sends the plan the round's claim recorded and, for an exception, the plan the ruling named; every act and undo is sent by the claim's holder |
+| `approvedByAnother` | an exception's round is claimed only on an approval, never on a denial or the proposer's own |
+
+`neverSent`, `neverCompensated`, `neverRefusedOnReplay`, `neverReplanned`, `neverContinuedLanded`,
+`neverSecondRoundSent`, `neverSuperseded`, `neverRefusedAtClaim` and `neverCleanSent` are registered
+as violations, so
+the invariants are checked over runs where a leg is sent, a rejection is compensated, a restart
+under a changed plan is refused at the gate, a continuation under one is refused, a continuation
+lands, a second round sends, a worker finds its round claimed, a restart that finds the case clean
+is refused at its own claim, and a clean plan claimed first is sent. Each field of `design` set false is a rejected rule:
+
+| rejected | breaks `licensed` by |
+|---|---|
+| a gate that ignores the plan a ruling names | sending the derived plan under a ruling naming another |
+| a continuation that compares no plan | a restarted worker continuing a round claimed under the earlier plan |
+| an executor mapping arguments outside the plan | code deriving the approved plan and sending another |
+| a claim that compares no plan | a restart finding the case clean, passing the gate unasked, and sending the clean plan under the exception's claim |
+
+The model checks the property the tests sample: the restart refused at the gate is the trace of
+`test_a_settlement_resumed_under_another_plan_is_refused_before_any_leg`, the refused continuation
+is `test_a_continuation_under_another_plan_is_refused_before_its_leg`'s, and a ruling on one plan
+reaching a worker deriving another is
+`test_a_resume_deriving_other_terms_is_refused_naming_its_approver`'s. The executor is trusted, as
+the ERP adapter is: the third tooth shows what the approval cannot see.
+
 ## Run
 
 Toolchain: **pinned per-machine via `just formal-setup`** (idempotent; nothing global) —

@@ -1,4 +1,4 @@
-"""Code quality as ASI — the CLAUDE.md rubric, mechanized and pluggable.
+"""Code quality as ASI — the AGENTS.md rubric, mechanized and pluggable.
 
 Quality for code in this repo is not vibes; it is the project's own gates. This runs
 **static** checkers over candidate code and returns the tool output as the **ASI** (GEPA's
@@ -119,8 +119,6 @@ def check_code(
     execution), so it is safe on untrusted code with no sandbox. For a non-Python run_code
     target, pass that language's checkers.
 
-    (Refinement, designed-for: run_code injects names — ``inputs``/``functions``/``actions`` —
-    that a standalone ruff pass flags as F821 undefined. A `provides` param that declares
-    them for the checker is the clean follow-up; until then, check self-contained code or
-    select rules that skip F821.)"""
+    run_code injects names (``inputs``/``functions``/``actions``) that a standalone ruff pass
+    flags as F821 undefined, so check self-contained code or select rules that skip F821."""
     return make_code_quality(checkers)({name: code})

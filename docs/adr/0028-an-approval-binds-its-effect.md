@@ -73,6 +73,7 @@ every undo. A deploy that changes a step changes the digest:
 |---|---|
 | before the claim, or after it on a resume | the gate re-reads the approval and refuses before any leg |
 | a continuation of an unlanded collection | `resume` compares the plan with the row's and refuses, `Replanned`, before its leg |
+| a resume whose code finds the case clean | the terms ask nobody, so the gate passes them unasked; `settle` compares the plan with the round's claim and refuses, `Replanned`, before any leg |
 
 A refused run fails, and its round stays claimed with no ending, so no later round opens over it;
 settling what its landed legs left is a decision for whoever deployed the change.

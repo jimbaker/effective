@@ -35,6 +35,7 @@ import typing
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
+from fnmatch import fnmatch
 from functools import cache
 from pathlib import Path
 from typing import Any, TypeAliasType, assert_never, get_args, get_origin
@@ -232,6 +233,7 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "tests/_coding.py",
     "examples/dashboard_demo.py",
     "examples/first_workflow.py",
+    "examples/port_dspy_module.py",
     "examples/smol_door.py",
     "examples/tui_demo.py",
 )
@@ -2788,13 +2790,23 @@ _BORROW_WITNESS = "x"
 """The atom substituted for a hole when building a witness key. Any delimiter-free name works."""
 
 
+def _walked(root: Path, pattern: str) -> list[Path]:
+    """The files under `root` whose names match `pattern`, sorted. A virtual environment (a
+    directory holding `pyvenv.cfg`) is skipped: its packages are installed, and none is ours."""
+    found: list[Path] = []
+    for directory, subdirs, files in root.walk():
+        subdirs[:] = [d for d in subdirs if not (directory / d / "pyvenv.cfg").exists()]
+        found.extend(directory / name for name in files if fnmatch(name, pattern))
+    return sorted(found)
+
+
 def _expanded(paths: Iterable[str | Path]) -> list[Path]:
     """Directories to their `.py` files, files verbatim — `main`'s expansion, reusable from a
     rule that resolves its own default path set instead of receiving one."""
     out: list[Path] = []
     for entry in paths:
         path = Path(entry)
-        out.extend(sorted(path.rglob("*.py")) if path.is_dir() else [path])
+        out.extend(_walked(path, "*.py") if path.is_dir() else [path])
     return out
 
 
@@ -4666,7 +4678,7 @@ def main(argv: list[str] | None = None) -> int:
             # where it is read on trust.
             globs = ("*.py", "*.md") if mode == "--test-citations" else ("*.py",)
             for pattern in globs:
-                paths.extend(str(f) for f in sorted(path.rglob(pattern)))
+                paths.extend(str(f) for f in _walked(path, pattern))
         else:
             paths.append(p)
     # Role default (the single source of truth): with no explicit files, the

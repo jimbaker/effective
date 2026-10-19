@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parent.parent
-PAGES = [ROOT / "README.md", ROOT / "docs" / "intro.md", ROOT / "docs" / "first-workflow.md"]
+PAGES = [
+    ROOT / "README.md",
+    ROOT / "docs" / "intro.md",
+    ROOT / "docs" / "first-workflow.md",
+    ROOT / "wiki" / "concepts" / "rosetta.md",
+]
 BLOCK_RE = re.compile(r"<!-- source: (\S+) -->\n```python\n(.*?)```", re.S)
 
 
@@ -92,6 +97,18 @@ def test_the_audit_layer_sees_each_op_before_and_after(monkeypatch: pytest.Monke
         "after a call:  AppendLedgerRow -> "
         "{'event_id': 'setpoint:r1', 'kind': 'setpoint', 'celsius': 22.0}",
         "result: 22.0",
+    ]
+
+
+def test_the_ported_module_answers_replays_and_refuses_a_stray_citation(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    printed = run("port_dspy_module.py", monkeypatch).splitlines()
+    assert printed == [
+        "forward:   GenerateAnswer(reasoning='passage 1 names the essay', "
+        "answer='The Nature of the Firm', citation=1) via step;tool:search step:respond",
+        "replay:    True with no search and no model",
+        "guardrail: Repair(reason='cite a passage by its number')",
     ]
 
 

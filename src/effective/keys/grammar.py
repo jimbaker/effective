@@ -175,7 +175,7 @@ def is_tag(text: str) -> bool:
     thing and a digest names one artifact; only a name names a namespace of things.
 
     Asking `kind_of` rather than excluding the kinds by hand is the difference between a rule and
-    a list.
+    a list: ``not UUID.match(text)`` would miss every kind added after it.
 
     Used by all three gates that admit a tag: `Term.__post_init__` and `marker.Tag` on the
     composing side, `_parse_foreign` on the reading side."""
@@ -1088,7 +1088,7 @@ class Key:
     positions is a finding that wants a reason, not a routine conversion.
 
     Not a `str` subclass, which is permanently flattened — the same protection PEP 750 designs
-    into `Template`, declined. CLAUDE.md states that as the general rule.
+    into `Template`, declined. AGENTS.md states that as the general rule.
     """
 
     _parsed: ParsedKey

@@ -1,4 +1,4 @@
-"""make_code_quality — the CLAUDE.md rubric, mechanized, and the debug loop driven by it.
+"""make_code_quality — the AGENTS.md rubric, mechanized, and the debug loop driven by it.
 
 Two proofs:
 - UNIT: ruff over a candidate scores it — an unused variable drops the score below 1.0 and

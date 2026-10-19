@@ -31,7 +31,7 @@ looking for WHY it is that way? ──► wiki/index.md            (the concept 
 
 ## The gates
 
-Two gates guard citations. `just docs-check` grades the paths `README.md`, `CLAUDE.md`, `docs/`
+Two gates guard citations. `just docs-check` grades the paths `README.md`, `AGENTS.md`, `docs/`
 and `wiki/` cite, a backticked path from the repository root and a markdown link from the page that
 holds it: a path that names no file fails.
 `just wiki-lint` grades the links between wiki pages and finds orphan pages. Both run inside

@@ -179,7 +179,7 @@ def _collision_alarm(collisions: tuple[Collision, ...]) -> Template | str:
     keys the reader can go look up, which is the drill-down the fold promises.
 
     Deliberately phrased as what was OBSERVED rather than as a verdict on the ledger: this reads
-    one bookkeeper and infers about the other, and CLAUDE.md forbids deriving one from the other.
+    one bookkeeper and infers about the other, and AGENTS.md forbids deriving one from the other.
     A run whose store already refuses the collision cannot reach this state at all."""
     if not collisions:
         return ""

@@ -7,6 +7,10 @@ hanging fruit." A human's actual choice is then a revealed-preference point on
 the frontier.
 """
 
+import json
+
+import pytest
+
 from effective.pareto import Objective, dominates, frontier
 
 # cost & latency minimized, quality maximized
@@ -49,3 +53,25 @@ def test_frontier_drops_dominated_keeps_tradeoffs():
     ]
     names = {p["name"] for p in frontier(points, OBJ)}
     assert names == {"local", "big"}  # cloud and weak are dominated
+
+
+def test_a_direction_other_than_min_or_max_is_refused():
+    """A direction read from a config file, which the type checker does not see."""
+    with pytest.raises(ValueError, match="'mni'"):
+        Objective("cost", json.loads('{"direction": "mni"}')["direction"])
+
+
+def test_a_point_missing_an_objective_is_refused_by_key_and_position():
+    points = [{"cost": 0.0, "quality": 1.0, "latency": 1.0}, {"cost": 1.0, "latency": 1.0}]
+    with pytest.raises(ValueError, match=r"'quality'.*point 1"):
+        frontier(points, OBJ)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")], ids=str)
+def test_a_value_that_is_not_finite_is_refused_by_key_and_position(value):
+    points = [
+        {"cost": 0.0, "quality": 1.0, "latency": 1.0},
+        {"cost": value, "quality": 0.0, "latency": 1.0},
+    ]
+    with pytest.raises(ValueError, match=r"'cost'.*point 1"):
+        frontier(points, OBJ)

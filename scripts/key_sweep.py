@@ -9,10 +9,9 @@ is written down in three media, and each is located by the thing that can actual
 | Python **prose** | ast-grep over `comment` + docstring nodes | a spelling the grammar refuses |
 | Markdown | text + Mermaid node labels | a spelling the grammar refuses |
 
-The first version of this ran a token regex over raw lines and reported 536 hits, most of them
-text that merely looked like a key. A regex cannot tell a call from a comment from a sentence; an
-AST can, so the regex now runs only inside prose that an AST has already handed over — the same
-argument `lint._compose_key_templates` makes one module over.
+A token regex over raw lines reports text that merely looks like a key. A regex cannot tell a
+call from a comment from a sentence; an AST can, so the regex runs only inside prose that an AST
+has already handed over, the same argument `lint._compose_key_templates` makes one module over.
 
 **Scoped by production ownership, not by a denylist.** A candidate counts only when its leading
 tag appears in `build/key-registry.json`, so it is making a claim about a namespace the substrate
@@ -323,13 +322,28 @@ def is_exempt(path: pathlib.Path) -> bool:
     )
 
 
+NESTED = ("pyvenv.cfg", ".git")
+"""The marker files of a tree nested inside a root that is not ours to sweep."""
+
+
+def tree(base: pathlib.Path) -> list[pathlib.Path]:
+    """Every file under `base`, sorted, leaving out another tree nested inside it: a virtual
+    environment (a directory holding `pyvenv.cfg`) installs other people's code, and a directory
+    holding its own `.git` is another checkout, such as an agent's worktree."""
+    found: list[pathlib.Path] = []
+    for directory, subdirs, files in base.walk():
+        subdirs[:] = [d for d in subdirs if not any((directory / d / m).exists() for m in NESTED)]
+        found.extend(directory / name for name in files)
+    return sorted(found)
+
+
 def sweep(roots, tags, want):
     found: dict[str, list[tuple[str, int, str, str]]] = {}
     for root in roots:
         base = pathlib.Path(root)
         # A FILE argument is the common way to check one thing; `rglob` on one yields nothing,
         # so a naive walk answers "clean" for any path a reader passes directly.
-        walk = [base] if base.is_file() else sorted(base.rglob("*"))
+        walk = [base] if base.is_file() else tree(base)
         for path in walk:
             if path.suffix not in (".py", ".md") or not path.is_file() or is_exempt(path):
                 continue
@@ -432,7 +446,7 @@ def main(argv: list[str]) -> int:
 
     tags = registry()
     roots = args.paths or [
-        *("src", "docs", "tests", "scripts", "examples", ".claude"),
+        *("src", "docs", "tests", "scripts", "examples"),
         *(configured("extra_paths_key_sweep") or ()),
     ]
     found = sweep(roots, tags, want)

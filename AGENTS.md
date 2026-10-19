@@ -7,14 +7,14 @@ Postgres, or on the embedded SQLite engine). Stack: Python 3.14, `uv`, Pydantic,
 Alembic for the ledger, Postgres for the durable lane.
 
 **The theme: weave together determinism and gen AI**, both in what Effective supports and in how
-it is developed. *What it supports:* a model call is non-deterministic and a durable run must be
+you build on it. *What it supports:* a model call is non-deterministic and a durable run must be
 reproducible, so the substrate wraps the model in deterministic machinery: a typed op with a stable
 key, a recorded result that replay re-serves, a permission cascade evaluated before the side
-effect, a `Gated` channel that constrains the answer and repairs it. *How it is developed:* the
-same weave, pointed at ourselves. A model proposes; gates, pinned tests, mutation checks,
-cross-engine conformance and fresh-eyes review decide. That is why the discipline below is not
-ceremony: *run the claim, don't read it*, *an instrument is a claim* and *ask what a gate scans*
-are the development-side spelling of the product-side thesis.
+effect, a `Gated` channel that constrains the answer and repairs it. *How you build on it:* the
+same weave, pointed at the work. A coding agent proposes; gates, pinned tests, mutation checks,
+cross-engine conformance and an independent review decide (`docs/co-development.md`). That is why
+the discipline below is not ceremony: *run the claim, don't read it*, *an instrument is a claim*
+and *ask what a gate scans* are the development-side spelling of the product-side thesis.
 
 **Two seams, and t-strings as the second.** Effects reify the **control axis**: what the workflow
 does, as ops that are data. PEP 750 **t-strings reify the data axis** (`effective.channels`): a
@@ -68,7 +68,7 @@ src/effective/        the substrate: ops, the authoring API, handlers, channels,
                       combinators, the SQLite engine, the ledger
 src/effective/interpreters/   what answers a domain op
 src/agent/            evaluation: bench harnesses, scoring, subagent runtimes
-src/examples/         two packaged example agents: coder, deep_research
+src/examples/         packaged examples: the agent firm, coder, deep_research, startup
 src/tui/              a terminal view over a durable run
 examples/             single-file examples: react_toy, hooks_as_layers, first_workflow, testing_a_workflow,
                       smol_*, demos

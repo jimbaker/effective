@@ -44,7 +44,7 @@ a web framework picking the color for you is a hazard rather than a convenience.
 
 ## 2. The op set: the whole abstract syntax
 
-Nine members. `type WorkflowOp` in [`src/effective/ops.py`](../src/effective/ops.py) is the complete alphabet;
+Ten members. `type WorkflowOp` in [`src/effective/ops.py`](../src/effective/ops.py) is the complete alphabet;
 everything a workflow can ask for is one of these.
 
 | op | one-line contract |
@@ -52,6 +52,7 @@ everything a workflow can ask for is one of these.
 | `Step` | run a named unit of work; its result is checkpointed and replayed |
 | `AwaitEvent` | park until a named event arrives; resolves by **replay**, not by resuming a captured frame |
 | `AppendLedgerRow` | append one row to the canonical, append-only ledger |
+| `ReadLedgerRow` | read the ledger's row under an event id, or `None`; the answer is recorded, so a replay reads what the first attempt read |
 | `StoreArtifact` | put a blob in content-addressed storage, get back a reference |
 | `SleepUntil` | park until a wall-clock time |
 | `Gather` | run branches concurrently; the applicative shape: parallel reads, serialized writes |
@@ -59,7 +60,7 @@ everything a workflow can ask for is one of these.
 | `Scoped` | run a body under a name scope; the handler applies the prefix, not the author |
 | `Respawn` | end this task and start the next **generation** with a bounded replay history |
 
-That is the whole syntax. If you find yourself wanting a tenth, treat it as a
+That is the whole syntax. If you find yourself wanting an eleventh, treat it as a
 falsification attempt on the closed set: a forced op is a boundary finding and
 earns its own design decision, not a quiet addition.
 

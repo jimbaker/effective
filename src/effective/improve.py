@@ -60,7 +60,7 @@ class Reflection:
     """The proposer's reflective context, in two parts with different lifetimes:
 
     - ``rubric`` — **pinned**: the standing objective / requirements / constraints (in this
-      repo, the CLAUDE.md rules). It defines what "quality" *means*, so it is never
+      repo, the AGENTS.md rules). It defines what "quality" *means*, so it is never
       compacted — the summarizer never even sees it. Losing it would silently redefine the
       objective mid-search.
     - ``digest`` — the running ASI history (prior diagnostics), which *is* compacted when it

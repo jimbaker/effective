@@ -7,7 +7,7 @@ follow it as written. Contradictions between
 pages, a claim a newer document has superseded, and a task that is quietly done
 need a reader, and that half of the lint pass stays a reading job.
 
-A `wiki/CLAUDE.md`, when present, is the schema rather than a page, so it is
+A `wiki/AGENTS.md` (or `wiki/CLAUDE.md`), when present, is the schema rather than a page, so it is
 neither linted for inbound links nor read for outbound ones: it quotes the link
 syntax while explaining it.
 
@@ -43,7 +43,7 @@ except ImportError:  # run as a script: scripts/ is on sys.path, the repo root i
 
 ROOT = Path(__file__).resolve().parent.parent
 WIKI = ROOT / "wiki"
-SCHEMA = "CLAUDE"
+SCHEMA = frozenset({"AGENTS", "CLAUDE"})
 ENTRY = {"index", "log"}
 
 LINK = re.compile(r"\[\[([^\]]+)\]\]")
@@ -56,7 +56,7 @@ def pages() -> dict[str, set[str]]:
     found = {}
     for path in sorted(WIKI.rglob("*.md")):
         name = path.relative_to(WIKI).with_suffix("").as_posix()
-        if name == SCHEMA:
+        if name in SCHEMA:
             continue
         found[name] = outbound(path)
     return found
@@ -139,7 +139,7 @@ def bracketed() -> list[str]:
     return [
         f"{path.relative_to(WIKI).as_posix()}: [[{target}]]"
         for path in sorted(WIKI.rglob("*.md"))
-        if path.stem != SCHEMA
+        if path.stem not in SCHEMA
         for target in LINK.findall(CODE.sub("", FENCED.sub("", path.read_text(encoding="utf-8"))))
     ]
 

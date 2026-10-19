@@ -1,5 +1,5 @@
 # Pinned artifacts for the T-real container tier.
-# Standing supply-chain policy (CLAUDE.md): exact version + digest, corroborated
+# Standing supply-chain policy (AGENTS.md): exact version + digest, corroborated
 # from two independent machines, run rootless + --network=none.
 
 # Base image (pinned by digest in the Dockerfile FROM, never a floating tag):

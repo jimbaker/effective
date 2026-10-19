@@ -45,6 +45,10 @@ FORMAL_CHECKS=(
     "verify erp_claim.qnt --invariant=liveClaimHasMatch --max-steps=30 --backend=tlc"
     "verify erp_claim.qnt --invariant=noRoundBeforeEnded --max-steps=30 --backend=tlc"
     "verify erp_claim.qnt --invariant=creditedOnce --max-steps=30 --backend=tlc"
+    # An approval licenses what a settlement sends, across crashes, deploys, two workers and two
+    # rounds. TLC enumerates the whole graph (diameter 32), so each verdict is unbounded.
+    "verify plan_license.qnt --invariant=licensed --max-steps=40 --backend=tlc"
+    "verify plan_license.qnt --invariant=approvedByAnother --max-steps=40 --backend=tlc"
 )
 
 # Checks on the UNMODIFIED models that must VIOLATE.
@@ -91,6 +95,15 @@ FORMAL_EXPECT_VIOLATION=(
     "erp_claim.qnt|--invariant=neverForeignUndone --max-steps=30 --backend=tlc|a compensation removes the match a person made"
     "erp_claim.qnt|--invariant=neverSecondRound --max-steps=30 --backend=tlc|a second round opens and settles"
     "erp_claim.qnt|--invariant=neverContinued --max-steps=30 --backend=tlc|a round that ended unlanded is continued"
+    "plan_license.qnt|--invariant=neverSent --max-steps=40 --backend=tlc|a settlement sends a leg"
+    "plan_license.qnt|--invariant=neverCompensated --max-steps=40 --backend=tlc|a rejected leg is compensated"
+    "plan_license.qnt|--invariant=neverRefusedOnReplay --max-steps=40 --backend=tlc|a restart under a changed plan is refused at the gate"
+    "plan_license.qnt|--invariant=neverReplanned --max-steps=40 --backend=tlc|a continuation under a changed plan is refused"
+    "plan_license.qnt|--invariant=neverContinuedLanded --max-steps=40 --backend=tlc|a continuation lands"
+    "plan_license.qnt|--invariant=neverSecondRoundSent --max-steps=40 --backend=tlc|a second round sends a leg"
+    "plan_license.qnt|--invariant=neverSuperseded --max-steps=40 --backend=tlc|a worker finds its round claimed"
+    "plan_license.qnt|--invariant=neverRefusedAtClaim --max-steps=40 --backend=tlc|a restart that finds the case clean is refused at its own claim"
+    "plan_license.qnt|--invariant=neverCleanSent --max-steps=40 --backend=tlc|a clean plan claimed first is sent"
 )
 
 # TEETH: flip a model's design toggle to the KNOWN-BUGGY value and assert the checker finds
@@ -151,4 +164,9 @@ FORMAL_TEETH=(
     "erp_claim.qnt|waits: true|waits: false|--invariant=noRoundBeforeEnded --max-steps=30 --backend=tlc|a round that does not wait must open before the earlier ends"
     "erp_claim.qnt|waits: true|waits: false|--invariant=creditedOnce --max-steps=30 --backend=tlc|a round that does not wait must credit a completed case again"
     "erp_claim.qnt|continues: true|continues: false|--invariant=creditedOnce --max-steps=30 --backend=tlc|a new round after an unlanded one must credit the case again"
+    # The rejected designs for plan-licensed dispatch, each sending a leg its approval did not name.
+    "plan_license.qnt|bindRuling: true|bindRuling: false|--invariant=licensed --max-steps=40 --backend=tlc|a gate ignoring the plan a ruling names must send another plan"
+    "plan_license.qnt|checkContinuation: true|checkContinuation: false|--invariant=licensed --max-steps=40 --backend=tlc|a continuation that compares no plan must send a changed reminder"
+    "plan_license.qnt|executorFromPlan: true|executorFromPlan: false|--invariant=licensed --max-steps=40 --backend=tlc|an executor mapping arguments outside the plan must send what was not approved"
+    "plan_license.qnt|checkClaimedPlan: true|checkClaimedPlan: false|--invariant=licensed --max-steps=40 --backend=tlc|a claim that compares no plan must let a clean plan run under an approved round"
 )

@@ -8,7 +8,7 @@
 # git tree is *disposable execution state* and the ledger stays canonical (git SHA
 # is a projection).
 #
-# Supply-chain policy (CLAUDE.md): the base image is pinned by DIGEST (not a
+# Supply-chain policy (AGENTS.md): the base image is pinned by DIGEST (not a
 # floating tag); pytest is pinned exact. See PIN.txt for the recorded digests and
 # the cross-machine corroboration line. Built + run rootless under podman.
 FROM docker.io/library/python@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf

@@ -11,21 +11,40 @@ A config is a plain ``dict`` of objective key -> value plus any labels; an
 ``Objective`` says which key to read and whether more is better.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, assert_never, get_args
+
+type Direction = Literal["min", "max"]
 
 
 @dataclass(frozen=True)
 class Objective:
     key: str
-    direction: str  # "min" or "max"
+    direction: Direction
+
+    def __post_init__(self) -> None:
+        if self.direction not in get_args(Direction.__value__):
+            raise ValueError(f"objective {self.key!r}: direction {self.direction!r} is min or max")
 
     def better_or_equal(self, x: float, y: float) -> bool:
-        return x <= y if self.direction == "min" else x >= y
+        match self.direction:
+            case "min":
+                return x <= y
+            case "max":
+                return x >= y
+            case unreachable:
+                assert_never(unreachable)
 
     def strictly_better(self, x: float, y: float) -> bool:
-        return x < y if self.direction == "min" else x > y
+        match self.direction:
+            case "min":
+                return x < y
+            case "max":
+                return x > y
+            case unreachable:
+                assert_never(unreachable)
 
 
 def dominates(a: dict[str, Any], b: dict[str, Any], objectives: Sequence[Objective]) -> bool:
@@ -39,7 +58,16 @@ def dominates(a: dict[str, Any], b: dict[str, Any], objectives: Sequence[Objecti
 def frontier(
     points: Sequence[dict[str, Any]], objectives: Sequence[Objective]
 ) -> list[dict[str, Any]]:
-    """The non-dominated subset of ``points`` (order preserved)."""
+    """The non-dominated subset of ``points`` (order preserved). Each point carries every
+    objective's key with a finite value; dominance is a strict partial order only there."""
+    for position, point in enumerate(points):
+        for objective in objectives:
+            if objective.key not in point:
+                raise ValueError(f"objective {objective.key!r} is missing from point {position}")
+            if not math.isfinite(point[objective.key]):
+                raise ValueError(
+                    f"objective {objective.key!r} is {point[objective.key]} at point {position}"
+                )
     return [
         p for p in points if not any(dominates(q, p, objectives) for q in points if q is not p)
     ]

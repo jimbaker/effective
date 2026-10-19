@@ -186,6 +186,26 @@ def test_a_settlement_resumed_under_another_plan_is_refused_before_any_leg(
     assert len(firm.told) == since["told"], firm.told
 
 
+@pytest.mark.adversarial
+def test_a_settlement_resumed_as_clean_is_refused_before_any_leg(backend, monkeypatch):
+    """Approved as an exception, crashed once its notice was sent, and resumed by code that finds
+    the case clean, so its terms ask nobody: the round's claim names the approved plan, and the
+    resume is refused before a leg of the clean plan runs."""
+    since: dict[str, Any] = {}
+
+    def deployed() -> None:
+        monkeypatch.delitem(ar.INVARIANTS, "paid-in-full")
+        since.update(residual=firm.world.erp.residual(SLA_CAP.invoice.id), told=len(firm.told))
+
+    firm = _firm(deployed)
+    crash = Fault(on_name="notify", position=FaultPosition.AFTER_THUNK)
+    run = resolved(backend, firm, manifest(FOUNDING, firm.round), fault=crash)
+    snapshot = run.snapshot
+    assert (snapshot.state, failure_kind(snapshot)) == ("failed", "Replanned"), snapshot
+    assert firm.world.erp.residual(SLA_CAP.invoice.id) == since["residual"]
+    assert len(firm.told) == since["told"], firm.told
+
+
 def _closed_as_unapproved(op: WorkflowOp, state: GateState) -> Verdict:
     """A policy beside the approval, refusing every claim with the approval's sentence, on the
     controller's word."""

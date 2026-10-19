@@ -13,6 +13,11 @@ every permutation of every row, because they are the ones an implementation gets
 reason strings. The mapping is positional and total — tag `n` becomes `Ask("p{n}", ...)` /
 `"reason-{n}"` — so a row's fused payload ORDER is observable, which is the half of the fold that
 is not order-free.
+
+Each row's expected ruling decodes from the vector file alone, so a `combine` that fused its
+payload in the wrong order fails here. The rows are finite: they show the live function agrees
+with the model on these inputs, and `just formal-vectors-check` shows they are what the model
+emits now. Agreement on inputs outside the rows is the permutation checks' to sample.
 """
 
 import json
@@ -22,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from effective.govern import Ask, Park, Proceed, Refuse, combine, refuse
+from effective.govern import Ask, Park, Proceed, Refusal, Refuse, combine
 
 _VECTORS_PATH = Path(__file__).resolve().parents[1] / "formal" / "govern_vectors.json"
 VECTORS: list[dict[str, Any]] = json.loads(_VECTORS_PATH.read_text())
@@ -43,10 +48,8 @@ def _verdict(spec: dict[str, Any]):
             return Proceed()
         case {"kind": "park", "asks": asks}:
             return Park(tuple(_ask(t) for t in asks))
-        case {"kind": "refuse", "reasons": []}:
-            return Refuse(())
         case {"kind": "refuse", "reasons": reasons}:
-            return combine([refuse(f"reason-{t}", policy=f"p{t}") for t in reasons])
+            return Refuse(tuple(Refusal(f"p{t}", f"reason-{t}") for t in reasons))
     raise AssertionError(f"unknown verdict in the vector file: {spec}")
 
 
@@ -70,6 +73,23 @@ def test_every_permutation_yields_the_same_KIND(row: dict[str, Any]):
     verdicts = [_verdict(v) for v in row["verdicts"]]
     kinds = {type(combine(list(order))) for order in permutations(verdicts)}
     assert kinds == {type(combine(verdicts))}
+
+
+@pytest.mark.parametrize("row", ROWS)
+def test_every_permutation_fuses_its_payloads_in_its_own_order(row: dict[str, Any]):
+    """The payload half of the fold, which is not order-free, over every argument order: the
+    refusals of the refusing verdicts, or else the asks of the parking ones, in the order given."""
+    verdicts = [_verdict(v) for v in row["verdicts"]]
+    for order in permutations(verdicts):
+        refusals = [r for v in order if isinstance(v, Refuse) for r in v.refusals]
+        asks = [a for v in order if isinstance(v, Park) for a in v.asks]
+        match combine(list(order)):
+            case Refuse(refusals=fused):
+                assert list(fused) == refusals
+            case Park(asks=fused):
+                assert list(fused) == asks
+            case Proceed():
+                assert (refusals, asks) == ([], [])
 
 
 @pytest.mark.parametrize("row", ROWS)

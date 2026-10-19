@@ -94,10 +94,10 @@ def paths(violations) -> set[str]:
 def test_a_live_target_is_not_a_violation_and_a_dead_one_is(corpus):
     """The mutation baseline: identical citation, only the target differs."""
     corpus("docs/real.md", "# real")
-    corpus("CLAUDE.md", "Read `docs/real.md`.")
+    corpus("AGENTS.md", "Read `docs/real.md`.")
     assert lc.scan() == []
 
-    corpus("CLAUDE.md", "Read `docs/typo.md`.")
+    corpus("AGENTS.md", "Read `docs/typo.md`.")
     assert paths(lc.scan()) == {"docs/typo.md"}
 
 
@@ -105,14 +105,14 @@ def test_an_untracked_target_does_not_resolve(corpus):
     """A gitignored artifact exists on a working machine and in no clone. A citation resolves
     against what a clone contains, or a local green predicts nothing about CI."""
     corpus("docs/generated.md", "# built, never committed", track=False)
-    corpus("CLAUDE.md", "Read `docs/generated.md`.")
+    corpus("AGENTS.md", "Read `docs/generated.md`.")
     assert paths(lc.scan()) == {"docs/generated.md"}
 
 
 def test_a_declared_generated_artifact_resolves(corpus, monkeypatch):
     """The exemption an untracked artifact has to earn: a command that makes it."""
     monkeypatch.setattr(lc, "GENERATED", {"build/thing.json": "just build-thing"})
-    corpus("CLAUDE.md", "The map is `build/thing.json`.")
+    corpus("AGENTS.md", "The map is `build/thing.json`.")
     assert lc.scan() == []
 
 
@@ -120,7 +120,7 @@ def test_a_generated_declaration_is_stale_once_the_file_is_tracked(corpus, monke
     """A tracked file needs no exemption, so the declaration goes stale and the table shrinks."""
     monkeypatch.setattr(lc, "GENERATED", {"build/thing.json": "just build-thing"})
     corpus("justfile", "build-thing:\n    echo hi\n")
-    corpus("CLAUDE.md", "The map is `build/thing.json`.")
+    corpus("AGENTS.md", "The map is `build/thing.json`.")
     assert lc.stale_generated(lc.cited_paths()) == []
 
     corpus("build/thing.json", "{}")
@@ -130,7 +130,7 @@ def test_a_generated_declaration_is_stale_once_the_file_is_tracked(corpus, monke
 def test_a_generated_declaration_nobody_cites_is_stale(corpus, monkeypatch):
     """The pawl's second arm: an exemption for a citation that no longer exists."""
     monkeypatch.setattr(lc, "GENERATED", {"build/thing.json": "just build-thing"})
-    corpus("CLAUDE.md", "no links here")
+    corpus("AGENTS.md", "no links here")
     assert [p for p, _ in lc.stale_generated(lc.cited_paths())] == ["build/thing.json"]
 
 
@@ -138,7 +138,7 @@ def test_shapes_that_are_not_links_are_never_scanned(corpus):
     """Globs, directory refs, prose-in-backticks, elisions. Each would be a false
     failure, and a gate with false failures gets disabled."""
     corpus(
-        "CLAUDE.md",
+        "AGENTS.md",
         """
         `docs/*.md` and `wiki/**` are globs.
         `src/effective/` is a directory. `docs/` too.
@@ -153,7 +153,7 @@ def test_shapes_that_are_not_links_are_never_scanned(corpus):
 
 def test_adr_resolves_against_the_wiki_rows_not_the_filesystem(corpus):
     """ADR-0003 has a ROW and deliberately no FILE, which a filesystem check would flag."""
-    corpus("CLAUDE.md", "See ADR-0003 §2 and ADR-0021.")
+    corpus("AGENTS.md", "See ADR-0003 §2 and ADR-0021.")
     assert lc.scan() == []
 
 
@@ -161,7 +161,7 @@ def test_an_adr_with_no_row_is_a_violation(corpus):
     """The file exists and the index row does not: the row is what the gate and every reader
     resolve against."""
     corpus("docs/adr/0020-keys.md", "# adr 20")
-    corpus("CLAUDE.md", "See ADR-0020.")
+    corpus("AGENTS.md", "See ADR-0020.")
     assert [(v.path, v.kind) for v in lc.scan()] == [("ADR-0020", lc.Kind.ADR_UNKNOWN)]
 
 
@@ -180,24 +180,24 @@ def _run(argv: list[str]) -> int:
 
 
 def test_baseline_absorbs_existing_rot_then_fails_on_growth(corpus):
-    corpus("CLAUDE.md", "Read `docs/old-rot.md`.")
+    corpus("AGENTS.md", "Read `docs/old-rot.md`.")
     assert _run(["--init-baseline"]) == 0
     assert _run([]) == 0, "a baselined violation must not gate"
 
-    corpus("CLAUDE.md", "Read `docs/old-rot.md` and `docs/new-rot.md`.")
+    corpus("AGENTS.md", "Read `docs/old-rot.md` and `docs/new-rot.md`.")
     assert _run([]) == 1, "a NEW violation must gate even though rot is baselined"
 
 
 def test_a_stale_baseline_entry_fails(corpus):
     """Without the stale rule, a fixed-then-re-broken pair is reabsorbed in silence."""
-    corpus("CLAUDE.md", "Read `docs/gone.md`.")
+    corpus("AGENTS.md", "Read `docs/gone.md`.")
     assert _run(["--init-baseline"]) == 0
     corpus("docs/gone.md", "# it came back")
     assert _run([]) == 1, "a baseline entry matching no violation must fail as stale"
 
 
 def test_init_baseline_refuses_to_overwrite(corpus):
-    corpus("CLAUDE.md", "Read `docs/x.md`.")
+    corpus("AGENTS.md", "Read `docs/x.md`.")
     assert _run(["--init-baseline"]) == 0
     assert _run(["--init-baseline"]) == 2, "bootstrap is one-time"
 
@@ -208,7 +208,7 @@ def test_init_baseline_refuses_to_overwrite(corpus):
 def test_init_baseline_survives_committing_the_baseline(corpus):
     """`write_baseline` creates a file the corpus cites, untracked until the developer commits
     it. The citation resolves either way, so no entry goes stale on the commit."""
-    corpus("CLAUDE.md", "The baseline lives at `scripts/link-check-baseline.txt`.")
+    corpus("AGENTS.md", "The baseline lives at `scripts/link-check-baseline.txt`.")
     assert _run(["--init-baseline"]) == 0
     assert _run([]) == 0, "green before the baseline is committed"
     subprocess.run(
@@ -224,13 +224,13 @@ def test_a_generated_declaration_needs_a_producer_that_exists(corpus, monkeypatc
     """A renamed recipe would leave the declaration excusing a path nothing produces."""
     monkeypatch.setattr(lc, "GENERATED", {"build/thing.json": "just no-such-recipe"})
     corpus("justfile", "build-thing:\n    echo hi\n")
-    corpus("CLAUDE.md", "The map is `build/thing.json`.")
+    corpus("AGENTS.md", "The map is `build/thing.json`.")
     assert [p for p, _ in lc.stale_generated(lc.cited_paths())] == ["build/thing.json"]
 
 
 def test_a_wiki_citation_is_graded(corpus):
     """A repo-rooted `wiki/...` citation is a link here."""
-    corpus("CLAUDE.md", "Read `wiki/concepts/nothing.md`.")
+    corpus("AGENTS.md", "Read `wiki/concepts/nothing.md`.")
     assert paths(lc.scan()) == {"wiki/concepts/nothing.md"}
 
 
@@ -374,7 +374,7 @@ def test_the_gate_is_actually_reading_the_corpus():
     """
     rels = {p.relative_to(lc.REPO).as_posix() for p in lc.sources()}
 
-    assert "CLAUDE.md" in rels, "the root instructions must be scanned"
+    assert {"AGENTS.md", "CLAUDE.md"} & rels, "the root agent guide must be scanned"
     for family in ("docs/", "wiki/"):
         assert any(r.startswith(family) for r in rels), f"{family} must be scanned"
 

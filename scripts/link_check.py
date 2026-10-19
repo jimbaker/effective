@@ -1,7 +1,8 @@
 """Documentation link gate: a dangling doc link fails like a broken test.
 
-The scanned documents are the maintained layer, current by contract: `README.md`, `CLAUDE.md`,
-`docs/` and `wiki/`. Each cites the tree three ways, and each form is resolved:
+The scanned documents are the maintained layer, current by contract: `README.md`, the root agent
+guide (`AGENTS.md`, or `CLAUDE.md` in a tree that keeps that name), `docs/` and `wiki/`. Each
+cites the tree three ways, and each form is resolved:
 
 | form                         | resolves against                                       |
 |------------------------------|--------------------------------------------------------|
@@ -313,7 +314,7 @@ def sources() -> Iterator[Path]:
     the gate. Third-party input and vendored trees (`build/`, `formal/lean/.lake`) are not
     ours to grade. A missing directory contributes no sources.
     """
-    for name in ("CLAUDE.md", "README.md"):
+    for name in ("AGENTS.md", "CLAUDE.md", "README.md"):
         if (p := REPO / name).exists():
             yield p
     yield from sorted((REPO / "wiki").rglob("*.md"))

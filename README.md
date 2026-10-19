@@ -174,6 +174,38 @@ The two engines run one conformance suite through the same handler ([`tests/_con
 the durable tests crash a run at every op and resume it. Testing a workflow needs neither: two
 in-memory handlers serve canned results and replay a recording ([`wiki/concepts/testing.md`](wiki/concepts/testing.md)).
 
+## The handler is the semantics
+
+The op set is the syntax of a small language, and a handler is its transition relation: each op
+steps the run by an answer from the tape when the tape holds the op's name, and from the world
+otherwise. Record, replay and the two durable engines are four refinements of that one relation,
+and for workflows whose rows have distinct ids they are meant to agree on the ledger a run leaves,
+up to the order in which concurrent branches commit. [`wiki/concepts/semantics.md`](wiki/concepts/semantics.md) states the rules and grades each
+law: proved in Lean, model-checked in Quint, tested, or open.
+
+## Context, evals and telemetry
+
+Each place a workflow meets a model is a named, typed seam that a deployment can tune and meter:
+
+| seam | what it is | read |
+|---|---|---|
+| prompts | a `t"..."` whose interpolations are the context's regions: inputs render in, outputs parse back | [`wiki/concepts/context.md`](wiki/concepts/context.md) |
+| cache order | the stable prefix first, the volatile part last; within a role, `render` refuses the other order | [`wiki/concepts/context.md`](wiki/concepts/context.md) |
+| skills | a catalog in the cached prefix, a disclosed body in the volatile tail, activated once above a fan-out | [`wiki/concepts/context.md`](wiki/concepts/context.md) |
+| code and files | code a model writes runs as an effect in a sandbox; the coder's shell runs in a container | [`wiki/concepts/context.md`](wiki/concepts/context.md) |
+| evals | judgments, `improve` over a Pareto frontier, and a recorded run scored again, replayed, or forked at one decision | [`wiki/concepts/evals.md`](wiki/concepts/evals.md) |
+| keys and projections | every op's name composed by one grammar; views folded from the append-only ledger | [`wiki/concepts/tapes.md`](wiki/concepts/tapes.md), [`wiki/concepts/graph.md`](wiki/concepts/graph.md) |
+| telemetry | OTLP spans under the OpenTelemetry GenAI conventions, each placed span carrying the key that joins it to the run | [`wiki/concepts/tapes.md`](wiki/concepts/tapes.md) |
+
+## Built with coding agents
+
+This repository was built with coding agents, and a workflow on Effective is meant to be built the
+same way. An agent writes the code; tests, the type checker, lints for the rules it cannot see, and
+reviews decide; a person merges. A workflow that performs no I/O can be driven offline with canned
+answers, so an agent checks its work with no key and no spend.
+[`docs/co-development.md`](docs/co-development.md) walks through the three stages, from a first version to a deployment, and
+the gate that closes each.
+
 ## What's in the box
 
 All under `src/effective/` unless noted.
@@ -192,7 +224,7 @@ All under `src/effective/` unless noted.
 | permission: a fail-closed cascade of rules and a human | `permission.py`, `parked.py` |
 | cost: metered model calls, spend caps that survive a crash, a cache | `cost.py`, `budget.py`, `spend.py`, `cache.py` |
 | telemetry: OTLP/JSON spans under the OpenTelemetry GenAI conventions, joined to the run by key | `telemetry.py` |
-| counterfactuals: fork a recorded run at an op, change one result, replay the rest | `fork.py`, `counterfactual.py` |
+| counterfactuals: fork a recorded run at an op, change one result, run the rest live | `fork.py`, `counterfactual.py` |
 | optimization: `improve` (reflective prompt evolution) over a Pareto frontier of cost, quality and latency | `improve.py`, `pareto.py`, and the benches in `src/agent/` |
 | the read side: a run as a graph, cards, a dashboard, a terminal viewer | `graphview.py`, `cards/`, `dashboard.py`, `runview.py`, `src/tui/` |
 | interpreters for ops: OpenAI, the `claude -p` and `codex exec` CLIs, a judge service, a shell, the web | `interpreters/` |
@@ -201,9 +233,8 @@ All under `src/effective/` unless noted.
 
 | missing | where it stands |
 |---|---|
-| memory between runs | a run's record is durable; no design yet carries what one run learned into the next |
-| MCP servers as tools | not decided, and the coding example declines them; command-line tools through the sandboxed shell are nearer |
-| a guide to building with a coding agent | this repository was built that way; the page showing how is not written |
+| memory between runs | a run's record is durable and forkable, and nothing carries what one run learned into the next; open is whether recall is a recorded op or a layer that fills the prompt, and how a write to memory is authorized |
+| MCP servers as tools | an MCP tool would reach the loop through an interpreter for `CallTool`, under the permission cascade, with its result recorded; not built, and the coding example does not implement them |
 | a deployment from zero | a walkthrough from a fresh managed Postgres to a running worker is not written |
 
 ## Examples
@@ -283,6 +314,9 @@ a scripted Odoo answers the same calls in memory.
 | [`docs/first-workflow.md`](docs/first-workflow.md) | the first workflow, line by line |
 | [`wiki/concepts/testing.md`](wiki/concepts/testing.md) | testing a workflow, and how the substrate is verified: crash at every op, two engines, schedules, models and proofs |
 | [`docs/effective-101.md`](docs/effective-101.md) | the concepts in depth: the op set, the combinator algebra, the temporal shapes |
+| [`wiki/concepts/semantics.md`](wiki/concepts/semantics.md) | the handler as the transition relation, and how each law is known |
+| [`wiki/concepts/rosetta.md`](wiki/concepts/rosetta.md) | DSPy, Pydantic AI and LangGraph, term by term, with a DSPy module ported |
+| [`docs/co-development.md`](docs/co-development.md) | building a workflow with a coding agent, stage by stage |
 | `wiki/index.md` | one concept a page, and the index of architecture decisions |
 | [`wiki/references.md`](wiki/references.md) | the work Effective builds on: Recursive Language Models, GEPA, ReAct, Absurd, tdom and more |
 
@@ -317,7 +351,7 @@ How the substrate is verified, from crash sweeps to the formal models, is on the
 
 Run `just check` from a git clone: its docs gate reads `git ls-files`. Without a test Postgres, it
 skips the Postgres-backed tests and runs everything else.
-`CLAUDE.md` is the contributor guide, for people and coding agents alike: the layout, every
+`AGENTS.md` is the contributor guide, for people and coding agents alike: the layout, every
 recipe, the invariants and the code-prose rules.
 
 ## License

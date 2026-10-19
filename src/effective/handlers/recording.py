@@ -876,7 +876,7 @@ class RecordingHandler:
                 # `_drive` parking path. A canned response lets in-memory tests exercise the
                 # layer's approve/deny logic; without one we CANNOT park, because the
                 # recorder holds the live generator and a mid-layer suspend would mean
-                # capturing the trampoline stack (a continuation — forbidden, see CLAUDE.md
+                # capturing the trampoline stack (a continuation — forbidden, see AGENTS.md
                 # "No call/cc"). Durable suspend-from-mid-layer is the DurableHandler's job.
                 if self._stop.racing:  # refused by its kind, as the durable handler refuses it
                     refuse_a_park_in_a_race_branch(op, self._prefix)

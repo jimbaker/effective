@@ -230,14 +230,15 @@ formal-quint-host:
     (cd formal/quint && for spec in *.qnt; do "$QUINT" typecheck "$spec"; done)
     echo "formal-quint-host: OK"
 
-# Lean build + quint typecheck (seconds)
+# Lean build, the vectors checked fresh, and the quint typecheck (seconds)
 formal:
     #!/usr/bin/env bash
     set -eo pipefail
     export PATH="$HOME/.elan/bin:$PATH"
     (cd formal/lean && lake build)
+    just formal-vectors-check
     just formal-quint
-    echo "formal: lean build + quint typecheck OK"
+    echo "formal: lean build, fresh vectors, quint typecheck OK"
 
 # Regenerate the conformance vectors the Python tests read
 formal-vectors:
@@ -253,6 +254,18 @@ formal-vectors:
     (cd formal/lean && lake build retry_vectors >/dev/null 2>&1 \
       && lake exe retry_vectors 2>/dev/null) > formal/retry_vectors.json
     echo "formal-vectors: regenerated formal/{enforce,decide,govern,retry}_vectors.json"
+
+# The committed conformance vectors are the ones the Lean models emit now
+formal-vectors-check:
+    #!/usr/bin/env bash
+    set -eo pipefail
+    export PATH="$HOME/.elan/bin:$PATH"
+    for name in enforce decide govern retry; do
+      (cd formal/lean && lake build "${name}_vectors" >/dev/null 2>&1 && lake exe "${name}_vectors" 2>/dev/null) \
+        | diff -u "formal/${name}_vectors.json" - \
+        || { echo "formal/${name}_vectors.json is stale: run just formal-vectors" >&2; exit 1; }
+    done
+    echo "formal-vectors-check: the committed vectors match the models"
 
 formal-image:
     podman build -t effective-formal:0.32.0-0.56.1 infra/formal/

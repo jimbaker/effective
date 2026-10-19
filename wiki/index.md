@@ -76,6 +76,11 @@ models cite none, and state their invariants in their own words. Numbers with no
 | [concepts/agent-firm](concepts/agent-firm.md) | the AR firm: its combinators, its ERP port's contract, and the questions its tests answer |
 | [concepts/template-shape](concepts/template-shape.md) | a processor reads a template's structure once per call site: the statics plus each hole's expression, conversion and evaluated spec, the spec being the part that looks static and is not |
 | [concepts/authority](concepts/authority.md) | the verdict fold as a join over kinds, what a ruling's binding to its effect establishes, and attenuation and conservation as proposed |
+| [concepts/claims](concepts/claims.md) | each law the agent firm rests on: what it observes, where it holds, what it assumes, and whether it is proved, model-checked, tested, sampled or proposed |
+| [concepts/context](concepts/context.md) | context engineering as seams: channels as the prompt's regions, cache order, skills, code and files, memory and MCP as open |
+| [concepts/evals](concepts/evals.md) | what evaluates a workflow: judgments, `improve` over a Pareto frontier, the benches, fork as a counterfactual, and what is not built |
+| [concepts/rosetta](concepts/rosetta.md) | DSPy, Pydantic AI and LangGraph mapped term by term onto Effective, with a DSPy module ported and pinned |
+| [concepts/semantics](concepts/semantics.md) | the handler as the transition relation: the op set as syntax, each handler a refinement of one relation, replay as resume, and the grade of each law |
 
 ## References
 

@@ -134,7 +134,7 @@ def spend() -> Precondition:
 
 def postgres() -> Precondition:
     """The second durable engine. Without it the whole Absurd half of the cross-engine sweep is
-    absent, and a green run means less than it looks — the case CLAUDE.md records at 168 tests.
+    absent, and a green run means less than it looks — the case AGENTS.md records at 168 tests.
 
     The same predicate `tests/_durable.pg_ready` uses. One definition with two readers is the
     point; a second spelling of "is Postgres ready" is how the two drift.

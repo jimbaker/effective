@@ -7,7 +7,7 @@ one**. It composes existing seams with no new op, and delegates its control to `
 than hand-rolling a `while`.
 
 **The Pareto tension, made concrete.** Passing the tests is not the only objective: the
-code must also meet the project's constraints — in this repo, **CLAUDE.md is the quality
+code must also meet the project's constraints — in this repo, **AGENTS.md is the quality
 rubric** (determinism boundary, ty-clean, one-way seam, the idioms). So the objectives are
 two — `tests` (correctness) and `quality` (conformance) — and the loop is genuinely MOO.
 The common good practice, staged, falls out of `done`: **get it working, then raise
@@ -30,10 +30,7 @@ The control/data split:
 Durability is by replay: every score/propose is a sealed op, so a recorded debug run
 replays with zero model calls, applies, or test executions; selection re-derives from
 recorded measures. The `Workspace` is live-run state (mutated by `apply_edit`); replay
-never touches it. Imports `effective` and `agent` only. Deferred (designed-for): a
-`FixCommitted` ledger promotion of the winning edit chain, memory of what-was-tried, and
-CLAUDE.md-conformance as a real `quality_fn` (lint/ty/determinism) rather than a
-caller-supplied rubric.
+never touches it. Imports `effective` and `agent` only.
 """
 
 from collections.abc import Callable, Mapping
@@ -61,7 +58,7 @@ class TestReport(BaseModel):
 
 class QualityReport(BaseModel):
     """The quality objective's reading: a [0,1] conformance score + the rubric notes (the
-    ASI for quality — in this repo, derived from the CLAUDE.md constraints)."""
+    ASI for quality — in this repo, derived from the AGENTS.md constraints)."""
 
     score: float = 0.0
     notes: str = ""
@@ -130,7 +127,7 @@ def debug_loop(
     `improve`: propose = read+edit+apply (one candidate per round, self-refine), score =
     run tests + rate quality, objectives = [tests, quality], done = the staged gate.
 
-    ``rubric`` is the pinned quality signal (the CLAUDE.md constraints); it rides into every
+    ``rubric`` is the pinned quality signal (the AGENTS.md constraints); it rides into every
     edit prompt and survives compaction. When ``compact``/``summarize`` are given, a long
     debug session folds its ASI history but never the rubric."""
 

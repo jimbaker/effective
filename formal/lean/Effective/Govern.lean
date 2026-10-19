@@ -170,6 +170,7 @@ def conformanceVectors : List (List Verdict × Verdict) :=
     ([.park [1], .proceed, .park [2]], .park [1, 2]),
     ([.refuse [1], .refuse [2]], .refuse [1, 2]),
     ([.park [2], .park [1]], .park [2, 1]),
+    ([.refuse [2], .refuse [1]], .refuse [2, 1]),
     -- refuse dominates park, in both orders (the RULING is order-free)
     ([.park [1], .refuse [2]], .refuse [2]),
     ([.refuse [2], .park [1]], .refuse [2]),

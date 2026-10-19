@@ -24,6 +24,7 @@ from scripts.key_sweep import (  # noqa: E402
     markdown_prose,
     refused,
     spellings,
+    tree,
 )
 
 TAGS = {
@@ -212,3 +213,14 @@ def test_a_key_inside_a_diagram_is_read_as_the_diagram_shows_it():
     assert not any("#59" in text for text in lines)
     outside = [text for _, text in markdown_prose("step#59;leaf\n")]
     assert outside == ["step#59;leaf"], "outside a fence the text is the text"
+
+
+@pytest.mark.parametrize("marker", ["pyvenv.cfg", ".git"])
+def test_the_walk_leaves_out_a_nested_tree(tmp_path, marker):
+    """Mutation: drop `marker` from `NESTED`, and the nested tree's file is swept as ours."""
+    (tmp_path / "ours.md").write_text("")
+    nested = tmp_path / "nested"
+    (nested / "deep").mkdir(parents=True)
+    (nested / marker).write_text("")
+    (nested / "deep" / "theirs.md").write_text("")
+    assert tree(tmp_path) == [tmp_path / "ours.md"]

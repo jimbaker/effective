@@ -341,8 +341,8 @@ def planned(plan: list[Planned]) -> Segment:
 
 
 class Replanned(ValueError, Unretryable):
-    """A continuation whose settlement plans other legs than the plan its round's approval bound,
-    refused before any leg runs."""
+    """A settlement or a continuation planning other legs than the plan its round's claim
+    recorded, refused before any leg runs."""
 
 
 def settle(
@@ -382,9 +382,17 @@ def settle(
         )
 
         def superseded(held: dict[str, Any]) -> Superseded | None:
-            if held.get("claimant") == claimant:
-                return None
-            return Superseded(credit=credit, held=Decimal(held["credit"]))
+            """`None` when the round's claim is this settlement's own, for the plan it runs. A
+            resume whose code derives terms that ask nobody passes the gate unasked, so the plan
+            is compared here."""
+            if held.get("claimant") != claimant:
+                return Superseded(credit=credit, held=Decimal(held["credit"]))
+            if (claimed := held.get("plan")) != digest:
+                raise Replanned(
+                    f"the round's claim recorded plan {claimed}, and its settlement now plans "
+                    f"{digest}"
+                )
+            return None
 
         read = yield from read_ledger(settled)
         if read is not None and (ended := superseded(read)) is not None:

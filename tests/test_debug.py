@@ -101,7 +101,7 @@ def add_test_ugly(files) -> TestReport:
 
 # lint: working-note — the tag IS this rubric's subject
 def rubric_quality(files) -> QualityReport:
-    """The CLAUDE.md-style rubric, in miniature: a leftover TODO is a quality breach."""
+    """The AGENTS.md-style rubric, in miniature: a leftover TODO is a quality breach."""
     c = files["calc.py"]
     if "TODO" in c:
         return QualityReport(score=0.3, notes="leftover TODO")
