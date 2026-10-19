@@ -10,25 +10,21 @@ discharged by a table where every entry has a production body, and by
 
 **Opinionated, which means choosing rather than offering.** The incumbent shipped five edit modes
 and wired two; the other three were built, unit-tested and unreachable from the durable path. Here
-the ladder's default is `SEMANTIC` for a refactor and `STRUCTURAL` for a uniform rewrite, with
-`WHOLE_FILE` as the drafting fallback — one constant, `DEFAULT_SCHEME`, states it, and the
-alternatives sit beside it as measured options rather than as unresolved seams.
+the ladder's default is `STRUCTURAL`, with `write_file` as the drafting fallback: one constant,
+`DEFAULT_SCHEME`, states the default, and `TEXT` sits beside it as a measured option rather than
+as an unresolved seam.
 
 **The workspace is a mapping, not a directory, and reads flow through the tree.** A tool that
 touched the real filesystem would make replay a lie: the recorded result would depend on whatever
 the disk happened to hold. So the tree is workflow-local state threaded in, every tool is a pure
 function of `(tree, args)`, and the only escapes are the deterministic subprocesses the ladder's
-upper rungs need — ast-grep, ruff and jedi — which run past the yield boundary where a subprocess
-is legitimate.
+upper rung needs, ast-grep and ruff, which run past the yield boundary where a subprocess is
+legitimate.
 
-**Those three PARSE; `run_suite` EXECUTES, and the difference decides what needs isolating.**
+**ast-grep and ruff PARSE; `run_suite` EXECUTES, and the difference decides what needs isolating.**
 pytest imports every module it collects, so a tree a model wrote runs before any assertion does.
 Where that happens is `effective.coding.tier`'s question, not this module's: `run_suite` takes a
 `tier` and the parsing below cannot tell the arms apart.
-
-The one exception is `semantic_rename`: jedi needs a project on disk to resolve bindings
-across files, so the caller supplies a `project_root`. That is the ladder's own rule showing
-through — rung 3 needs the whole project, and no amount of API design makes it not need it.
 """
 
 import re
@@ -39,7 +35,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from effective.coding.edits.semantic import SemanticError, declared_arms, references, rename
 from effective.coding.edits.structural import StructuralEdit, StructuralRule, apply_structural
 from effective.coding.gate import static_diagnostic, static_merge_gate
 from effective.coding.tier import PYTHON, Tier, UnsafeTreePath, run_tree_command, tree_paths
@@ -53,15 +48,14 @@ class Scheme(StrEnum):
 
     TEXT = "text"
     STRUCTURAL = "structural"
-    SEMANTIC = "semantic"
 
 
-DEFAULT_SCHEME = Scheme.SEMANTIC
-"""What a refactor uses unless told otherwise.
+DEFAULT_SCHEME = Scheme.STRUCTURAL
+"""What a rewrite uses unless told otherwise.
 
 The default is the TOP rung deliberately. A sandbox makes the nominal scheme cheap and the
-structural one impossible, so the path of least resistance is regex-over-code — this repo's named
-defect class. Defaulting to semantic means a text edit has to argue for itself."""
+structural one impossible, so the path of least resistance is regex-over-code, this repo's named
+defect class. Defaulting to structural means a text edit has to argue for itself."""
 
 
 class ToolError(RuntimeError):
@@ -76,8 +70,7 @@ class UnknownTool(KeyError):
 
 @dataclass(frozen=True)
 class Workspace:
-    """What one tool call acts on: the tree the call carries, and the project root the semantic
-    rung needs.
+    """What one tool call acts on: the tree the call carries.
 
     Built per call and changed by none. An edit RETURNS the tree it makes, so what a run has
     edited lives in the recorded results, and a domain serving the table keeps nothing between
@@ -89,7 +82,6 @@ class Workspace:
     the model."""
 
     tree: Mapping[str, str] = field(default_factory=dict)
-    project_root: str | None = None
 
     def __post_init__(self) -> None:
         tree_paths(self.tree)
@@ -156,43 +148,6 @@ def _structural_apply(ws: Workspace, args: Mapping[str, Any]) -> dict[str, str]:
     if (bad := static_diagnostic(content, edit.path)) is not None:
         raise ToolError(f"the rewrite does not merge: {bad}")
     return {**tree, edit.path: content}  # the resulting tree, from one copy: see `_write_file`
-
-
-def _semantic_rename(ws: Workspace, args: Mapping[str, Any]) -> str:
-    if ws.project_root is None:
-        raise ToolError("semantic_rename needs a project_root — rung 3 resolves across files")
-    try:
-        edit = rename(
-            ws.project_root,
-            str(args["path"]),
-            int(args["line"]),
-            int(args["column"]),
-            str(args["new_name"]),
-        )
-    except SemanticError as e:
-        raise ToolError(str(e)) from e
-    return edit.diff or "no change"
-
-
-def _semantic_references(ws: Workspace, args: Mapping[str, Any]) -> list[str]:
-    if ws.project_root is None:
-        raise ToolError("semantic_references needs a project_root")
-    try:
-        found = references(
-            ws.project_root, str(args["path"]), int(args["line"]), int(args["column"])
-        )
-    except SemanticError as e:
-        raise ToolError(str(e)) from e
-    return [f"{r.path}:{r.line}:{r.column}" for r in found]
-
-
-def _declared_arms(ws: Workspace, args: Mapping[str, Any]) -> list[str]:
-    if ws.project_root is None:
-        raise ToolError("declared_arms needs a project_root")
-    try:
-        return list(declared_arms(ws.project_root, str(args["path"]), str(args["alias"])))
-    except SemanticError as e:
-        raise ToolError(str(e)) from e
 
 
 _FAILURE_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(?P<node>\S+)", re.MULTILINE)
@@ -304,9 +259,6 @@ TOOLS: dict[str, Runner] = {
     "check": _check,
     "run_suite": _run_suite,
     "structural_apply": _structural_apply,
-    "semantic_rename": _semantic_rename,
-    "semantic_references": _semantic_references,
-    "declared_arms": _declared_arms,
 }
 """Every tool the machine can call, and every one has a body here.
 
@@ -320,7 +272,7 @@ declared repertoire and a deployment's served set from drifting apart."""
 #
 # `TOOLS` above is the PROVIDED side — what a deployment serves. This is the DECLARED side: what
 # each name means, bound once instead of restated at every construction site. The `result`
-# column shows why: five of these nine return something that is not a string.
+# column shows why: most of them return something that is not a string.
 #
 # The two columns are read by different consumers. `result` is what the OP
 # carries, so the workflow folds it and a replay re-derives it; `observe` is what the TRANSCRIPT
@@ -348,21 +300,6 @@ class WriteFileArgs(BaseModel):
 class StructuralApplyArgs(BaseModel):
     path: str
     rules: list[dict[str, Any]]
-
-
-class PositionArgs(BaseModel):
-    path: str
-    line: int
-    column: int
-
-
-class RenameArgs(PositionArgs):
-    new_name: str
-
-
-class DeclaredArmsArgs(BaseModel):
-    path: str
-    alias: str
 
 
 class SuiteArgs(BaseModel):
@@ -398,29 +335,16 @@ CODING_TOOLS: dict[str, Tool[Any, Any]] = {
     "structural_apply": Tool(
         "structural_apply", StructuralApplyArgs, dict[str, str], _tree_summary
     ),
-    "semantic_rename": Tool("semantic_rename", RenameArgs, str, lambda diff: diff),
-    "semantic_references": Tool(
-        "semantic_references",
-        PositionArgs,
-        list[str],
-        lambda sites: f"{len(sites)} reference(s): {', '.join(sites)}" if sites else "none found",
-    ),
-    "declared_arms": Tool(
-        "declared_arms",
-        DeclaredArmsArgs,
-        list[str],
-        lambda arms: ", ".join(arms) or "no arms declared",
-    ),
 }
-"""The declared side of the same nine names `TOOLS` serves.
+"""The declared side of the names `TOOLS` serves.
 
 Kept in step by `test_the_declared_table_and_the_served_table_are_the_same_names` — two tables
 over one set of names is exactly the drift `--role-coverage` and the deleted `StateSpec.needs`
-have each taught this repo about, and a declaration that quietly covers eight of nine is worse
+have each taught this repo about, and a declaration that quietly covers all but one is worse
 than none, because it is read on trust."""
 
 
-def serve_tool(name: str, args: Mapping[str, Any], *, project_root: str | None = None) -> Any:
+def serve_tool(name: str, args: Mapping[str, Any]) -> Any:
     """Dispatch one tool call AT THE OP BOUNDARY, where a refusal has to be a value.
 
     This is what a deployment's `DomainInterpreter` calls, and it differs from `run_tool` in
@@ -448,7 +372,7 @@ def serve_tool(name: str, args: Mapping[str, Any], *, project_root: str | None =
     `run_tool` stays as it is: it is the direct API, it is what the edit tests drive, and "this
     call raises on failure" is the right contract everywhere the caller is not an op."""
     try:
-        workspace = Workspace(tree=args.get("tree", {}), project_root=project_root)
+        workspace = Workspace(tree=args.get("tree", {}))
         return run_tool(workspace, name, args)
     except ToolError as refused:
         return ToolRefused(refused=True, tool=name, diagnostic=str(refused))

@@ -12,11 +12,9 @@ a measurement"* — and this is that substitution made explicit, so a caller dec
 execution to happen instead of discovering that the answer was always "here".
 
 **What is containerized, and what deliberately is not.** Only execution. `effective.coding.gate`
-shells out to ruff, and `coding.edits.structural` to ast-grep and jedi, and none of the three RUNS
-the content: they parse it. Containerizing a parser would buy no isolation and would cost the gate
-its access to this repo's ruff configuration, whose absence the gate treats as a refusal rather
-than a pass. Naming the distinction is the point — a blanket "everything in a container" reads as
-more careful and is mostly ceremony.
+shells out to ruff, and `coding.edits.structural` to ast-grep, and neither RUNS the content: they
+parse it. Containerizing a parser would buy no isolation and would cost the gate its access to this
+repo's ruff configuration, whose absence the gate treats as a refusal rather than a pass.
 
 **No volume mount, no overlayfs**, matching the discipline `infra/code-agent/Dockerfile` states
 for the same image: the tree is unpacked inside a fresh `--rm` container from a tar fed on stdin,

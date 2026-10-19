@@ -50,16 +50,14 @@ bridge = [
 judge = [
     "typesafe-sdk==0.7.2",
 ]
-# The coding machine's handler half: the lint, the merge gate and the structural and semantic
-# edits. The yielding half and the rest of the substrate import neither, so a consumer that runs
-# workflows installs no parser, and an install on free-threaded CPython stays possible: ast-grep-py
-# ships no free-threaded wheel.
+# The coding machine's handler half: the lint, the merge gate and the structural edits. The yielding
+# half and the rest of the substrate import neither, so a consumer that runs workflows installs no
+# parser, and an install on free-threaded CPython stays possible: ast-grep-py ships no free-threaded
+# wheel.
 coding = [
     # Bounded: `ast-grep-cli` in the dev group runs the same release as this binding. Bump the
     # two together.
     "ast-grep-py>=0.45.3,<0.46",
-    # The semantic rung above ast-grep: jedi resolves bindings where ast-grep matches shapes.
-    "jedi>=0.20.0",
 ]
 # psycopg's own libpq, for a machine without one. It ships no free-threaded wheel, so the core
 # takes the pure-Python build. Named directly rather than as `psycopg[binary]`, which the override

@@ -1,31 +1,23 @@
-"""The edit-scheme ladder: text, syntactic, semantic — and why the rung decides where work runs.
+"""The edit-scheme ladder: text and structural, and why the rung decides where work runs.
 
-Three rungs, and they are monotone in how much WORLD an edit needs. That is not a taxonomy for its
-own sake; it fixes the sandbox boundary, because the rung you need decides whether the edit can
-happen inside a sandbox at all.
+The rungs are monotone in how much of the world an edit needs, and that fixes the sandbox
+boundary: the rung an edit needs decides whether it can happen inside a sandbox at all.
 
-| rung | knows | tool | the discriminating rename |
-|---|---|---|---|
-| text | the file's **bytes** | `re`, `str` | renames both scopes — wrong |
-| syntactic | the file's **parse** | `ast_grep_py` | 4 nodes, both scopes — wrong |
-| **semantic** | **binding + lexical scope** | **`jedi`** | 2 references, `f` only — right |
-
-Measured on `rename x in f() where g() has its own x and a string "x"`. Only the semantic rung
-gets it right, because only it knows what a name is BOUND to rather than how it is spelled.
+| rung       | knows               | tool          | renaming `x` beside a string `"x"`   |
+|------------|---------------------|---------------|--------------------------------------|
+| text       | the file's bytes    | `re`, `str`   | rewrites the string too: wrong       |
+| structural | the file's parse    | `ast_grep_py` | rewrites only the `x` nodes          |
 
 > **The sandbox boundary and the nominal/structural boundary are the same boundary.** Text needs
-> bytes and runs anywhere; syntactic needs a parse (`import ast` is a `ModuleNotFoundError` inside
-> Monty); semantic needs the whole project — bindings, imports, inference — and cannot run remotely
-> at all.
+> bytes and runs anywhere; structural needs a parse, and `import ast` is a `ModuleNotFoundError`
+> inside Monty.
 
-**So the structural/semantic host call is the DEFAULT, and a text program is the exception that
-must argue for itself.** The hazard is that a sandbox makes the *nominal* scheme cheap (`re` works)
-and the structural one impossible, so the path of least resistance is regex-over-code — this
-repo's named defect class. Defaulting the other way is the whole point of the ladder.
+**So the structural host call is the default, and a text program must argue for itself.** A
+sandbox makes the nominal scheme cheap (`re` works) and the structural one impossible, so the path
+of least resistance is regex over code, this repo's named defect class.
 
-**What the model emits is an INTENT, never the result.** For the structural rung the model's entire
-surface is an ast-grep pattern; locate, rewrite, format and validate are deterministic Python
-re-derived from it. For the semantic rung it is a position and a new name; jedi computes the diff.
-Both are pure functions of their inputs, so a replay re-binds the recorded intent and never
-re-runs the tool — which is what keeps an editor inside the determinism boundary.
+**What the model emits is an intent, never the result.** Its whole surface is an ast-grep pattern;
+locating, rewriting, formatting and validating are deterministic Python derived from it, so a
+replay re-binds the recorded intent and never re-runs the tool. That keeps an editor inside the
+determinism boundary.
 """

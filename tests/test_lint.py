@@ -896,7 +896,7 @@ def test_shipping_substrate_obeys_the_seam():
             "from effective.machine.outcomes import Advance\n",
             False,
         ),
-        # Coding's yielding half must stay importable without ast-grep, jedi and a ruff config.
+        # Coding's yielding half must stay importable without ast-grep and a ruff config.
         (
             "yielding half reaching the gate",
             "src/effective/coding/verdicts.py",
@@ -912,7 +912,7 @@ def test_shipping_substrate_obeys_the_seam():
         (
             "yielding half reaching the editors",
             "src/effective/coding/transition.py",
-            "from effective.coding.edits.semantic import rename\n",
+            "from effective.coding.edits.structural import apply_structural\n",
             True,
         ),
         # ...but the handler-side half is allowed to reach itself, which is why the rule is keyed
@@ -926,7 +926,7 @@ def test_shipping_substrate_obeys_the_seam():
         (
             "editors reaching each other",
             "src/effective/coding/edits/__init__.py",
-            "from effective.coding.edits.semantic import rename\n",
+            "from effective.coding.edits.structural import apply_structural\n",
             False,
         ),
         # The direction that IS the design: an embodiment imports the generic machine.

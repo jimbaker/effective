@@ -57,7 +57,7 @@ __all__ = ["coding_bind", "coding_read"]
 # NOT re-exported here: `CODING_TOOLS`, which lives with the runners that serve it. Re-exporting
 # it would make this module import `effective.coding.runners`, and that is the one edge the
 # package's own split forbids — the yielding half must stay importable without `gate`, `runners`
-# or `edits`, which carry jedi, ast-grep and a ruff config resolved from the filesystem.
+# or `edits`, which carry ast-grep and a ruff config resolved from the filesystem.
 #
 # `lint.SEAM_FORBIDDEN` names the PROTECTED half rather than listing the yielding half, so the
 # yielding half is whatever is not protected, including a module nobody has written yet.

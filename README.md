@@ -337,7 +337,7 @@ a scripted Odoo answers the same calls in memory.
 | `tui` | the terminal viewer (textual, rich) |
 | `judge` | the Jev judge interpreter |
 | `bridge` | the arrivals bridge (redis) |
-| `coding` | the lint and the coding machine's tools (ast-grep, jedi) |
+| `coding` | the lint and the coding machine's tools (ast-grep) |
 | `binary` | psycopg with its own libpq, for a machine without one |
 
 ## Contributing

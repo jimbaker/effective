@@ -163,16 +163,6 @@ src/effective/code.py :: 'run_code input  has a non-str key ' :: raise -> struct
 src/effective/code.py :: 'run_code input  is , not a JSON value — convert explicitly (e.g. sorted(a_set), list(a_tuple), dt.isoformat())' :: raise -> structured exception
 src/effective/code.py :: 'run_code input  is non-finite (); not a JSON value' :: raise -> structured exception
 src/effective/code.py :: "run_code name  contains '/', the key grammar's path delimiter; wrap the call in `scoped(...)` to namespace it" :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: ' does not resolve: ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: ' has  arm(s) defined outside the project' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: ' is not a Python identifier' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: ' is not defined in ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: ' is outside the project' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: 'could not infer arms of : ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: 'could not rename at ::: ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: 'could not resolve references at ::: ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: 'no such file: ' :: raise -> structured exception
-src/effective/coding/edits/semantic.py :: 'renaming at :: would change  file(s) outside the project' :: raise -> structured exception
 src/effective/coding/edits/text.py :: 'Could not find edits[].old in . It must match exactly, including whitespace and newlines.' :: raise -> structured exception
 src/effective/coding/edits/text.py :: 'Found  occurrences of edits[].old in . It must be unique; include more of the surrounding text.' :: raise -> structured exception
 src/effective/coding/edits/text.py :: 'No changes made to : the replacements give identical content.' :: raise -> structured exception
@@ -185,8 +175,6 @@ src/effective/coding/gate.py :: 'lint [fidelity] non-printable character U+ at l
 src/effective/coding/gate.py :: 'lint [ruff ] ' :: text
 src/effective/coding/gate.py :: 'lint [ruff] ' :: text
 src/effective/coding/gate.py :: 'lint [syntax]  (line )' :: text
-src/effective/coding/runners.py :: ' reference(s): ' :: text
-src/effective/coding/runners.py :: '::' :: key -> compose_key
 src/effective/coding/runners.py :: 'exit ; failing: ' :: text
 src/effective/coding/runners.py :: 'no rule matched anything in  — the pattern hit 0 sites' :: raise -> structured exception
 src/effective/coding/runners.py :: 'no runner for ; the table serves ' :: raise -> structured exception

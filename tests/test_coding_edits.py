@@ -1,14 +1,8 @@
 """The edit-scheme ladder, and the runner table that serves it.
 
-**Roles.** The rung comparison is `adversarial`: it exists to show the two lower rungs
-getting a real case WRONG, and it would be worthless if it only showed the top rung right. The
-table tests are `unit`. The runner tests are `spine`: they drive the dispatch a machine actually
-uses.
-
-The case in `test_the_three_rungs_disagree_and_only_the_top_one_is_right` is the ladder's
-discriminator, and it is the entire argument for paying for jedi. If it ever stops discriminating
-(if text and syntactic start agreeing with semantic), the ladder has no justification and this
-file should say so loudly rather than quietly passing.
+**Roles.** The rung comparison is `adversarial`: it shows the text rung getting a real case
+wrong that the structural rung gets right. The table tests are `unit`. The runner tests are
+`spine`: they drive the dispatch a machine actually uses.
 """
 
 import re
@@ -20,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from effective.coding import runners
-from effective.coding.edits.semantic import SemanticError, declared_arms, references, rename
 from effective.coding.edits.structural import (
     StructuralRule,
     apply_structural,
@@ -57,74 +50,22 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-# --- the ladder: the case that justifies the top rung -------------------------------------------
+# --- the ladder: the case that justifies the structural rung ------------------------------------
 
 
-def test_the_three_rungs_disagree_and_only_the_top_one_is_right(project: Path):
-    """Rename `x` in `f()` only. `g()` has its own `x`, and there is a string `"x"`.
-
-    This is the measurement the whole ladder rests on, so it is asserted as a DISAGREEMENT rather
-    than as three separate facts: the value of rung 3 is precisely that rungs 1 and 2 are wrong
-    here, and a test that only checked jedi would still pass on a day the others caught up."""
+def test_the_text_rung_rewrites_a_string_the_structural_rung_leaves(project: Path):
+    """Rename `x`, with a string `"x"` in the module. The text rung rewrites the string; the
+    structural rung sees `x` only as a node, and the string is not one."""
     source = (project / "mod.py").read_text()
 
-    # Rung 1 — bytes. Renames both scopes AND the string.
     textual = re.sub(r"\bx\b", "y", source)
-    assert textual.count("y") > 4
-    assert '"x"' not in textual, "rung 1 rewrote the string literal — that is the defect"
+    assert '"y"' in textual, "the text rung left the string literal alone"
 
-    # Rung 2 — the parse. Sees every `x` NODE, in both scopes; the string is not a node, so it
-    # survives, but the two scopes are still conflated.
     from ast_grep_py import SgRoot
 
     nodes = SgRoot(source, "python").root().find_all(pattern="x")
-    assert len(nodes) == 4, "rung 2 should see four `x` identifier nodes across both scopes"
-
-    # Rung 3 — bindings. Two references, both inside `f`.
-    refs = references(project, "mod.py", line=2, column=4)
-    assert len(refs) == 2
-    assert {r.line for r in refs} == {2, 3}, "rung 3 must resolve `f`'s binding only"
-
-
-def test_a_semantic_rename_leaves_the_other_scope_and_the_string_alone(project: Path):
-    edit = rename(project, "mod.py", line=2, column=4, new_name="y")
-    assert edit.diff, "a rename that changes nothing is not a rename"
-    assert "-    x = 1" in edit.diff
-    assert "+    y = 1" in edit.diff
-    # The proof: `g`'s own binding and the string never appear as removals.
-    assert "-    x = 2" not in edit.diff
-    assert '-    return "x"' not in edit.diff
-
-
-def test_a_rename_returns_a_diff_and_writes_nothing(project: Path):
-    """The intent is recordable and applying it is a separate, explicit act — which is what keeps
-    a semantic edit inside the determinism boundary."""
-    before = (project / "mod.py").read_text()
-    rename(project, "mod.py", line=2, column=4, new_name="y")
-    assert (project / "mod.py").read_text() == before
-
-
-def test_declared_arms_resolves_a_PEP695_union(tmp_path: Path):
-    """FINALIZE's analysis: knowing a union's DECLARED arms, which is a type fact no lower rung
-    can reach."""
-    (tmp_path / "u.py").write_text(
-        "from dataclasses import dataclass\n"
-        "@dataclass(frozen=True)\nclass A: pass\n"
-        "@dataclass(frozen=True)\nclass B: pass\n"
-        "type U = A | B\n"
-    )
-    assert set(declared_arms(tmp_path, "u.py", "U")) == {"A", "B"}
-
-
-def test_semantic_failures_are_raised_not_swallowed(project: Path):
-    """A refusal and an empty answer are different facts; collapsing them is how a rename
-    silently does nothing."""
-    with pytest.raises(SemanticError):
-        rename(project, "mod.py", line=2, column=4, new_name="not an identifier")
-    with pytest.raises(SemanticError):
-        declared_arms(project, "mod.py", "NoSuchAlias")
-    with pytest.raises(SemanticError):
-        references(project, "nope.py", line=1, column=0)
+    assert len(nodes) == 4
+    assert all(node.text() == "x" for node in nodes)
 
 
 # --- rung 2's oracle -----------------------------------------------------------------------------
@@ -369,20 +310,6 @@ def test_a_pattern_that_matches_nothing_is_an_error_not_a_silent_no_op():
             "structural_apply",
             {"path": "m.py", "rules": [{"pattern": "nope($A)", "rewrite": "x($A)"}]},
         )
-
-
-def test_the_semantic_tools_need_a_project_and_say_so(project: Path):
-    ws = Workspace(tree={}, project_root=None)
-    with pytest.raises(ToolError, match="project_root"):
-        run_tool(
-            ws, "semantic_rename", {"path": "mod.py", "line": 2, "column": 4, "new_name": "y"}
-        )
-
-    ws = Workspace(tree={}, project_root=str(project))
-    diff = run_tool(
-        ws, "semantic_rename", {"path": "mod.py", "line": 2, "column": 4, "new_name": "y"}
-    )
-    assert "+    y = 1" in diff
 
 
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff not installed")

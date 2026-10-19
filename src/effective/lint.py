@@ -142,7 +142,7 @@ SEAM_FORBIDDEN: dict[str, frozenset[str]] = {
     # unfalsifiable.
     "effective.machine": frozenset({"effective.coding"}),
     # The yielding half must stay importable without the handler-side half, which carries
-    # ast-grep, jedi and a ruff config resolved from the filesystem. A re-export such as
+    # ast-grep and a ruff config resolved from the filesystem. A re-export such as
     # `CODING_TOOLS` from `coding/specs.py` would make the yielding half import the tool half.
     "effective.coding": frozenset(
         {"effective.coding.gate", "effective.coding.runners", "effective.coding.edits"}
@@ -159,9 +159,9 @@ SEAM_FORBIDDEN |= {
 SEAM_REASONS: dict[str, str] = {
     "tui": "a UI; the substrate renders a run without one (`effective.runread`)",
     "effective.coding": "the trampoline is generic; an embodiment may not be imported by it",
-    "effective.coding.gate": "the handler-side half carries ast-grep, jedi and a ruff config",
-    "effective.coding.runners": "the handler-side half carries ast-grep, jedi and a ruff config",
-    "effective.coding.edits": "the handler-side half carries ast-grep, jedi and a ruff config",
+    "effective.coding.gate": "the handler-side half carries ast-grep and a ruff config",
+    "effective.coding.runners": "the handler-side half carries ast-grep and a ruff config",
+    "effective.coding.edits": "the handler-side half carries ast-grep and a ruff config",
 }
 _PRIVATE_REASON = "code built on the substrate; dependencies point from it to the substrate"
 

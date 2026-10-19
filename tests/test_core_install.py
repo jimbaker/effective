@@ -9,7 +9,7 @@ extra away in turn, in a subprocess, so the refusals run on every pass of the ga
 sees module-level imports; the lint's lazy-import rule keeps a parser import out of a function
 body.
 
-    python tests/test_core_install.py ast_grep_py jedi    # the census with those packages absent
+    python tests/test_core_install.py ast_grep_py    # the census with that package absent
 """
 
 import importlib
@@ -27,14 +27,13 @@ EXTRA_OF: dict[str, str] = {
     "effective.lint": "coding",
     "effective.coding.gate": "coding",
     "effective.coding.runners": "coding",
-    "effective.coding.edits.semantic": "coding",
     "effective.coding.edits.structural": "coding",
     "effective.interpreters.jev": "judge",
 }
 """Each module that needs an extra, and the extra."""
 
 PACKAGES_OF: dict[str, tuple[str, ...]] = {
-    "coding": ("ast_grep_py", "jedi"),
+    "coding": ("ast_grep_py",),
     "judge": ("typesafe_sdk",),
 }
 """The top-level packages each extra brings, which the subprocess census takes away."""
