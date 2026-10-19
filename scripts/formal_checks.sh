@@ -39,8 +39,12 @@ FORMAL_CHECKS=(
     "verify retry.qnt --invariant=safe --max-steps=30 --backend=tlc"
     # A race's branch errors across task retries, in two orders and both readers.
     "verify race_errors.qnt --invariant=safe --max-steps=40 --backend=tlc"
-    # A settlement's apply and its undo across two attempts: the claim fences a stale call.
-    "verify erp_claim.qnt --invariant=booksAreTheDecision --max-steps=20 --backend=tlc"
+    # A settlement's apply and its undo across two attempts and two rounds: the claim fences a
+    # stale call, the count keeps a shared match, and a round waits for the earlier one's ending.
+    "verify erp_claim.qnt --invariant=booksAreTheDecision --max-steps=30 --backend=tlc"
+    "verify erp_claim.qnt --invariant=liveClaimHasMatch --max-steps=30 --backend=tlc"
+    "verify erp_claim.qnt --invariant=noRoundBeforeEnded --max-steps=30 --backend=tlc"
+    "verify erp_claim.qnt --invariant=creditedOnce --max-steps=30 --backend=tlc"
 )
 
 # Checks on the UNMODIFIED models that must VIOLATE.
@@ -82,9 +86,11 @@ FORMAL_EXPECT_VIOLATION=(
     # The race's strongest readings: the order can move the answering attempt and a loser's ending.
     "race_errors.qnt|--invariant=sameAnsweringAttempt --max-steps=40 --backend=tlc|the order moves the attempt that answers"
     "race_errors.qnt|--invariant=sameEndings --max-steps=40 --backend=tlc|the order moves a loser's ending"
-    "erp_claim.qnt|--invariant=neverStaleLanded --max-steps=20 --backend=tlc|a stale attempt's call reaches the ERP"
-    "erp_claim.qnt|--invariant=neverCompensated --max-steps=20 --backend=tlc|a compensation removes the match"
-    "erp_claim.qnt|--invariant=neverForeignUndone --max-steps=20 --backend=tlc|a compensation removes another key's match"
+    "erp_claim.qnt|--invariant=neverStaleLanded --max-steps=30 --backend=tlc|a stale attempt's call reaches the ERP"
+    "erp_claim.qnt|--invariant=neverCompensated --max-steps=30 --backend=tlc|a compensation removes the match"
+    "erp_claim.qnt|--invariant=neverForeignUndone --max-steps=30 --backend=tlc|a compensation removes the match a person made"
+    "erp_claim.qnt|--invariant=neverSecondRound --max-steps=30 --backend=tlc|a second round opens and settles"
+    "erp_claim.qnt|--invariant=neverContinued --max-steps=30 --backend=tlc|a round that ended unlanded is continued"
 )
 
 # TEETH: flip a model's design toggle to the KNOWN-BUGGY value and assert the checker finds
@@ -136,6 +142,13 @@ FORMAL_TEETH=(
     "race_errors.qnt|impossibleAtOnce: bool = false|impossibleAtOnce: bool = true|--invariant=orderIndependent --max-steps=40 --backend=tlc|impossible before every branch ends must let the order decide whether the task answers"
     "race_errors.qnt|impossibleAtOnce: bool = false|impossibleAtOnce: bool = true|--invariant=impossibleOnlyOnceEveryBranchEnded --max-steps=40 --backend=tlc|impossible at once must save the choice while a branch runs"
     "race_errors.qnt|clearableIsEnding: bool = false|clearableIsEnding: bool = true|--invariant=noClearableErrorIsAnEnding --max-steps=40 --backend=tlc|a clearable error after the choice must become an ending"
-    # An ERP with no claim lets a stale attempt's apply land after the undo.
-    "erp_claim.qnt|buggyNoClaim: bool = false|buggyNoClaim: bool = true|--invariant=booksAreTheDecision --max-steps=20 --backend=tlc|an ERP with no claim must let a stale apply land after its undo"
+    # The claim model's rejected designs: an ERP with no claim, an unapply that ignores the other
+    # live claims, a round that opens before the earlier one ends, and an unlanded round that a
+    # new round replaces. Overlapping rounds are what make the count necessary.
+    "erp_claim.qnt|claimed: true, counted: true|claimed: false, counted: false|--invariant=booksAreTheDecision --max-steps=30 --backend=tlc|an ERP with no claim must let a stale apply land after its undo"
+    "erp_claim.qnt|counted: true, waits: true|counted: false, waits: false|--invariant=liveClaimHasMatch --max-steps=30 --backend=tlc|an uncounted unapply must remove a match an overlapping round holds"
+    "erp_claim.qnt|counted: true, waits: true, continues: true|counted: false, waits: true, continues: false|--invariant=liveClaimHasMatch --max-steps=30 --backend=tlc|an uncounted unapply must remove a match the round after an unlanded one holds"
+    "erp_claim.qnt|waits: true|waits: false|--invariant=noRoundBeforeEnded --max-steps=30 --backend=tlc|a round that does not wait must open before the earlier ends"
+    "erp_claim.qnt|waits: true|waits: false|--invariant=creditedOnce --max-steps=30 --backend=tlc|a round that does not wait must credit a completed case again"
+    "erp_claim.qnt|continues: true|continues: false|--invariant=creditedOnce --max-steps=30 --backend=tlc|a new round after an unlanded one must credit the case again"
 )

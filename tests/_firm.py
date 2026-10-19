@@ -1,12 +1,14 @@
 """The AR firm's resolutions driven from a manifest on either engine, approved by a controller,
 for the suites that read what a resolution read, wrote and cost."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from _conformance import Fault
 
+from effective.api import Effect
 from effective.cost import Contract, MeteredInterpreter, Usage
 from effective.govern import GateState, Policy, Proceed, Verdict, govern, rulers_for
 from effective.handlers.durable import DurableHandler
@@ -167,7 +169,9 @@ def _unasked(op: Any) -> Any:
     raise AssertionError(f"a replay called the world: {op!r}")
 
 
-def replayed(backend, run: Run) -> Any:
+def replayed(backend, run: Run, program: Callable[[], Effect[Any]] | None = None) -> Any:
+    """`run` replayed with an interpreter that refuses every call, from the program it ran: an
+    admitted resolution unless `program` says otherwise."""
     raw = backend.unclaimed_ctx(run.task_id)
     try:
         ctx = raw
@@ -184,7 +188,7 @@ def replayed(backend, run: Run) -> Any:
             op_layers=(gate(run.run_id),),
             contract=Contract.from_params(run.params),
         )
-        return handler.run(admitted(Manifest.admitted(run.params)))
+        return handler.run(program or admitted(Manifest.admitted(run.params)))
     finally:
         if backend.name == "postgres":
             raw._conn.close()

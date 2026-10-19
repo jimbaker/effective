@@ -13,9 +13,11 @@ second `load` appends its line to a draft. After a write raises, the adapter rea
 commits before it answers, and a method that returns nothing raises after it commits.
 
 An apply and an unapply run as one server action, `FENCE`, so a claim and the match it records
-commit together. Two attempts that overlap on one key both try to claim it; the second's create
-violates the unique name and rolls its whole action back, which reaches the adapter as `Unknown`,
-and the step's retry finds the first's claim.
+commit together. A claim lives on the invoice, and a hold on each match its apply made or found, so
+the matches a claim holds can be counted, and a hold goes with its match whoever removes it. Two
+attempts that overlap on one key both try to claim it; the second's create violates the unique name
+and rolls its whole action back, which reaches the adapter as `Unknown`, and the step's retry finds
+the first's claim.
 """
 
 import hashlib
@@ -41,8 +43,10 @@ from .port import (
     Kind,
     Posted,
     PostMemo,
+    Read,
     Refused,
     Reverse,
+    Statement,
     Unapplied,
     Unapply,
     Unknown,
@@ -54,13 +58,24 @@ rows, and this name is the port's alone, so its rows outlive every addon update.
 
 
 class Claim(StrEnum):
-    """What a claim on an apply's key records, as the `ir.model.data` module it lives under. Its
-    name is the key's, so an apply and the undo naming it find each other, and a count of keyed
-    entries never sees a claim."""
+    """What a row `FENCE` writes records, as the `ir.model.data` module it lives under. A claim's
+    name is its key's, so an apply and the undo naming it find each other, and a count of keyed
+    entries never sees a claim. A hold's name is its key's and its match's.
+
+    | module     | records                                                                   |
+    |------------|---------------------------------------------------------------------------|
+    | `APPLIED`  | the key's apply landed                                                    |
+    | `REFUSED`  | the key's apply was refused                                               |
+    | `UNDONE`   | the key's undo released its holds, and removed a match no other key held  |
+    | `RELEASED` | the key's undo released its holds, and every match it held stands         |
+    | `HELD`     | a match the key's apply made or found, until the key's undo or the match goes |
+    """
 
     APPLIED = "effective_applied"
     REFUSED = "effective_refused"
     UNDONE = "effective_undone"
+    RELEASED = "effective_released"
+    HELD = "effective_held"
 
 
 FENCE_NAME = "effective: apply or unapply once per claim"
@@ -68,27 +83,38 @@ FENCE_NAME = "effective: apply or unapply once per claim"
 FENCE = """
 ask = env.context
 data = env["ir.model.data"]
-claims = ["effective_applied", "effective_refused", "effective_undone"]
+claims = ["effective_applied", "effective_refused", "effective_undone", "effective_released"]
 held = data.search([("module", "in", claims), ("name", "=", ask["name"])]).mapped("module")
+ended = [claim for claim in held if claim in ["effective_undone", "effective_released"]]
 invoice = env["account.move"].browse(ask["invoice"])
+env.cr.execute("UPDATE account_move SET write_date = write_date WHERE id = %s", [invoice.id])
 line = env["account.move.line"].browse(ask["line"])
 owed = invoice.line_ids.filtered(lambda row: row.account_id.account_type == "asset_receivable")
-joins = (line.matched_debit_ids | line.matched_credit_ids).filtered(
+joined = lambda: (line.matched_debit_ids | line.matched_credit_ids).filtered(
     lambda join: join.debit_move_id in owed or join.credit_move_id in owed
 )
+hold = lambda join: "%s.%s" % (ask["name"], join.id)
+holds = lambda found: data.search([("module", "=", "effective_held")] + found)
+joins = joined()
 mine = "effective_applied"
-if "effective_undone" in held:
-    action = {"found": "effective_undone"}
+if ended:
+    action = {"found": ended[0]}
 elif held and ask["op"] == "apply":
     action = {"found": held[0]}
 elif ask["op"] == "unapply":
-    mine = "effective_undone"
-    joins.unlink()
+    released = holds([("name", "in", [hold(join) for join in joins])])
+    joins = joins.filtered(lambda join: join.id in released.mapped("res_id"))
+    released.unlink()
+    kept = holds([("model", "=", "account.partial.reconcile"), ("res_id", "in", joins.ids)])
+    removed = joins.filtered(lambda join: join.id not in kept.mapped("res_id"))
+    mine = "effective_undone" if removed else "effective_released"
+    removed.unlink()
     action = {"found": "created"}
 elif joins:
     action = {"found": "effective_applied"}
 elif invoice.amount_residual and line.amount_residual:
     invoice.js_assign_outstanding_line(line.id)
+    joins = joined()
     action = {"found": "created"}
 else:
     mine = "effective_refused"
@@ -96,14 +122,24 @@ else:
 if action["found"] not in held:
     claim = {"module": mine, "name": ask["name"], "model": "account.move"}
     data.create(dict(claim, res_id=invoice.id))
+    if mine == "effective_applied":
+        holding = {"module": "effective_held", "model": "account.partial.reconcile"}
+        data.create([dict(holding, name=hold(join), res_id=join.id) for join in joins])
+action["claim"] = action["found"] if action["found"] in held else mine
 """
-"""The server action an apply and an unapply run, in one transaction that reads the claims and
-the entry line's matches against the invoice as it acts. An apply answers the claim its key
-holds; holding none, it claims the key as applied, matching the entry unless a match already
-stands, or as refused when the entry has nothing left or the invoice owes nothing. An unapply
-answers its claim, or claims the key as undone and removes the matches. The adapter runs only an
-action holding exactly this code, and creates one on first use; whoever administers Odoo's server
-actions can still change what runs between the lookup and the run, and the port trusts them."""
+"""The server action an apply and an unapply run, in one transaction that reads the claims, the
+holds and the entry line's matches against the invoice as it acts. An apply answers the claim its
+key holds; holding none, it claims the key as applied and holds each match it made or found
+standing, or claims it as refused when the entry has nothing left or the invoice owes nothing. An
+unapply answers its claim; holding none, it releases its key's holds and removes each match no
+other key holds, claiming the key as undone when it removed one and released otherwise. Each
+answer names the claim the key holds after it. Odoo deletes a match's holds with the match. Every
+run writes its invoice's row first, so two runs on one invoice serialize: Odoo answers the later
+one's write with a serialization failure and runs that call again, on a snapshot holding the
+earlier one's claims and holds. The
+adapter runs only an action holding exactly this code, and creates one on first use; whoever
+administers Odoo's server actions can still change what runs between the lookup and the run, and
+the port trusts them."""
 
 CENT = Decimal("0.01")
 
@@ -246,6 +282,10 @@ class OdooErp:
                         return self._unapply(moved, owing, undoes)
                     case unreachable:
                         assert_never(unreachable)
+            case Read(invoice=invoice) if invoice in self.documents:
+                return Statement(owed=self.residual(invoice), entries=self.entries(invoice))
+            case Read(invoice=invoice):
+                return Refused(reason="no document the world holds", about={"invoice": invoice})
             case unreachable:
                 assert_never(unreachable)
 
@@ -536,9 +576,9 @@ class OdooErp:
                 pass
             case lines, against:
                 return _unmatchable(entry, lines, invoice, against)
-        found = self._fenced("apply", key, invoice=invoice, line=line)
+        found, _ = self._fenced("apply", key, invoice=invoice, line=line)
         match found, self._matched(line, against):
-            case Claim.UNDONE, _:
+            case Claim.UNDONE | Claim.RELEASED, _:
                 return _undone(entry, invoice)
             case Claim.REFUSED, _:
                 return Refused(
@@ -558,24 +598,31 @@ class OdooErp:
                 pass
             case lines, against:
                 return _unmatchable(entry, lines, invoice, against)
-        found = self._fenced("unapply", undoes, invoice=invoice, line=line)
-        match found, self._matched(line, against):
-            case Claim.UNDONE, (_, residual):
-                return Unapplied(residual=residual, found=Found.EXISTING)
-            case None, ([], residual):
-                return Unapplied(residual=residual, found=Found.CREATED)
+        found, claim = self._fenced("unapply", undoes, invoice=invoice, line=line)
+        match found, claim, self._matched(line, against):
+            case Claim.UNDONE | Claim.RELEASED, _, (_, residual):
+                return Unapplied(
+                    residual=residual, found=Found.EXISTING, removed=found is Claim.UNDONE
+                )
+            case None, Claim.UNDONE, (_, residual):
+                return Unapplied(residual=residual, found=Found.CREATED, removed=True)
+            case None, Claim.RELEASED, (_, residual):
+                return Unapplied(residual=residual, found=Found.CREATED, removed=False)
             case _:
-                raise Unknown(f"move {entry} is still matched against {invoice}: {found}")
+                raise Unknown(f"move {entry} is still matched against {invoice}: {found}, {claim}")
 
-    def _fenced(self, op: Literal["apply", "unapply"], applied: str, **asked: Any) -> Claim | None:
-        """`FENCE`'s answer for `op` on the apply keyed `applied`: the claim the key held or this
-        call wrote, or `None` when this call made or removed the match."""
+    def _fenced(
+        self, op: Literal["apply", "unapply"], applied: str, **asked: Any
+    ) -> tuple[Claim | None, Claim]:
+        """`FENCE`'s answer for `op` on the apply keyed `applied`: the claim the key held, or
+        `None` when this call landed, and the claim the key holds after the call."""
         context = {"op": op, "name": name_of(applied), **asked}
+        claims = {claim.value for claim in Claim}
         match self.transport.call("ir.actions.server", "run", [self._fence()], context=context):
-            case {"found": "created"}:
-                return None
-            case {"found": str(found)} if found in {claim.value for claim in Claim}:
-                return Claim(found)
+            case {"found": "created", "claim": str(claim)} if claim in claims:
+                return None, Claim(claim)
+            case {"found": str(found), "claim": str(claim)} if {found, claim} <= claims:
+                return Claim(found), Claim(claim)
             case unexpected:
                 raise Unknown(f"the fence answered {unexpected!r}")
 

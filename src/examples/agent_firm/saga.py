@@ -100,12 +100,25 @@ def saga(legs: Sequence[Leg]) -> Callable[[], Effect[Ended]]:
     return lambda: _run(legs)
 
 
+def resumed(
+    legs: Sequence[Leg], landed: Mapping[str, Any], leg: str
+) -> Callable[[], Effect[Ended]]:
+    """The program that continues a saga of `legs` that ended unlanded at the retriable leg
+    `leg`, with `landed` as what the legs before it landed: it runs `leg` and the legs after it,
+    all retriable, so nothing it runs is compensated."""
+    match [i for i, held in enumerate(legs) if held.name == leg]:
+        case [at] if legs[at].kind is LegKind.RETRIABLE:
+            return lambda: _run(legs[at:], dict(landed))
+        case _:
+            raise SagaOrder(f"a saga continues at one of its retriable legs, not {leg!r}")
+
+
 def legs_of(legs: Sequence[Leg]) -> list[tuple[str, LegKind]]:
     return [(leg.name, leg.kind) for leg in legs]
 
 
-def _run(legs: Sequence[Leg]) -> Effect[Ended]:
-    landed: dict[str, Any] = {}
+def _run(legs: Sequence[Leg], landed: dict[str, Any] | None = None) -> Effect[Ended]:
+    landed = {} if landed is None else landed
     for leg in legs:
         retriable = leg.kind is LegKind.RETRIABLE
         seen = MappingProxyType(landed)

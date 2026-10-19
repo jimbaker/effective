@@ -14,6 +14,7 @@ answers them.
 | `create` of a key                        | holds it, and refuses a module and name held   |
 | `create` of a server action              | holds its name and code                        |
 | `run` of the fence action                | answers as `FENCE` does, in one transaction    |
+| `js_assign_outstanding_line`             | matches an entry line, as a person does        |
 | `run` of an action holding other code    | raises, since only `FENCE`'s semantics run     |
 
 The fence's run is `FENCE`'s semantics written in Python; its text is run by the live Odoo only,
@@ -24,7 +25,7 @@ payment; a search answers in id order.
 """
 
 import xmlrpc.client
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -117,6 +118,8 @@ class ScriptedOdoo:
     claims: dict[tuple[Claim, str], int] = field(default_factory=dict)
     """The invoice each claim on an apply's key was written for, by what it records and the
     key's name."""
+    holds: set[tuple[str, int]] = field(default_factory=set)
+    """Each match an applied key holds, by the key's name and the match."""
     actions: dict[int, dict[str, Any]] = field(default_factory=dict)
     locked: str | None = None
     """The last day of the locked periods."""
@@ -173,32 +176,54 @@ class ScriptedOdoo:
             )
         name, invoice, line = ask["name"], ask["invoice"], ask["line"]
         owed = self.moves[invoice].receivables
-        joins = [m.id for m in self.matches.values() if line in (m.debit, m.credit)]
-        joins = [
-            id for id in joins if {self.matches[id].debit, self.matches[id].credit} & set(owed)
-        ]
+        joins = self._joins(line, owed)
         held = [claim for claim in Claim if (claim, name) in self.claims]
+        ended = [claim for claim in held if claim in {Claim.UNDONE, Claim.RELEASED}]
         mine: Claim = Claim.APPLIED
         found: str
-        if Claim.UNDONE in held:
-            found = Claim.UNDONE
+        if ended:
+            found = ended[0]
         elif held and ask["op"] == "apply":
             found = held[0]
         elif ask["op"] == "unapply":
-            mine, found = Claim.UNDONE, "created"
-            for id in joins:
-                del self.matches[id]
+            mine, found = self._release(name, joins), "created"
         elif joins:
             found = Claim.APPLIED
         elif self._owes(invoice) and self._residual(line):
             for receivable in owed:
                 self._assign(receivable, line)
-            found = "created"
+            joins, found = self._joins(line, owed), "created"
         else:
             mine = found = Claim.REFUSED
         if found not in held:
             self.claims[mine, name] = invoice
-        return {"found": str(found)}
+            if mine is Claim.APPLIED:
+                self.holds |= {(name, id) for id in joins}
+        return {"found": str(found), "claim": str(found if found in held else mine)}
+
+    def _joins(self, line: int, owed: Iterable[int]) -> list[int]:
+        """The matches joining `line` to any of the lines `owed`."""
+        return [
+            m.id
+            for m in self.matches.values()
+            if line in (m.debit, m.credit) and {m.debit, m.credit} & set(owed)
+        ]
+
+    def _release(self, name: str, joins: Collection[int]) -> Claim:
+        """Release the holds of the key `name` on `joins`, removing each match no other key
+        holds, and the claim that records which."""
+        released = {(key, id) for key, id in self.holds if key == name and id in joins}
+        self.holds -= released
+        kept = {id for _, id in self.holds}
+        removed = [id for _, id in released if id not in kept]
+        for id in removed:
+            self._unmatch(id)
+        return Claim.UNDONE if removed else Claim.RELEASED
+
+    def _unmatch(self, match: int) -> None:
+        """Remove a match, and every hold on it, as Odoo deletes a record's external ids."""
+        del self.matches[match]
+        self.holds = {(key, id) for key, id in self.holds if id != match}
 
     def _owes(self, invoice: int) -> Decimal:
         return sum((self._residual(line) for line in self.moves[invoice].receivables), Decimal(0))
@@ -215,6 +240,10 @@ class ScriptedOdoo:
                 return id
             case "account.move", "load", (fields, [row]):
                 return self._load(dict(zip(fields, row, strict=True)))
+            case "account.move", "js_assign_outstanding_line", ([invoice], int(line)):
+                for receivable in self.moves[invoice].receivables:
+                    self._assign(receivable, line)
+                return True
             case "account.move", "action_post", ([*moves],):
                 for move in moves:
                     self._post(self.moves[move])

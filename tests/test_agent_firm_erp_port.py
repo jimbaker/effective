@@ -13,13 +13,16 @@ makes, before the call or after the server committed it.
 | an undo's claim         | an undo lands once per apply it names                                |
 | the fence's code        | an action under the fence's name holding other code is never run     |
 | matches move            | the fence reads the matches as it acts, not as the adapter read them |
-| round advance           | an earlier round's undo of an adopted match: a strict xfail          |
+| a shared match          | an undo removes a match at the last release only, and says which     |
 | installments            | a payment applies across an invoice's installments, and unapplies    |
 """
 
 import re
 import threading
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -52,8 +55,10 @@ from examples.agent_firm.erp.port import (
     Kind,
     Posted,
     PostMemo,
+    Read,
     Refused,
     Reverse,
+    Statement,
     Unapplied,
     Unapply,
     Unknown,
@@ -206,6 +211,7 @@ REFUSED = {
     ),
     "an unapply of nothing": Unapply(entry=PAYMENT, invoice="INV-9999", undoes="an apply"),
     "a payment unapplied from itself": Unapply(entry=PAYMENT, invoice=PAYMENT, undoes="an apply"),
+    "a read of an invoice nobody holds": Read(invoice="INV-9999"),
 }
 
 
@@ -226,6 +232,31 @@ def test_a_refusal_is_an_answer_and_writes_nothing(arm, op):
     assert (erp.residual(CLEAN_INVOICE), erp.residual(CLEAN.payment.id)) == (50000, 50000)
 
 
+@pytest.mark.conformance
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+def test_a_read_answers_the_books_as_they_stand_under_any_key(arm):
+    """A read lands nothing, so one key asked again reads what moved since."""
+    erp, key = OdooErp(*opened(arm, [SLA_CAP])()), fresh("the read")
+
+    def read() -> tuple[Decimal, list[Kind]]:
+        match erp.perform(Read(invoice=INVOICE), key):
+            case Statement(owed=owed, entries=entries):
+                return owed, [entry.kind for entry in entries]
+            case unexpected:
+                raise AssertionError(unexpected)
+
+    assert read() == (100000, [Kind.INVOICE, Kind.PAYMENT])
+    _applied_under(erp, fresh("the apply"))
+    match erp.perform(MEMO, fresh("the memo")):
+        case Posted(entry=memo):
+            erp.perform(Apply(entry=memo, invoice=INVOICE), fresh("the memo's apply"))
+        case unexpected:
+            raise AssertionError(unexpected)
+    assert read() == (2000, [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO])
+    assert erp.keyed(INVOICE) == 1
+
+
 def _applied_under(erp: OdooErp, key: str) -> Unapply:
     """The payment applied under `key`, and the undo that names it."""
     assert _found(erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key)) is Found.CREATED
@@ -235,6 +266,25 @@ def _applied_under(erp: OdooErp, key: str) -> Unapply:
 def _applied_under_key(erp: OdooErp, key: str) -> str:
     """The payment applied under `key`, and the key."""
     return _applied_under(erp, key).undoes
+
+
+def _removed(answer: ErpResult) -> bool:
+    match answer:
+        case Unapplied(removed=bool(removed)):
+            return removed
+        case unexpected:
+            raise AssertionError(unexpected)
+
+
+def _matched_by_a_person(erp: OdooErp, invoice: str = INVOICE) -> None:
+    """The payment matched against `invoice` in Odoo, as a person matches it, with no claim."""
+    (line,) = erp._receivables(erp.documents[PAYMENT])
+    owed = erp.residual(invoice)
+    with suppress(Unknown):
+        erp.transport.call(
+            "account.move", "js_assign_outstanding_line", [erp._move(invoice)], line
+        )
+    assert erp.residual(invoice) < owed
 
 
 @pytest.mark.conformance
@@ -254,15 +304,14 @@ def test_an_apply_lands_nothing_after_the_undo_naming_it(arm):
 @pytest.mark.conformance
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
-def test_an_apply_lands_once_per_key_whatever_moved_since(arm):
-    """An undo naming another apply removes the match, and the first apply's key, asked again,
-    answers that it landed and matches nothing."""
+def test_an_undo_naming_an_apply_that_never_landed_removes_nothing(arm):
+    """The match stands, and the key that made it, asked again, answers that it landed."""
     erp, key = OdooErp(*opened(arm, [SLA_CAP])()), fresh("the apply")
     _applied_under(erp, key)
     another = Unapply(entry=PAYMENT, invoice=INVOICE, undoes=fresh("another apply"))
-    erp.perform(another, fresh("the unapply"))
+    assert _removed(erp.perform(another, fresh("the unapply"))) is False
     found = _found(erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key))
-    assert (found, erp.keyed(INVOICE), erp.residual(INVOICE)) == (Found.EXISTING, 0, 100000)
+    assert (found, erp.keyed(INVOICE), erp.residual(INVOICE)) == (Found.EXISTING, 0, 3000)
 
 
 @pytest.mark.conformance
@@ -300,20 +349,74 @@ def test_a_refused_apply_answers_once_per_key_whatever_moved_since(arm):
 @pytest.mark.parametrize("arm", ERPS)
 def test_an_apply_that_found_another_keys_match_lands_nothing_after_its_undo(arm):
     """The apply under the key finds the match another key made and answers `EXISTING`; its undo
-    removes that match, and the key asked again lands nothing."""
+    releases that match, which the other key still holds, and the key asked again lands nothing."""
     erp, key = OdooErp(*opened(arm, [SLA_CAP])()), fresh("the apply")
     _applied_under(erp, fresh("another apply"))
     apply = Apply(entry=PAYMENT, invoice=INVOICE)
     assert _found(erp.perform(apply, key)) is Found.EXISTING
     erp.perform(Unapply(entry=PAYMENT, invoice=INVOICE, undoes=key), fresh("the unapply"))
     assert isinstance(erp.perform(apply, key), Refused)
+    assert (erp.residual(INVOICE), erp.residual(PAYMENT)) == (3000, 0)
+
+
+@pytest.mark.conformance
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+def test_an_unapply_says_whether_it_removed_the_match(arm):
+    """Of two keys holding one match, the first undo releases it and the second removes it; each
+    undo, asked again, answers as it did."""
+    erp, first, second = OdooErp(*opened(arm, [SLA_CAP])()), fresh("the apply"), fresh("another")
+    _applied_under(erp, first)
+    assert _found(erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), second)) is Found.EXISTING
+    undos = [
+        (Unapply(entry=PAYMENT, invoice=INVOICE, undoes=key), fresh("the unapply"))
+        for key in (first, second)
+    ]
+    assert [_removed(erp.perform(*undo)) for undo in undos] == [False, True]
+    assert [_removed(erp.perform(*undo)) for undo in undos] == [False, True]
     assert (erp.residual(INVOICE), erp.residual(PAYMENT)) == (100000, 97000)
 
 
-ROUND_ADVANCE = pytest.mark.xfail(
-    reason="an earlier round's undo removes a match a later round adopted: round advance decides",
-    strict=True,
-)
+@pytest.mark.conformance
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+def test_an_undo_answers_its_removal_beside_a_match_it_never_held(arm):
+    """The payment holds the second installment, a person matches it to the first, and the
+    payment's undo removes only the match it held."""
+    erp, invoice = another_invoice(arm, Decimal(1000), installments=True)
+    match erp.perform(MEMO.model_copy(update={"amount": Decimal(300)}), fresh("the memo")):
+        case Posted(entry=memo):
+            pass
+        case unexpected:
+            raise AssertionError(unexpected)
+    first, second = fresh("the memo's apply"), fresh("the payment's apply")
+    erp.perform(Apply(entry=memo, invoice=invoice), first)
+    erp.perform(Apply(entry=PAYMENT, invoice=invoice), second)
+    erp.perform(Unapply(entry=memo, invoice=invoice, undoes=first), fresh("the memo's undo"))
+    assert erp.residual(invoice) == 300
+    _matched_by_a_person(erp, invoice)
+    undo = Unapply(entry=PAYMENT, invoice=invoice, undoes=second)
+    match erp.perform(undo, fresh("the payment's undo")):
+        case Unapplied(found=Found.CREATED, removed=True):
+            pass
+        case unexpected:
+            raise AssertionError(unexpected)
+    assert erp.residual(invoice) == 700
+
+
+@pytest.mark.conformance
+@pytest.mark.adversarial
+@pytest.mark.parametrize("arm", ERPS)
+def test_the_last_release_removes_a_match_a_person_made(arm):
+    """A compensation undoes the books to what they were before the claims, and the ERP cannot
+    tell an adopted match's history from its own."""
+    transport, documents = opened(arm, [SLA_CAP])()
+    erp, key = OdooErp(transport, documents), fresh("the apply")
+    _matched_by_a_person(erp)
+    assert _found(erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key)) is Found.EXISTING
+    undo = Unapply(entry=PAYMENT, invoice=INVOICE, undoes=key)
+    assert _removed(erp.perform(undo, fresh("the unapply"))) is True
+    assert (erp.residual(INVOICE), erp.residual(PAYMENT)) == (100000, 97000)
 
 
 @dataclass
@@ -361,11 +464,9 @@ def test_an_undo_removes_the_apply_that_lands_before_its_fence_runs(arm):
 @pytest.mark.conformance
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
-@ROUND_ADVANCE
 def test_an_earlier_rounds_undo_leaves_the_match_a_later_round_adopted(arm):
-    """Round 0 applies, round 1 finds that match and claims it, then round 0's undo arrives. The
-    acceptance pin of round advance, which decides whether a round may start while an earlier one
-    is compensating."""
+    """Round 0 applies, round 1 finds that match and claims it, then round 0's undo arrives: it
+    releases round 0's claim and leaves the match round 1 holds."""
     erp, earlier, later = OdooErp(*opened(arm, [SLA_CAP])()), fresh("round 0"), fresh("round 1")
     apply = Apply(entry=PAYMENT, invoice=INVOICE)
     erp.perform(apply, earlier)
@@ -385,6 +486,119 @@ def test_an_apply_that_finds_another_keys_match_claims_its_own_key(arm):
     erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key)
     domain = [("module", "=", Claim.APPLIED.value), ("name", "=", name_of(key))]
     assert transport.call("ir.model.data", "search_count", domain) == 1
+
+
+def _paused(transport: Transport, after: str) -> int:
+    """A server action running `FENCE` with its transaction held open for two seconds after the
+    first line that starts `after`. A sleep inside the server is the only order a test can impose
+    between two transactions Odoo runs, since no event crosses its RPC boundary."""
+    lines = FENCE.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.lstrip().startswith(after))
+    indent = lines[at][: len(lines[at]) - len(lines[at].lstrip())]
+    lines.insert(at + 1, f'{indent}env.cr.execute("SELECT pg_sleep(2)")')
+    code = "\n".join(lines) + "\n"
+    (model,) = transport.call("ir.model", "search", [("model", "=", "account.move")])
+    held = {"name": f"paused {uuid4().hex}", "model_id": model, "state": "code", "code": code}
+    return transport.call("ir.actions.server", "create", held)
+
+
+PAUSED = """
+env.cr.execute(
+    "SELECT count(*) FROM pg_stat_activity"
+    " WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(2)%'"
+)
+action = {"paused": env.cr.fetchone()[0]}
+"""
+"""A server action answering how many fence runs are inside their pause."""
+
+
+def _inside_its_pause(transport: Transport) -> None:
+    """Return once a paused fence run's transaction is open, inside its pause."""
+    (model,) = transport.call("ir.model", "search", [("model", "=", "account.move")])
+    held = {"name": f"pause probe {uuid4().hex}", "model_id": model, "state": "code"}
+    probe = transport.call("ir.actions.server", "create", held | {"code": PAUSED})
+    deadline = time.monotonic() + TIMEOUT
+    try:
+        while transport.call("ir.actions.server", "run", [probe])["paused"] == 0:
+            assert time.monotonic() < deadline, "no fence run reached its pause"
+    finally:
+        transport.call("ir.actions.server", "unlink", [probe])
+
+
+def _fenced_by(action: int, op: str, key: str, documents: Mapping[str, int], line: int) -> Any:
+    """`action` run on a connection of its own, as the adapter runs the fence."""
+    context = {"op": op, "name": name_of(key), "invoice": documents[INVOICE], "line": line}
+    return XmlRpc.from_env().call("ir.actions.server", "run", [action], context=context)
+
+
+def _live() -> tuple[Transport, OdooErp, dict[str, int], int]:
+    transport, documents = opened("odoo", [SLA_CAP])()
+    erp = OdooErp(transport, documents)
+    (line,) = erp._receivables(documents[PAYMENT])
+    return transport, erp, documents, line
+
+
+@pytest.mark.adversarial
+def test_two_releases_of_one_match_at_once_remove_it():
+    """Each release, held open after it counts the other's hold, would leave the match to the
+    other; serialized, the later one is the last and removes it."""
+    transport, erp, documents, line = _live()
+    keys = [fresh("an apply") for _ in range(2)]
+    for key in keys:
+        erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key)
+    slow = _paused(transport, "kept = holds(")
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            runs = [pool.submit(_fenced_by, slow, "unapply", key, documents, line) for key in keys]
+            claims = sorted(run.result()["claim"] for run in runs)
+    finally:
+        transport.call("ir.actions.server", "unlink", [slow])
+    assert claims == [Claim.RELEASED, Claim.UNDONE]
+    assert erp.residual(INVOICE) == 100000
+
+
+@pytest.mark.adversarial
+def test_an_apply_and_its_undo_at_once_land_as_one_order_would():
+    """The apply, held open after it read no claim, and its undo run at once: in either order the
+    undo leaves the books unmatched, and the key asked again lands nothing."""
+    transport, erp, documents, line = _live()
+    key, slow = fresh("the apply"), _paused(transport, "joins = joined()")
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            apply = pool.submit(_fenced_by, slow, "apply", key, documents, line)
+            _inside_its_pause(transport)
+            erp.perform(Unapply(entry=PAYMENT, invoice=INVOICE, undoes=key), fresh("the undo"))
+            apply.result()
+    finally:
+        transport.call("ir.actions.server", "unlink", [slow])
+    assert erp.residual(INVOICE) == 100000
+    assert isinstance(erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), key), Refused)
+
+
+@pytest.mark.adversarial
+def test_an_adoption_beside_the_last_release_holds_a_match_that_stands():
+    """An adoption, held open after it read the match, and the release of the match's only other
+    claim run at once: the adopting key ends up holding a match that stands."""
+    transport, erp, documents, line = _live()
+    first, second = fresh("the first apply"), fresh("the adopting apply")
+    erp.perform(Apply(entry=PAYMENT, invoice=INVOICE), first)
+    slow = _paused(transport, "joins = joined()")
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            adoption = pool.submit(_fenced_by, slow, "apply", second, documents, line)
+            _inside_its_pause(transport)
+            undo = Unapply(entry=PAYMENT, invoice=INVOICE, undoes=first)
+            erp.perform(undo, fresh("the undo"))
+            adoption.result()
+    finally:
+        transport.call("ir.actions.server", "unlink", [slow])
+    domain = [("module", "=", Claim.HELD.value), ("name", "=like", f"{name_of(second)}.%")]
+    held = [
+        row["res_id"] for row in transport.call("ir.model.data", "search_read", domain, ["res_id"])
+    ]
+    standing = transport.call("account.partial.reconcile", "search", [("id", "in", held)])
+    assert held
+    assert sorted(standing) == sorted(held)
 
 
 @pytest.mark.adversarial
@@ -452,14 +666,17 @@ def test_a_fence_action_holding_other_code_is_never_run():
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
 def test_a_payment_applies_across_an_invoices_installments(arm):
+    """Two keys hold both installments' matches; the first undo releases them, the second
+    removes them."""
     erp, invoice = another_invoice(arm, Decimal(1000), installments=True)
     apply, keys = Apply(entry=PAYMENT, invoice=invoice), [fresh("the apply") for _ in range(2)]
-    unapply = Unapply(entry=PAYMENT, invoice=invoice, undoes=keys[0])
     applied = [_found(erp.perform(apply, key)) for key in keys]
     assert applied == [Found.CREATED, Found.EXISTING]
     assert (erp.residual(invoice), erp.residual(PAYMENT)) == (0, 96000)
-    assert _found(erp.perform(unapply, fresh("the unapply"))) is Found.CREATED
-    assert (erp.residual(invoice), erp.residual(PAYMENT)) == (1000, 97000)
+    for key, books in zip(keys, [(0, 96000), (1000, 97000)], strict=True):
+        unapply = Unapply(entry=PAYMENT, invoice=invoice, undoes=key)
+        assert _found(erp.perform(unapply, fresh("the unapply"))) is Found.CREATED
+        assert (erp.residual(invoice), erp.residual(PAYMENT)) == books
 
 
 @pytest.mark.conformance

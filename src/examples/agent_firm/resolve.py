@@ -9,8 +9,9 @@
 | authorize | `approval` parks the credit for a principal other than the proposer      |
 | act       | `settle` posts the credit and the payment by saga                        |
 
-A matched case settles with no credit and asks nobody. Every model call is a step, so a resolution
-resumed after its approval replays them all and asks none again.
+A matched case settles with no credit and asks nobody. A refused approval is the resolution's
+answer, `Denied`. Every model call is a step, so a resolution resumed after its approval replays
+them all and asks none again.
 """
 
 from collections.abc import Callable
@@ -26,10 +27,12 @@ from effective.api import Effect
 from effective.channels import Field, Repair
 from effective.govern import (
     Ask,
+    BudgetRefused,
     GateState,
     Park,
     Policy,
     Proceed,
+    Refused,
     answers_for,
     fuse_prompt,
     park,
@@ -40,7 +43,7 @@ from effective.govern import Verdict as Gating
 from effective.keys import Index, Key, Name, Run, Segment, compose_key
 from effective.ops import AppendLedgerRow, LedgerRow, WorkflowOp
 
-from .ar import INVARIANTS, TERMS, Round, Settlement, settle
+from .ar import INVARIANTS, TERMS, Round, Settlement, claim_of, settle
 from .cases import Case
 from .engage import Critique, Proposal, asked, engage, evidence, owed
 from .knowledge import NO_RULES, Knowledge, load_knowledge
@@ -49,6 +52,9 @@ from .reconcile import reconcile
 
 APPROVAL = "approve-credit"
 """The policy an approver answers, and the name its answer comes back under."""
+
+NOT_APPROVED = "the settlement was not approved"
+"""Why the approval refuses a claim it was not given."""
 
 ASKED = "approval_asked"
 """The kind of the ledger row that carries a park's ask to whoever answers it."""
@@ -69,7 +75,13 @@ class Stopped(BaseModel):
     reason: str
 
 
-type Resolved = Settlement | Stopped
+class Denied(BaseModel):
+    """A resolution whose credit the approver refused: it posted nothing and holds no round."""
+
+    reason: str
+
+
+type Resolved = Settlement | Stopped | Denied
 
 
 def proposal_brief(case: Case, broken: tuple[str, ...], knowledge: Knowledge) -> Template:
@@ -132,11 +144,32 @@ def resolve(
             case Stopped() as stopped:
                 return stopped
             case Proposal(credit=credit, rationale=rationale):
-                return (yield from settle(case, credit, rationale, round)())
+                settled = settle(case, credit, rationale, round)
+                return (yield from approved(settled, claim_of(case, round)))
             case unreachable:
                 assert_never(unreachable)
 
     return program
+
+
+def approved(
+    settlement: Callable[[], Effect[Settlement]], claim: Key
+) -> Effect[Settlement | Denied]:
+    """`settlement`, or `Denied` when the approval refuses its `claim` of the round, so a denial
+    is one case's answer and its siblings settle. Any other refusal is raised: a refused spend,
+    since every later metered op is refused the same way, and another policy's refusal."""
+    try:
+        return (yield from settlement())
+    except BudgetRefused:
+        raise
+    except Refused as refused:
+        match refused.op:
+            case AppendLedgerRow(row=row) if (
+                row.event_id == claim and str(refused) == NOT_APPROVED
+            ):
+                return Denied(reason=str(refused))
+            case _:
+                raise
 
 
 def admitted(manifest: Manifest) -> Callable[[], Effect[Resolved]]:
@@ -190,7 +223,7 @@ def approval(proposer: Segment) -> Policy:
             case [*_, {"decision": "approve"}], _:
                 return Proceed()
             case _:
-                return refuse("the settlement was not approved")
+                return refuse(NOT_APPROVED)
 
     return approve
 

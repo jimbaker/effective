@@ -17,6 +17,7 @@ collection once, however a crash lands. Each control is a row of the table in
 from collections import Counter
 from collections.abc import Callable, Mapping
 from decimal import Decimal
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -24,16 +25,19 @@ import pytest
 from _conformance import Fault, FaultPosition, at_every_op
 from _odoo import ERPS, books, fresh_round
 
-from effective.api import Effect, step
+from effective.api import Effect, claim_ledger, step
 from effective.budget import Grant
 from effective.contexts import RecordingCtx
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Exceeded
 from effective.handlers.durable import DurableHandler
-from examples.agent_firm.ar import APPLY, REMIND, settle, settlement
+from effective.keys import Index, Key, Name, Subject, compose_key
+from effective.ops import LedgerRow
+from examples.agent_firm.ar import APPLY, REMIND, TERMS, Round, settle, settlement
 from examples.agent_firm.cases import SLA_CAP
 from examples.agent_firm.erp.port import Apply, Erp, Kind
 from examples.agent_firm.erp.scripted import ScriptedOdoo
+from examples.agent_firm.firm import Closed, advance
 from examples.agent_firm.saga import (
     RETRIES,
     Compensated,
@@ -57,10 +61,13 @@ def _world(erp: Erp, notify=lambda args: OK, remind=lambda args: OK) -> World:
     return World(erp=erp, tools={"notify": notify, REMIND: remind})
 
 
-def _run(backend, world: World, fault: Fault) -> Any:
-    run_id = f"r-{uuid4().hex[:8]}"
+def _run(backend, world: World, fault: Fault, round: Round | None = None) -> Any:
     reason = "clause 4.2 caps service credits at $1,000 a month"
-    program = settle(SLA_CAP, CREDIT, reason, fresh_round())
+    return _driven(backend, world, fault, settle(SLA_CAP, CREDIT, reason, round or fresh_round()))
+
+
+def _driven(backend, world: World, fault: Fault, program: Callable[[], Effect[Any]]) -> Any:
+    run_id = f"r-{uuid4().hex[:8]}"
     backend.register(f"settle-{run_id}", lambda _run_id: program(), world.domain(), fault, ())
     snapshot = backend.run_until_result(backend.spawn(f"settle-{run_id}", run_id))
     assert snapshot.state == "completed", snapshot
@@ -94,6 +101,109 @@ def _bounced(args: Mapping[str, Any]) -> dict[str, Any]:
     return {"ok": False, "reason": "the customer's AP address bounced"}
 
 
+def _closed(args: Mapping[str, Any]) -> dict[str, Any]:
+    return {"ok": False, "reason": "AP is closed today"}
+
+
+def _ended(round: Round, continued: int = 0) -> Key:
+    """Where the ledger holds how `SLA_CAP`'s settlement in `round` ended, or how its
+    `continued`th continuation did."""
+    books, invoice, payment = Name(round.books), Subject(INVOICE), Subject(PAYMENT)
+    return compose_key(
+        t"settlement-ended:{books},{invoice},{payment},round={Index(round.number):default=0},"
+        t"continued={Index(continued):default=0}"
+    )
+
+
+def _terms(round: Round) -> Key:
+    """Where the ledger holds `SLA_CAP`'s claim of `round`."""
+    books, invoice, payment = Name(round.books), Subject(INVOICE), Subject(PAYMENT)
+    return compose_key(t"settle:{books},{invoice},{payment},round={Index(round.number):default=0}")
+
+
+ENDINGS = {
+    "completed": {},
+    "compensated": {"notify": _bounced},
+    "unlanded": {"remind": _closed},
+}
+"""The tools that end a settlement each way."""
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_a_settlement_appends_its_ending_to_the_ledger(backend, ending):
+    round = fresh_round()
+    _run(
+        backend,
+        _world(ScriptedOdoo.seeded([SLA_CAP]).erp(), **ENDINGS[ending]),
+        Fault(None),
+        round,
+    )
+    assert (backend.ledger_read(_ended(round)) or {}).get("ending") == ending
+
+
+def _claimed(backend, round: Round) -> None:
+    """`round` claimed by a settlement that has not ended."""
+    row = LedgerRow(
+        event_id=_terms(round), kind=TERMS, credit="1000.00", claimant="another settlement"
+    )
+    name = f"claim-{uuid4().hex[:8]}"
+    backend.register(name, lambda _run_id: claim_ledger(row), World().domain(), Fault(None), ())
+    assert backend.run_until_result(backend.spawn(name, name)).state == "completed"
+
+
+@pytest.mark.adversarial
+def test_a_round_waits_for_the_earlier_round_to_end(backend):
+    earlier = fresh_round()
+    _claimed(backend, earlier)
+    world = _world(ScriptedOdoo.seeded([SLA_CAP]).erp())
+    result = _run(backend, world, Fault(None), Round(earlier.books, 1))
+    assert (result["earlier"], result.get("ending"), world.calls["erp"]) == (0, None, 0)
+
+
+@pytest.mark.adversarial
+@pytest.mark.parametrize("ending", ["completed", "unlanded"])
+def test_a_round_does_not_open_after_one_that_completed_or_ended_unlanded(backend, ending):
+    """A completed case is settled, and an unlanded one continues its own round, so the next
+    round of either would credit the case again."""
+    earlier, erp = fresh_round(), ScriptedOdoo.seeded([SLA_CAP]).erp()
+    _run(backend, _world(erp, **ENDINGS[ending]), Fault(None), earlier)
+    world = _world(erp)
+    result = _run(backend, world, Fault(None), Round(earlier.books, 1))
+    assert (result, world.calls["erp"]) == ({"earlier": 0, "ending": ending}, 0)
+
+
+@pytest.mark.adversarial
+def test_an_unlanded_settlement_continues_at_its_leg_under_fresh_attempts(backend):
+    """The continuation reminds the customer once more, under keys no earlier attempt held,
+    touches no entry, and appends its own ending."""
+    answers = iter([{"ok": False, "reason": "AP is closed today"}] * RETRIES + [OK])
+    round, erp = fresh_round(), ScriptedOdoo.seeded([SLA_CAP]).erp()
+    world = _world(erp, remind=lambda args: next(answers))
+    assert Unlanded.model_validate(_run(backend, world, Fault(None), round))
+    calls = Counter(world.calls)
+    advanced = partial(advance, SLA_CAP, round.books, None, critic=False)
+    closed = Closed.model_validate(_driven(backend, world, Fault(None), advanced))
+    assert closed == Closed(case=INVOICE, round=0)
+    assert (world.calls["erp"] - calls["erp"], world.calls[REMIND] - calls[REMIND]) == (0, 1)
+    assert (backend.ledger_read(_ended(round, 1)) or {}).get("ending") == "completed"
+    assert _kinds(erp) == [Kind.INVOICE, Kind.PAYMENT, Kind.CREDIT_MEMO]
+
+
+@pytest.mark.adversarial
+def test_a_round_starts_once_the_earlier_round_ended(backend):
+    earlier, erp = fresh_round(), ScriptedOdoo.seeded([SLA_CAP]).erp()
+    assert Compensated.model_validate(_run(backend, _world(erp, _bounced), Fault(None), earlier))
+    result = _run(backend, _world(erp), Fault(None), Round(earlier.books, 1))
+    assert set(Completed.model_validate(result).landed) == {
+        "credit-memo",
+        APPLY,
+        "apply-memo",
+        "notify",
+        REMIND,
+    }
+
+
 @pytest.mark.adversarial
 @pytest.mark.parametrize("arm", ERPS)
 @pytest.mark.parametrize("position", list(FaultPosition))
@@ -112,7 +222,7 @@ def test_a_settlement_posts_once_whatever_a_crash_interrupts(backend, position, 
             2000,
         ), k
 
-    assert _swept(backend, position, lambda: _world(erp_of()), check) == 8
+    assert _swept(backend, position, lambda: _world(erp_of()), check) == 9
 
 
 @pytest.mark.adversarial
@@ -133,7 +243,7 @@ def test_a_rejected_notice_unapplies_the_memo_and_the_payment_then_reverses_the_
         assert (erp.residual(memo.id), erp.residual(reversal.id)) == (0, 0), k
         assert (erp.residual(PAYMENT), erp.residual(INVOICE)) == (97000, 100000), k
 
-    assert _swept(backend, position, lambda: _world(erp_of(), _bounced), check) == 10
+    assert _swept(backend, position, lambda: _world(erp_of(), _bounced), check) == 11
 
 
 def _spent() -> World:
@@ -159,7 +269,7 @@ def test_a_rejected_leg_undoes_only_the_legs_that_landed(backend, position):
         ), k
         assert erp.residual(INVOICE) == 100000, k
 
-    assert _swept(backend, position, _spent, check) == 6
+    assert _swept(backend, position, _spent, check) == 7
 
 
 @pytest.mark.adversarial
@@ -238,7 +348,7 @@ def test_the_customer_hears_once_whatever_a_crash_interrupts(backend, position):
     def check(result, erp: Erp, k):
         assert heard == {"notify": 1, REMIND: 1}, k
 
-    assert _swept(backend, position, world, check) == 8
+    assert _swept(backend, position, world, check) == 9
 
 
 def test_a_reversal_after_its_period_locked_posts_in_the_open_period(backend):

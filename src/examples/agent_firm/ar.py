@@ -15,8 +15,8 @@ first, so a memo is unapplied before it is reversed, which a matched entry requi
 reads, then claims, its round on the ledger, so one settlement owns the round and a second
 performs nothing. Each step names the fact its effect is about: the case's settlement in its
 round, the leg and the attempt, so a step resumed after a crash reaches the ERP or the customer
-under the key it was first sent with. A case reopened after a settlement that did not complete is
-resolved in the next round.
+under the key it was first sent with. A settlement appends how it ended once its saga does, and a
+round after the first starts only once the round before it has ended.
 """
 
 from collections.abc import Callable
@@ -43,12 +43,26 @@ from .erp.port import (
     ErpResult,
     Posted,
     PostMemo,
+    Read,
     Refused,
     Reverse,
+    Statement,
     Unapplied,
     Unapply,
 )
-from .saga import Ended, Landed, Leg, LegKind, Outcome, Rejected, saga
+from .saga import (
+    Compensated,
+    Completed,
+    Ended,
+    Landed,
+    Leg,
+    LegKind,
+    Outcome,
+    Rejected,
+    Unlanded,
+    resumed,
+    saga,
+)
 
 APPLY, UNAPPLY = "apply-payment", "unapply-payment"
 """The step names of the payment's apply and of its undo."""
@@ -63,6 +77,9 @@ owed."""
 
 TERMS = "settlement-terms"
 """The ledger kind of a round's claimed credit."""
+
+ENDED = "settlement-ended"
+"""The ledger kind of how a round's settlement ended, appended after its saga."""
 
 CLAIMANT = "claimant"
 """The tool that names a settlement: it answers with the idempotency key minted for its call."""
@@ -80,8 +97,7 @@ class Unabsorbed(ValueError):
 
 @dataclass(frozen=True)
 class Round:
-    """Which settlement of a case a resolution makes: the books it is kept in, and its number. A
-    case reopened after a settlement that did not complete is resolved in the next round."""
+    """Which settlement of a case a resolution makes: the books it is kept in, and its number."""
 
     books: str
     number: int = 0
@@ -97,20 +113,66 @@ class Superseded(BaseModel):
     held: Decimal
 
 
-type Settlement = Ended | Superseded
+class Unopened(BaseModel):
+    """A settlement whose round may not start, since the round before it, `earlier`, did not end
+    compensated: it is still running when `ending` is `None`, and otherwise its case is settled or
+    continues in that round. It performs nothing."""
+
+    earlier: int
+    ending: str | None
 
 
-def _settlement_of(case: Case, round: Round) -> Key:
+type Settlement = Ended | Superseded | Unopened
+
+
+def claim_of(case: Case, round: Round) -> Key:
+    """Where the ledger holds the claim of `round` for `case`: its terms."""
     books, invoice, payment = Name(round.books), Subject(case.invoice.id), Subject(case.payment.id)
     number = Index(round.number)
     return compose_key(t"settle:{books},{invoice},{payment},round={number:default=0}")
 
 
-def about(case: Case, round: Round, leg: str, attempt: int = 0) -> Named:
-    """The fact a leg's effect is about: the settlement of `case` in `round`, the leg, and its
-    attempt."""
-    settlement, named, tried = _settlement_of(case, round), Name(leg), Index(attempt)
-    return Named(compose_key(t"leg:{named},attempt={tried:default=0};{settlement:domain=address}"))
+def _ended_of(case: Case, round: Round, continued: int = 0) -> Key:
+    """Where the ledger holds how `round`'s settlement ended, or how its `continued`th
+    continuation did."""
+    books, invoice, payment = Name(round.books), Subject(case.invoice.id), Subject(case.payment.id)
+    number, again = Index(round.number), Index(continued)
+    return compose_key(
+        t"settlement-ended:{books},{invoice},{payment},"
+        t"round={number:default=0},continued={again:default=0}"
+    )
+
+
+def _ended_row(case: Case, round: Round, outcome: Ended, continued: int = 0) -> LedgerRow:
+    result = outcome.model_dump(mode="json")
+    held = _ended_of(case, round, continued)
+    return LedgerRow(event_id=held, kind=ENDED, ending=ending(outcome), result=result)
+
+
+def ending(ended: Ended) -> str:
+    """How a settlement ended, as its ledger row names it."""
+    match ended:
+        case Completed():
+            return "completed"
+        case Compensated():
+            return "compensated"
+        case Unlanded():
+            return "unlanded"
+        case unreachable:
+            assert_never(unreachable)
+
+
+def about(case: Case, round: Round, leg: str, attempt: int = 0, continued: int = 0) -> Named:
+    """The fact a leg's effect is about: the settlement of `case` in `round`, the leg, its
+    attempt, and the continuation of the settlement that asked it."""
+    settlement, named, tried = claim_of(case, round), Name(leg), Index(attempt)
+    again = Index(continued)
+    return Named(
+        compose_key(
+            t"leg:{named},attempt={tried:default=0},continued={again:default=0};"
+            t"{settlement:domain=address}"
+        )
+    )
 
 
 def key_of(fact: Named) -> str:
@@ -128,6 +190,8 @@ def performed(name: str, op: ErpOp, fact: Named) -> Effect[Outcome]:
             return Landed(value=entry)
         case Applied() | Unapplied():
             return Landed()
+        case Statement() as statement:
+            return Landed(value=statement)
         case Refused(reason=reason):
             return Rejected(reason=reason)
         case unreachable:
@@ -148,7 +212,12 @@ def _told(tool: str, args: dict[str, Any], fact: Named) -> Effect[Outcome]:
 
 
 def settlement(
-    case: Case, credit: Decimal, reason: str, round: Round, grantor: Grantor | None = None
+    case: Case,
+    credit: Decimal,
+    reason: str,
+    round: Round,
+    grantor: Grantor | None = None,
+    continued: int = 0,
 ) -> list[Leg]:
     """Credit `credit`, apply the payment and then the memo, tell the customer, and queue what is
     still owed, with more attempts at the collection as `grantor` grants them. The notice is the
@@ -208,7 +277,7 @@ def settlement(
         REMIND,
         LegKind.RETRIABLE,
         lambda attempt, _landed: _told(
-            REMIND, {"invoice": invoice, "owed": still_owed}, fact(REMIND, attempt)
+            REMIND, {"invoice": invoice, "owed": still_owed}, fact(REMIND, attempt, continued)
         ),
         grantor=grantor,
     )
@@ -219,17 +288,24 @@ def settlement(
 def settle(
     case: Case, credit: Decimal, reason: str, round: Round
 ) -> Callable[[], Effect[Settlement]]:
-    """The program that claims `round` for this settlement and settles it. The settlement names
-    itself by the key minted for its claimant step, which a replay reads back, and the round's
-    claim carries that name, so one settlement owns the round and recovers its own crashes. A
-    settlement reads the round before it claims, so one that finds the round held by another ends
-    `Superseded` before it claims or asks, whatever credit it holds. The claim decides: a round
-    claimed after the read supersedes this settlement at the claim, before any leg runs. The claim
-    commits the firm to the credit, so it is the op an approval of the credit gates."""
+    """The program that claims `round` for this settlement, settles it, and appends how it ended.
+    The claim carries the name minted for the claimant step, so one settlement owns the round, a
+    settlement finding another's claim ends `Superseded`, and the claim is the op an approval of
+    the credit gates. A round after the first opens only once the round before it ended
+    compensated."""
     run = saga(settlement(case, credit, reason, round))
-    settled = _settlement_of(case, round)
+    settled = claim_of(case, round)
+    earlier = Round(round.books, round.number - 1) if round.number else None
 
     def program() -> Effect[Settlement]:
+        if earlier is not None:
+            match (yield from _endings(case, earlier)):
+                case [*_, {"ending": "compensated"}]:
+                    pass
+                case [*_, {"ending": str(ended)}]:
+                    return Unopened(earlier=earlier.number, ending=ended)
+                case _:
+                    return Unopened(earlier=earlier.number, ending=None)
         call = CallTool(name=CLAIMANT, args={}, result_schema=str)
         claimant = yield from step(CLAIMANT, call, idempotency_key=Minted())
         terms = LedgerRow(
@@ -238,6 +314,7 @@ def settle(
             invoice=case.invoice.id,
             credit=_dollars(credit),
             deducted=_dollars(case.gap),
+            reason=reason,
             broken=[name for name, holds in INVARIANTS.items() if not holds(case)],
             claimant=claimant,
         )
@@ -252,9 +329,117 @@ def settle(
             return ended
         if (ended := superseded((yield from claim_ledger(terms)))) is not None:
             return ended
-        return (yield from run())
+        outcome = yield from run()
+        yield from claim_ledger(_ended_row(case, round, outcome))
+        return outcome
 
     return program
+
+
+class Uncontinued(BaseModel):
+    """A continuation that ran nothing, since the round's latest ending, `ending`, is not
+    unlanded, or nobody claimed the round when it is `None`."""
+
+    ending: str | None
+
+
+def resume(case: Case, round: Round) -> Callable[[], Effect[Ended | Uncontinued]]:
+    """The program that continues `round`'s settlement of `case` at the leg that did not land,
+    under the round's keys, numbered by the endings already on the ledger, and appends how that
+    ended. It reads the round's claim, for the credit and its reason, and the round's endings.
+    Only retriable legs remain, so a continuation posts nothing and undoes nothing."""
+
+    def program() -> Effect[Ended | Uncontinued]:
+        terms = yield from read_ledger(claim_of(case, round))
+        endings = yield from _endings(case, round)
+        match terms, endings:
+            case {"credit": str(credit), "reason": str(reason)}, [
+                *_,
+                {"ending": "unlanded", "result": result},
+            ]:
+                unlanded, continued = Unlanded.model_validate(result), len(endings)
+                legs = settlement(case, Decimal(credit), reason, round, continued=continued)
+                outcome = yield from resumed(legs, unlanded.landed, unlanded.leg)()
+                yield from claim_ledger(_ended_row(case, round, outcome, continued))
+                return outcome
+            case dict(), [*_, {"ending": str(ended)}]:
+                return Uncontinued(ending=ended)
+            case _:
+                return Uncontinued(ending=None)
+
+    return program
+
+
+@dataclass(frozen=True)
+class Unclaimed:
+    """The first round of a case nobody has claimed."""
+
+    round: Round
+
+
+@dataclass(frozen=True)
+class Claimed:
+    """A round claimed and not ended."""
+
+    round: Round
+
+
+@dataclass(frozen=True)
+class Done:
+    """A round whose settlement, or its last continuation, completed."""
+
+    round: Round
+
+
+@dataclass(frozen=True)
+class Unfinished:
+    """A round whose settlement, or its last continuation, ended unlanded."""
+
+    round: Round
+
+
+type Standing = Unclaimed | Claimed | Done | Unfinished
+
+
+def _endings(case: Case, round: Round) -> Effect[list[dict[str, Any]]]:
+    """How `round`'s settlement ended and how each continuation of it did, in order."""
+    endings: list[dict[str, Any]] = []
+    while (row := (yield from read_ledger(_ended_of(case, round, len(endings))))) is not None:
+        endings.append(row)
+    return endings
+
+
+def standing(case: Case, books: str) -> Effect[Standing]:
+    """What the ledger says of `case` in `books`, read round by round: a round that ended
+    compensated passes the case to the next."""
+    number = 0
+    while True:
+        round = Round(books, number)
+        if (yield from read_ledger(claim_of(case, round))) is None:
+            return Unclaimed(round)
+        match (yield from _endings(case, round)):
+            case []:
+                return Claimed(round)
+            case [*_, {"ending": "compensated"}]:
+                number += 1
+            case [*_, {"ending": "completed"}]:
+                return Done(round)
+            case [*_, {"ending": "unlanded"}]:
+                return Unfinished(round)
+            case unreadable:
+                raise ValueError(f"an ending the ledger cannot hold: {unreadable[-1]}")
+
+
+def statement(invoice: str) -> Effect[Statement]:
+    """The invoice's statement, read as a step, so a replay reads what the first attempt read."""
+    call = CallTool(
+        name="erp", args=Read(invoice=invoice).model_dump(mode="json"), result_schema=dict
+    )
+    match RESULTS.validate_python((yield from step("statement", call, idempotency_key=Minted()))):
+        case Statement() as read:
+            return read
+        case unexpected:
+            raise ValueError(f"the statement of {invoice} reads as {unexpected}")
 
 
 INVARIANTS = {

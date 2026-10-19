@@ -266,6 +266,7 @@ WORKFLOW_ROLE_SRCS: tuple[str, ...] = (
     "src/examples/agent_firm/ar.py",
     "src/examples/agent_firm/critic.py",
     "src/examples/agent_firm/engage.py",
+    "src/examples/agent_firm/firm.py",
     "src/examples/agent_firm/knowledge.py",
     "src/examples/agent_firm/reconcile.py",
     "src/examples/agent_firm/resolve.py",

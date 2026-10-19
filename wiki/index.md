@@ -48,6 +48,7 @@ models cite none, and state their invariants in their own words. Numbers with no
 | 0024 | Proposed | the walk: one mint, many interpreters |
 | 0025 | Accepted | race and quorum |
 | 0026 | Accepted | in-flight cancellation |
+| 0027 | Accepted | the firm settles to a fixpoint |
 
 ## Concepts
 

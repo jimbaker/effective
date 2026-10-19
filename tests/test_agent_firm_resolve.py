@@ -40,6 +40,7 @@ from effective.govern import (
     answers_for,
     govern,
     park,
+    refuse,
 )
 from effective.handlers.base import step_key
 from effective.keys import Index, Key, Name, Tag, compose_key
@@ -58,6 +59,7 @@ from examples.agent_firm.resolve import (
     APPROVAL,
     ASKED,
     RULED,
+    Denied,
     Stopped,
     announced,
     approval,
@@ -260,7 +262,7 @@ def test_a_second_resolution_with_another_credit_is_superseded_and_does_nothing(
 def test_a_denied_credit_leaves_its_round_to_a_corrected_resolution(backend, critique, critic):
     firm = _firm(critique)
     denied = _resolved(backend, firm, critic=critic, decision="deny")
-    assert "the settlement was not approved" in str(denied.failure)
+    assert Denied.model_validate(denied.result).reason == "the settlement was not approved"
     firm.world.critic = lambda op: (CritiqueWire.model_validate(CAPPED), Usage())
     corrected = _resolved(backend, firm)
     assert "notify" in Completed.model_validate(corrected.result).landed
@@ -295,33 +297,60 @@ def _rejects_first(name: str, firm: Firm, times: int):
     return tool
 
 
+def _closed_for_maintenance(op: WorkflowOp, state: GateState) -> Verdict:
+    """A policy beside the approval, refusing every claim of a round."""
+    return Proceed() if terms_of(op) is None else refuse("the books are closed for maintenance")
+
+
 @pytest.mark.adversarial
-@pytest.mark.parametrize(("leg", "times"), [("notify", 1), (REMIND, RETRIES)])
-def test_a_case_reopened_after_an_unfinished_settlement_settles_in_its_next_round(
-    backend, leg, times
-):
-    """A rejected notice compensates the settlement, and a collection out of attempts leaves it
-    unlanded. Resolved again in the same round, it does not land the leg, and asks nothing new of
-    it; in the next round it asks again."""
+def test_a_refusal_other_than_the_approvals_fails_the_resolution(backend):
+    firm, run_id = _firm(), f"r-{uuid4().hex[:8]}"
+    gate = govern(approval(PROPOSER), _closed_for_maintenance, gate="credit", run_id=run_id)
+    program = resolve(SLA_CAP, critic=True, round=firm.round)
+    backend.register(f"shut-{run_id}", lambda _: program(), firm.world.domain(), Fault(), (gate,))
+    snapshot = backend.run_until_result(backend.spawn(f"shut-{run_id}", run_id))
+    assert snapshot.state == "failed", snapshot
+    assert "closed for maintenance" in str(snapshot.failure)
+    assert _entries(firm) == []
+
+
+@pytest.mark.adversarial
+def test_a_compensated_case_settles_in_its_next_round(backend):
+    """A rejected notice compensates the settlement. Resolved again in the same round, it does not
+    land the notice, and asks nothing new of it; in the next round it asks again."""
     firm = _firm()
-    firm.world.tools = {**firm.world.tools, leg: _rejects_first(leg, firm, times)}
+    firm.world.tools = {**firm.world.tools, "notify": _rejects_first("notify", firm, 1)}
     for _ in range(2):
         unfinished = _resolved(backend, firm).result
-        assert leg not in unfinished.get("landed", {}), unfinished
+        assert "notify" not in unfinished.get("landed", {}), unfinished
     reopened = _resolved(backend, firm, round=replace(firm.round, number=1))
-    assert leg in Completed.model_validate(reopened.result).landed
-    assert [name for name, _ in firm.told].count(leg) == times + 1
+    assert "notify" in Completed.model_validate(reopened.result).landed
+    assert [name for name, _ in firm.told].count("notify") == 2
+
+
+@pytest.mark.adversarial
+def test_an_unlanded_case_opens_no_next_round_and_is_credited_once(backend):
+    """A collection out of attempts leaves the settlement unlanded, and its own round continues
+    it."""
+    firm = _firm()
+    firm.world.tools = {**firm.world.tools, REMIND: _rejects_first(REMIND, firm, RETRIES)}
+    assert REMIND not in _resolved(backend, firm).result.get("landed", {})
+    reopened = _resolved(backend, firm, round=replace(firm.round, number=1))
+    assert reopened.result == {"earlier": 0, "ending": "unlanded"}
+    assert (_memos(firm), [name for name, _ in firm.told].count("notify")) == ([1000], 1)
 
 
 def _branch_ledger(op: WorkflowOp) -> str | None:
     """A settlement's read or claim of its round, by the gather branch it runs in."""
     match op, current_placement():
-        case ReadLedgerRow(), placed if placed is not None and (
-            frames := branch_of(placed.stored())
+        case ReadLedgerRow(event_id=held), placed if (
+            held.terms()[0].tag == "settle"
+            and placed is not None
+            and (frames := branch_of(placed.stored()))
         ):
             return f"read in {frames[-1]}"
-        case AppendLedgerRow(claim=True), placed if placed is not None and (
-            frames := branch_of(placed.stored())
+        case AppendLedgerRow(claim=True, row=row), placed if (
+            row.kind == TERMS and placed is not None and (frames := branch_of(placed.stored()))
         ):
             return f"claim in {frames[-1]}"
         case _:
@@ -741,10 +770,10 @@ def test_the_customer_hears_and_owes_in_dollars_and_cents(backend):
 
 
 @pytest.mark.adversarial
-def test_a_denied_settlement_ends_the_resolution_and_posts_nothing(backend):
+def test_a_denied_settlement_is_the_resolutions_answer_and_posts_nothing(backend):
     firm = _firm()
     run = _resolved(backend, firm, decision="deny")
-    assert "the settlement was not approved" in str(run.failure)
+    assert Denied.model_validate(run.result) == Denied(reason="the settlement was not approved")
     assert _entries(firm) == []
 
 
@@ -765,7 +794,7 @@ def test_a_resolution_posts_once_whatever_a_crash_interrupts(backend, position, 
         assert firm.world.erp.residual(SLA_CAP.payment.id) == 0, k
         assert _rulers(backend, run.run_id) == [CONTROLLER], k
         crashes += 1
-    assert crashes == {FaultPosition.BEFORE_OP: 21, FaultPosition.AFTER_THUNK: 13}[position]
+    assert crashes == {FaultPosition.BEFORE_OP: 22, FaultPosition.AFTER_THUNK: 14}[position]
 
 
 @pytest.mark.spine
@@ -833,30 +862,41 @@ def test_a_credit_outside_the_shortfall_is_refused_and_posts_nothing(
     assert (_entries(firm), firm.told) == ([], [])
 
 
-def _keys(backend, run: Run) -> tuple[str, ...]:
-    return canonical(backend.checkpoint_keys(run.task_id), scrub=[run.run_id])
+def _keys(backend, run: Run, books: str = "") -> tuple[str, ...]:
+    """The run's checkpoint names, its run id scrubbed, and its `books` when given."""
+    return canonical(backend.checkpoint_keys(run.task_id), scrub=_scope(run, books))
+
+
+def _scope(run: Run, books: str) -> dict[str, str]:
+    return {run.run_id: "{run}"} | ({books: "{books}"} if books else {})
+
+
+def _states(backend, run: Run, books: str) -> dict[str, Any]:
+    """The run's checkpoints by their names, scrubbed as `_keys` scrubs them."""
+    states = backend.checkpoint_states(run.task_id).items()
+    scope = _scope(run, books)
+    return {canonical([key.display()], scrub=scope)[0]: state for key, state in states}
 
 
 @pytest.mark.adversarial
 def test_the_critique_parts_the_run_at_engage_and_nowhere_before(backend):
+    """Each arm keeps books of its own, named alike once scrubbed."""
     absent_firm, present_firm, uncited_firm = _firm(), _firm(CAPPED), _firm(UNCITED)
-    books = absent_firm.round.books  # one case's arms read one chain of the firm's knowledge
-    present_firm.round, uncited_firm.round = Round(books, 1), Round(books, 2)
     absent = _resolved(backend, absent_firm, critic=False)
     present = _resolved(backend, present_firm)
     uncited = _resolved(backend, uncited_firm)
-    before = backend.checkpoint_states(absent.task_id)
-    for arm in (present, uncited):
-        keys = _keys(backend, arm)
+    unasked = _keys(backend, absent, absent_firm.round.books)
+    before = _states(backend, absent, absent_firm.round.books)
+    for arm, firm in ((present, present_firm), (uncited, uncited_firm)):
+        keys = _keys(backend, arm, firm.round.books)
         engaged = next(i for i, key in enumerate(keys) if "engage" in key)
-        assert compare(_keys(backend, absent), keys).first_divergence == engaged, keys
-        states = backend.checkpoint_states(arm.task_id)
-        shared = [k for k in states if k.display() in keys[:engaged]]
-        assert len(shared) == engaged
+        assert compare(unasked, keys).first_divergence == engaged, keys
+        states = _states(backend, arm, firm.round.books)
+        shared = keys[:engaged]
         assert {k: states[k] for k in shared} == {k: before[k] for k in shared}
     assert _memos(absent_firm) == [3000]
     assert _memos(present_firm) == [1000]
-    read = [key for key in _keys(backend, present) if key.startswith("ledger-read;")]
+    read = [key for key in _keys(backend, present) if key.startswith("ledger-read;settle:")]
     assert len(read) == 1, "the settlement reads its round once"
     assert isinstance(Stopped.model_validate(uncited.result), Stopped)
     assert (uncited.asked_at_park, _entries(uncited_firm)) == (None, [])

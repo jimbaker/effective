@@ -201,25 +201,49 @@ decided before every branch has ended, which stops a `late` branch short of its 
 order and not the other; and a retryable error after the choice kept as an ending. The race's deadline, its flag
 and crashes are v4's.
 
-**v7: `erp_claim.qnt`** (a settlement's apply and its undo at the ERP): two attempts of one task
-send an Apply, decide to keep the match or compensate, and compensating sends an Unapply that
-names the Apply it undoes. The first attempt's lease can expire anywhere; the second replays the
-first's checkpoints. A call already sent lands whenever the network delivers it, whichever attempt
-sent it. The ERP keeps claims on the Apply's key, each in the transaction of the match it
-records: an Apply finding any claim lands nothing, and otherwise claims the key as applied,
-matching unless another key's match already stands; an Unapply finding the key claimed as undone
-lands nothing, and otherwise claims it so and removes the match. The run may start with another
-key's match standing. Assumed, as the engine's
-question: an attempt whose lease expired writes no checkpoint. TLC enumerates the whole graph.
+**v7: `erp_claim.qnt`** (a settlement's apply and its undo at the ERP): two rounds of one case,
+each settled by up to two attempts. A round sends an Apply under its key, decides to keep the
+match or compensate, and compensating sends an Unapply naming the Apply it undoes; keeping sends a
+reminder. A retriable leg can run out, ending the round unlanded with its call in flight. Each
+ending is a ledger row: round 1 opens once round 0 has ended compensated, and an unlanded round is
+continued by its next attempt under its own key. An attempt's lease can expire anywhere, and a
+call already sent lands whenever the network delivers it. The ERP keeps a claim on each round's
+key, in the transaction of the match it records: an Apply finding its key claimed lands nothing,
+and otherwise claims it as applied and records the match it made or found standing; an Unapply
+finding its key undone lands nothing, and otherwise claims it so and removes the match when its
+claim was the last live one recording it. The run may start with a match a person made. Assumed,
+as the engine's question: an attempt whose lease expired writes no checkpoint, and, as the ERP's,
+a landing is one whole fence run, which the fence serializes per invoice. TLC enumerates the whole
+graph.
 
 | Invariant | the rule it checks |
 |---|---|
-| `booksAreTheDecision` | once the last attempt is done and nothing is in flight, the match stands exactly when the settlement kept it |
+| `booksAreTheDecision` | once every open round is done and nothing is in flight, the match stands exactly when a round kept it |
+| `liveClaimHasMatch` | every live applied claim's match stands |
+| `noRoundBeforeEnded` | round 1 opens only after round 0's ending is a row |
+| `creditedOnce` | at most one round keeps its credit |
 
-`neverStaleLanded`, `neverCompensated` and `neverForeignUndone` are registered as violations, so the
-invariant is checked over runs where a stale attempt's call reaches the ERP, a compensation removes
-the match, and the match it removes is another key's. The
-teeth toggle drops the claim, and the stale Apply then lands after the Unapply.
+`neverStaleLanded`, `neverCompensated`, `neverForeignUndone`, `neverSecondRound` and
+`neverContinued` are registered as violations, so the invariants are checked over runs where a
+stale call lands, a compensation removes a match, the match removed is a person's, a second round
+settles, and an unlanded round is continued. Each field of `design` set false is a rejected rule,
+and a tooth:
+
+| rejected | breaks |
+|---|---|
+| no claim, so no count | `booksAreTheDecision`: a stale Apply lands after the Unapply |
+| an uncounted Unapply, with rounds that overlap | `liveClaimHasMatch`: one round's Unapply removes the match the other holds |
+| an uncounted Unapply, with a new round after an unlanded one | `liveClaimHasMatch`, the same way |
+| a round that opens whenever | `noRoundBeforeEnded`; `creditedOnce`, a completed case credited again |
+| a new round after an unlanded one | `creditedOnce` |
+
+The model holds one match at a time, one claim per round, and one ending per round: installments,
+a match a person replaces, the continuation's numbered keys, and how often the customer is told are
+the tests' to check, on the scripted and live Odoo.
+
+The count and the ending are two layers. With rounds waiting for the earlier ending and unlanded
+rounds continued, an uncounted Unapply still keeps every live claim's match, since no two rounds'
+claims are ever live at once; the count is what keeps the match when they are.
 
 ## Run
 

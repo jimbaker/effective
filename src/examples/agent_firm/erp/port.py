@@ -5,7 +5,8 @@
 | `PostMemo` | post a credit memo to the invoice's customer                   | `Posted`    |
 | `Reverse`  | post the entry that reverses an entry, matched against it      | `Posted`    |
 | `Apply`    | match a payment or a memo against an invoice                   | `Applied`   |
-| `Unapply`  | remove that match                                              | `Unapplied` |
+| `Unapply`  | release that match, removing it when no other apply holds it   | `Unapplied` |
+| `Read`     | what the invoice owes, and the entries on its customer's account | `Statement` |
 
 A post or a reversal lands once per idempotency key: the key names the one entry it made, and a
 replay answers that entry with `found` set to `EXISTING`. An apply lands once per key and an
@@ -14,14 +15,14 @@ or removes, and an op that finds its claim answers from it and moves nothing. An
 because the entry has nothing left or the invoice owes nothing claims the key as refused, so it is
 refused again whatever moved since. An apply whose undo's claim is held is `Refused`, so an apply
 an expired attempt sent lands nothing after the compensation that undid it. An apply that finds the
-entry already matched to the invoice claims its key without making the match, so an undo naming the
-key that did make it removes the match from under it; whether a round may start while an earlier
-round compensates is for round advance to decide. An op whose key names an entry it does not
-describe, or one since reversed, is `Refused`: two resolutions of one case may disagree on what the
-key names, and the first resolution may have been undone. A key the ERP holds for a record that is
-no entry raises `Diverged`. An adapter answers only what it read, and raises `Unknown` when it
-could not read whether a call landed. A refusal is an answer, `Refused`, and the books are as they
-were.
+entry already matched to the invoice claims its key and holds that match without making it. An undo
+releases its apply's holds and removes each match no other apply holds, so an undo naming one key
+leaves a match another key holds, and the last undo removes the match whoever made it. An op whose
+key names an entry it does not describe, or one since reversed, is `Refused`: two resolutions of
+one case may disagree on what the key names, and the first resolution may have been undone. A key
+the ERP holds for a record that is no entry raises `Diverged`. An adapter answers only what it
+read, and raises `Unknown` when it could not read whether a call landed. A refusal is an answer,
+`Refused`, and the books are as they were.
 
 An entry is named by the id its adapter gives it, or by the id of a document the world holds, such
 as an invoice or a payment.
@@ -32,6 +33,26 @@ from enum import StrEnum
 from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, Field, TypeAdapter
+
+
+class Kind(StrEnum):
+    INVOICE = "invoice"
+    PAYMENT = "payment"
+    CREDIT_MEMO = "credit-memo"
+    REVERSAL = "reversal"
+    OTHER = "other"
+    """A move the port neither posts nor holds as a document, such as a vendor bill."""
+
+
+class Entry(BaseModel):
+    """A posted entry on a customer's account. A reversal names the entry it reverses."""
+
+    id: str
+    kind: Kind
+    amount: Decimal
+    period: str
+    reason: str
+    reverses: str | None = None
 
 
 class Found(StrEnum):
@@ -64,10 +85,17 @@ class Unapply(BaseModel):
     entry: str
     invoice: str
     undoes: str
-    """The key of the apply this removes."""
+    """The key of the apply whose holds this releases."""
 
 
-type ErpOp = Annotated[PostMemo | Reverse | Apply | Unapply, Field(discriminator="op")]
+class Read(BaseModel):
+    """A read lands nothing, so the key it is asked under names nothing."""
+
+    op: Literal["read"] = "read"
+    invoice: str
+
+
+type ErpOp = Annotated[PostMemo | Reverse | Apply | Unapply | Read, Field(discriminator="op")]
 
 
 class Posted(BaseModel):
@@ -87,9 +115,13 @@ class Applied(BaseModel):
 
 
 class Unapplied(BaseModel):
+    """`removed` is whether the undo removed the match, which it does when the apply it names
+    held the last claim on it; otherwise the match stands for the keys still holding it."""
+
     result: Literal["unapplied"] = "unapplied"
     residual: Decimal
     found: Found
+    removed: bool
 
 
 class Refused(BaseModel):
@@ -100,7 +132,18 @@ class Refused(BaseModel):
     about: dict[str, str] = {}
 
 
-type ErpResult = Annotated[Posted | Applied | Unapplied | Refused, Field(discriminator="result")]
+class Statement(BaseModel):
+    """What the invoice owes across its installments, and the posted entries on its customer's
+    account, oldest first."""
+
+    result: Literal["statement"] = "statement"
+    owed: Decimal
+    entries: list[Entry]
+
+
+type ErpResult = Annotated[
+    Posted | Applied | Unapplied | Statement | Refused, Field(discriminator="result")
+]
 
 OPS: TypeAdapter[ErpOp] = TypeAdapter(ErpOp)
 RESULTS: TypeAdapter[ErpResult] = TypeAdapter(ErpResult)
@@ -112,26 +155,6 @@ class Unknown(Exception):
 
 class Diverged(Exception):
     """The ERP holds a key for a record that is no entry."""
-
-
-class Kind(StrEnum):
-    INVOICE = "invoice"
-    PAYMENT = "payment"
-    CREDIT_MEMO = "credit-memo"
-    REVERSAL = "reversal"
-    OTHER = "other"
-    """A move the port neither posts nor holds as a document, such as a vendor bill."""
-
-
-class Entry(BaseModel):
-    """A posted entry on a customer's account. A reversal names the entry it reverses."""
-
-    id: str
-    kind: Kind
-    amount: Decimal
-    period: str
-    reason: str
-    reverses: str | None = None
 
 
 class Erp(Protocol):
