@@ -71,6 +71,7 @@ from effective.keys.grammar import (  # noqa: E402
     Splice,
     parse,
     parse_skeleton,
+    render_terms,
     split_occurrence,
 )
 from effective.keys.marker import Role  # noqa: E402
@@ -238,7 +239,7 @@ def _bind(skeleton: Skeleton, parsed: ParsedKey, fields: tuple[str, ...]) -> dic
                 # and it is why a splice may only be LAST — anything after it has no boundary.
                 # `ParsedKey.render`, not `;`.join: a foreign term joins its payload with
                 # `:`, so joining by hand reports the field's value as bytes no producer wrote.
-                out[take()] = ParsedKey(tuple(terms)).render()
+                out[take()] = render_terms(tuple(terms))
                 return out
             case Splice():
                 return None  # not last, or nothing left for it to absorb
@@ -535,7 +536,7 @@ class KeyMap:
         while terms:
             # `ParsedKey.render` for the same reason as the splice arm above — and this one
             # runs FIRST, so a hand-rolled join here hands the splice an already-forged key.
-            inner = ParsedKey(tuple(terms)).render()
+            inner = render_terms(tuple(terms))
             if self._decode_one(inner) is not None:
                 return inner, tuple(atoms)
             atoms.append(self._atom(terms.pop(0).render()))

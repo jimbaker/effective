@@ -14,6 +14,7 @@ gather is the g-th gather in its frame, and nothing else can say which.
 """
 
 from dataclasses import dataclass, field
+from typing import assert_never
 
 from effective.keys.grammar import (
     ARITY_SEPARATOR,
@@ -22,8 +23,9 @@ from effective.keys.grammar import (
     Domain,
     Key,
     KeySyntaxError,
-    ParsedKey,
+    Term,
     parse,
+    render_terms,
 )
 
 ARM_TAGS = (
@@ -117,8 +119,8 @@ police.
 address, and it carries the same obligation."""
 
 
-def _leading_frames(key: str) -> tuple[tuple[int, ...], int] | None:
-    """Indices of the leading FRAME terms and where the identity begins, or `None` off-language.
+def _frames_in(terms: tuple[Term, ...]) -> tuple[tuple[int, ...], int]:
+    """Indices of the leading FRAME terms and where the identity begins.
 
     One walk for both readers: `split_frames` names the halves, `past_frames` filters the first
     one in place.
@@ -130,10 +132,6 @@ def _leading_frames(key: str) -> tuple[tuple[int, ...], int] | None:
     A frame carries a COORDINATE, so a bare `gather` qualifier stays an ordinary term. Removing
     that test also removes a refusal: the composer starts accepting `event;gather;foo` at a
     `domain=address` splice."""
-    try:
-        terms = parse(key).terms
-    except KeySyntaxError:
-        return None
     frames: list[int] = []
     at = 0
     while at < len(terms) - 1:
@@ -180,14 +178,19 @@ def past_frames(key: str, *, drop: tuple[str, ...] = FRAME_ARMS) -> str:
     `{run}`, and `gather:0,2;ledger;{run}:m-fan` must still fold. Such text falls back to a walk
     over the term separator alone, where a frame boundary needs no more than that — a term ends
     at `;`, and there are no terms to read a wrapper from."""
-    if (found := _leading_frames(key)) is None:
+    try:
+        parsed = parse(key)
+    except KeySyntaxError:
         return _past_frames_text(key, drop)
-    frames, _identity_at = found
-    parsed = parse(key)
-    terms = parsed.terms
+    return render_terms(_past(parsed.terms, drop), parsed.occurrence)
+
+
+def _past(terms: tuple[Term, ...], drop: tuple[str, ...]) -> tuple[Term, ...]:
+    """`past_frames` over terms already read. The survivors are a projection, not a key: two
+    wrapping terms a dropped frame separated now stand side by side."""
+    frames, _identity_at = _frames_in(terms)
     removed = {at for at in frames if terms[at].tag in drop and terms[at].coordinates}
-    kept = tuple(t for at, t in enumerate(terms) if at not in removed)
-    return ParsedKey(kept, parsed.occurrence).render()
+    return tuple(t for at, t in enumerate(terms) if at not in removed)
 
 
 def _past_frames_text(key: str, drop: tuple[str, ...]) -> str:
@@ -236,7 +239,9 @@ def split_frames(key: str) -> tuple[tuple[str, ...], str]:
     partitions, on a walk over the term separator alone. That walk is the FALLBACK — reading a
     wrapper needs terms — and the banked corpus is why it exists, since a `parse`-based split
     raises on most of its names."""
-    if (found := _leading_frames(key)) is None:
+    try:
+        parsed = parse(key)
+    except KeySyntaxError:
         rest, frames = key, []
         while True:
             head, separator, tail = rest.partition(TERM_SEPARATOR)
@@ -245,14 +250,13 @@ def split_frames(key: str) -> tuple[tuple[str, ...], str]:
                 return tuple(frames), rest
             frames.append(head)
             rest = tail
-    at_frames, at_identity = found
-    parsed = parse(key)
     terms = parsed.terms
+    at_frames, at_identity = _frames_in(terms)
     # A `#N` counts the whole key, and a frame never carries one, so it rides on the identity.
     wrappers = tuple(t for at, t in enumerate(terms) if at < at_identity and at not in at_frames)
     return (
         tuple(terms[at].render() for at in at_frames),
-        ParsedKey(wrappers + terms[at_identity:], parsed.occurrence).render(),
+        render_terms(wrappers + terms[at_identity:], parsed.occurrence),
     )
 
 
@@ -284,7 +288,7 @@ def branch_frames(key: str) -> tuple[str, ...]:
     return frames[: innermost + 1]
 
 
-def leads_with_an_arm(key: str) -> bool:
+def leads_with_an_arm(key: str | Key) -> bool:
     """Does `key` open with an op ARM — i.e. is it a checkpoint identity rather than an ADDRESS?
 
     The reachability question the grammar can answer on its own. An arm's payload is an ADDRESS:
@@ -298,13 +302,23 @@ def leads_with_an_arm(key: str) -> bool:
     that refused an arm anywhere in the payload would refuse the substrate's own approvals.
 
     Total: text that is not in the language leads with nothing."""
-    try:
-        return parse(key).terms[0].tag in ARM_TAGS
-    except KeySyntaxError, IndexError:
-        return False
+    match key:
+        case Key():
+            return _opens_with_an_arm(key.terms())
+        case str():
+            try:
+                return _opens_with_an_arm(parse(key).terms)
+            except KeySyntaxError:
+                return False
+        case unreachable:
+            assert_never(unreachable)
 
 
-def admits(domain: Domain, payload: str) -> bool:
+def _opens_with_an_arm(terms: tuple[Term, ...]) -> bool:
+    return terms[0].tag in ARM_TAGS
+
+
+def admits(domain: Domain, payload: str | Key) -> bool:
     """Is `payload` in `domain` — the one predicate the composer, the registry and the lint share.
 
     Decidable because `ARM_TAGS` is CLOSED: the key space is a qualification scheme over a finite
@@ -315,12 +329,18 @@ def admits(domain: Domain, payload: str) -> bool:
     refuse the substrate's own approvals — `event;approve;step;tool:charge-card` is real, and its
     payload contains an arm. Reading less than that refuses a framed address: `gather:0,0;ev:r1`
     is a branch's park, which `parked.py` mints, and its leading tag is an arm's."""
-    stripped = past_frames(payload)
+    match payload:
+        case Key():
+            leads = _opens_with_an_arm(_past(payload.terms(), FRAME_ARMS))
+        case str():
+            leads = leads_with_an_arm(past_frames(payload))
+        case unreachable:
+            assert_never(unreachable)
     match domain:
         case Domain.ADDRESS:
-            return not leads_with_an_arm(stripped)
+            return not leads
         case Domain.IDENTITY:
-            return leads_with_an_arm(stripped)
+            return leads
         case Domain.ANY:
             return True
 
@@ -356,9 +376,9 @@ def unmintable(key: str) -> str | None:
         if term.tag == STEP_ARM:
             return None  # author territory from here on
         if term.tag in ADDRESS_ARMS:
-            # `ParsedKey.render`, not `;`.join: a foreign term joins its payload with `:`, so a
+            # `render_terms`, not `;`.join: a foreign term joins its payload with `:`, so a
             # hand-rolled join would quote bytes no producer wrote in the refusal below.
-            payload = ParsedKey(tuple(terms[index + 1 :])).render()
+            payload = render_terms(tuple(terms[index + 1 :]))
             if leads_with_an_arm(past_frames(payload)):
                 return (
                     f"the payload of the {term.tag!r} arm is {payload!r}, which opens with an op "
@@ -383,6 +403,12 @@ def scope_prefix(atom: Key) -> str:
     composition (`Key.prefixed`), and an untyped name is a finding.
     """
     text = atom.stored()
+    if (occurrence := atom.structure().occurrence) is not None:
+        raise ValueError(
+            f"scope atom {text!r} carries occurrence {occurrence}: the suffix counts the uses of "
+            f"a whole key, and a frame fronts other terms, so it would land mid-key where the "
+            f"grammar has no place for it. Scope by the unnumbered atom."
+        )
     if TERM_SEPARATOR in text:
         # A frame may not contain the frame delimiter. Checked HERE rather than at `scoped()`
         # because this is the chokepoint every applier goes through — the durable handler, the

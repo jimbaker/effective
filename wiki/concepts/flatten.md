@@ -88,6 +88,10 @@ concatenation"*, and says *"the `expression` attribute will not be used in most 
 code."* So the question at a t-string seam is not "is this shape clean?" but **"who processes this,
 and what does it read?"**, and if nothing reads that, there is no rule to enforce.
 
+What a processor reads also decides what it may remember: the structural read depends on the call
+site and not on the values, so it can run once per site. [concepts/template-shape](template-shape.md)
+has the rule, and the part of a `Template` that looks static and is not.
+
 That was learned by cost. A `--hole-control-flow` lint was built here to forbid a comprehension
 inside an interpolation, on the reasoning that it destroys the hole's `expression`. It was
 well-made (a ten-shape discrimination matrix, firing on the real file, red-then-green under
@@ -99,14 +103,14 @@ the PEP says most processors do not read. Built and reverted the same day.
 `template`, `Template`, `Interpolation`, `strings`, `interpolations`, `values`, `expression`,
 `conversion`, `format_spec`. `string.templatelib`'s public surface contains **zero abbreviations**,
 so `tpl` is not a clipped domain term: it is Jinja/Go/PHP jargon advertising the wrong mental
-model. Foreign-neighbourhood vocabulary is the failure mode to watch, not shortness.
+model. Foreign-neighborhood vocabulary is the failure mode to watch, not shortness.
 
 ## The test corollary
 
 An assertion on **rendered bytes** has flattened the structure before asking its question, exactly
-as an f-string has. Three pins broke or misled this arc that way: `&quot;` against tdom's `&#34;`,
+as an f-string has. Three pins go wrong that way: `&quot;` against tdom's `&#34;`,
 `<!doctype>` against `<!DOCTYPE>`, and `assert "<script>…" not in html`; the third passes a
-renderer that **drops its input entirely**, which mutation testing confirmed. Parse and assert on
+renderer that **drops its input entirely**. Parse and assert on
 the result ([`tests/_html.py`](../../tests/_html.py)), and the assertion says what it means while the renderer stays free
 to spell an escape however it likes.
 

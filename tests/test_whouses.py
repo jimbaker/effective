@@ -220,7 +220,8 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # A ledger read's id is read by `effect_of`, `op_key`, the durable handler, the recorder and
     # the sandbox that refuses it.
     # `lint._chosen_contract` reads a keyword's name and the class and member it names.
-    assert reached == 324, f"the corpus this fix was measured on held 324; found {reached}"
+    # `grammar._render_terms` reads whether a projected term wraps, as it reads a term's.
+    assert reached == 326, f"the corpus this fix was measured on held 326; found {reached}"
 
     seen = {
         (str(p), line + 1)
@@ -249,7 +250,7 @@ def test_the_pinned_ast_grep_is_the_one_that_runs() -> None:
 def test_reference_search_is_blind_to_keyword_patterns() -> None:
     """`ty`'s own reference search cannot replace the candidate set, which is why it does not.
 
-    `textDocument/references` reaches files nobody opened: 30 locations for `Key.scope` across
+    `textDocument/references` reaches files nobody opened: every location for `Key.scope` across
     `src/` and `tests/`, against a candidate set bounded by the roots you pass. It is also blind to
     exactly the construct the enumerator was just taught to see, so each reaches what the other
     cannot. Measured on three attributes with a keyword-pattern use; all three are missing, and
@@ -257,7 +258,7 @@ def test_reference_search_is_blind_to_keyword_patterns() -> None:
     ops = "src/effective/ops.py"
     cases = [
         (BUDGET, GRANTED_FIELD, "granted", (FORK, _line_of(FORK, CLEARED_PATTERN)), 1),
-        (GRAMMAR, SCOPE_PROPERTY, "scope", (ops, _line_of(ops, SCOPE_PATTERN)), 30),
+        (GRAMMAR, SCOPE_PROPERTY, "scope", (ops, _line_of(ops, SCOPE_PATTERN)), 35),
         (API, GATHER_FIELD, "gather", (API, _line_of(API, GATHER_PATTERN)), 0),
     ]
     server = wh.Server(Path.cwd())
@@ -287,7 +288,7 @@ def test_a_use_under_ty_but_not_under_the_rules_is_still_a_use() -> None:
     """The other side of the same coin, so neither direction of the disagreement goes unpinned.
 
     `Key.scope` is read at `handlers/base.py:395`, a plain attribute read both enumerators see,
-    and referenced 29 more times under `tests/`, which a `src`-rooted sweep cannot reach."""
+    and referenced under `tests/` as well, which a `src`-rooted sweep cannot reach."""
     server = wh.Server(Path.cwd())
     try:
         row = _line_of(GRAMMAR, SCOPE_PROPERTY) - 1
@@ -298,7 +299,7 @@ def test_a_use_under_ty_but_not_under_the_rules_is_still_a_use() -> None:
             base,
             _line_of(base, "case AwaitEvent(name=name) if name.scope is Scope.SETTLEMENT:"),
         ) in found
-        assert sum(1 for where, _line in found if where.startswith("tests/")) == 29
+        assert sum(1 for where, _line in found if where.startswith("tests/")) == 34
     finally:
         server.close()
 

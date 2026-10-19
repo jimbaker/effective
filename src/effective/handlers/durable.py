@@ -149,7 +149,7 @@ from effective.keys import (
     race_prefix,
     scope_prefix,
 )
-from effective.keys.grammar import TERM_SEPARATOR, split_occurrence
+from effective.keys.grammar import TERM_SEPARATOR
 from effective.layers import (
     CHECKPOINTED_OPS,
     OpLayer,
@@ -280,8 +280,8 @@ def spawn_done_name(writer: Writer) -> Key:
     The placement's occurrence is a coordinate here, where it is a ``#N`` suffix on the spawn: a
     child composes this name into its emit step's key, where a trailing ``#N`` would read as that
     step's own occurrence."""
-    base, occurrence = split_occurrence(writer.placement.stored())
-    placement = Key.parse(base)
+    placement = writer.placement.unnumbered()
+    occurrence = writer.placement.structure().occurrence
     return compose_key(
         t"spawn-done:{Run(writer.task)},{Index(occurrence or 1)};{placement:domain=any}"
     )
@@ -1916,7 +1916,7 @@ class DurableHandler:
         `Scope.SETTLEMENT` await already carries the one `placing` gave it. That suffix counts
         asks of the name, which is the same coordinate under a different producer."""
         placed = placed_key(op).prefixed(getattr(self.ctx, "prefix", ""))
-        if split_occurrence(placed.stored())[1] is not None:
+        if placed.structure().occurrence is not None:
             return placed  # the walk already distinguished this one
         reforwards = self._reforwards
         if reforwards is not None and (replayed := reforwards.replayed(placed)) is not None:
@@ -2259,7 +2259,7 @@ class DurableHandler:
     def _step_name(self, op: WorkflowOp, slot: Key) -> Key:
         """The name `ctx.step` checkpoints `op` at: its key in the ctx's coordinates, at the
         occurrence of its slot."""
-        return op_key(op).occurrence(split_occurrence(slot.stored())[1] or 1)
+        return op_key(op).occurrence(slot.structure().occurrence or 1)
 
     def _slot(self, op: WorkflowOp) -> Key:
         """The op's placement in this handler's frames: the walk's, or one counted here.
@@ -2270,16 +2270,16 @@ class DurableHandler:
         | an op a layer yields: `permission`'s and   | `_place(op)`, counted as the walk counts  |
         | `govern`'s awaits, `govern`'s announce     | its own                                   |
 
-        The ambient placement is this op's when its key, occurrence stripped, is this op's key.
+        The ambient placement is this op's when it is an occurrence of this op's unnumbered key.
         Under any other op's placement, an injected wait would settle into the wrapped op's
         checkpoint and serve the wait's record back as that op's result. An op a layer yields
         under the key of the op it wraps takes that op's slot, and is served its checkpoint. An
         op injected under a re-forward with the key its first forward asked takes the slot that
         forward counted (`_Reforwards`); one whose layer numbers its key per invocation places a
         new key."""
-        mine = placed_key(op).prefixed(getattr(self.ctx, "prefix", "")).stored()
+        mine = placed_key(op).prefixed(getattr(self.ctx, "prefix", ""))
         ambient = current_placement()
-        if ambient is not None and split_occurrence(ambient.stored())[0] == mine:
+        if ambient is not None and ambient.is_occurrence_of(mine):
             return ambient
         return self._place(op)
 

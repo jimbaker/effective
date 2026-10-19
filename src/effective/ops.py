@@ -45,11 +45,10 @@ class Named:
     fact: Key
 
     def __post_init__(self) -> None:
-        stored = self.fact.stored()
-        if parse(stored).occurrence is not None or leads_with_an_arm(stored):
+        if self.fact.structure().occurrence is not None or leads_with_an_arm(self.fact):
             raise CompositionRefused(
-                f"a fact names what an effect is about, and {stored!r} names an occurrence or an "
-                "op: compose it from the business identities alone"
+                f"a fact names what an effect is about, and {self.fact.stored()!r} names an "
+                "occurrence or an op: compose it from the business identities alone"
             )
 
 
@@ -1080,7 +1079,7 @@ def event_name(name: str | Key) -> Key:
         # An op's own identity is never an ADDRESS, whichever type it arrives as. FIRST for the
         # `str` arms too: a `;`-bearing identity would otherwise be refused as a forged frame,
         # which is true and unhelpful — it names the wrong defect.
-        case Key() if leads_with_an_arm(name.stored()):
+        case Key() if leads_with_an_arm(name):
             _refuse_an_op_identity_as_an_address(name.stored())
             raise AssertionError("unreachable — the call above raises")  # pragma: no cover
         # A reserved-authority `Key` carrying NO scope was PARSED, not composed. Every authority

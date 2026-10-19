@@ -44,8 +44,8 @@ DESIGNATED: frozenset[tuple[str, str]] = frozenset(
         # `grammar` is the key language's own renderer: these turn a decided structure into bytes.
         ("src/effective/keys/grammar.py", "Atom.render"),
         ("src/effective/keys/grammar.py", "Coordinate.render"),
-        ("src/effective/keys/grammar.py", "Term.render"),
-        ("src/effective/keys/grammar.py", "ParsedKey.render"),
+        ("src/effective/keys/grammar.py", "_render_term"),
+        ("src/effective/keys/grammar.py", "render_terms"),
         ("src/effective/keys/grammar.py", "_render_terms"),
         # the registry renders a SKELETON (a template with its holes shown) for `explain`
         ("src/effective/keys/registry.py", "_render_term"),
@@ -171,7 +171,7 @@ def load_baseline() -> dict[Entry, str]:
         path, rest = line.split(" :: ", 1)
         literal, reason = rest.rsplit(" :: ", 1)
         # The statics are stored as a Python literal, so a `::` or a newline inside them cannot
-        # be read as the field separator — the first version round-tripped 137 of 389 wrongly.
+        # be read as the field separator.
         entries[(path.strip(), ast.literal_eval(literal))] = reason.strip()
     return entries
 

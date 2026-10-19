@@ -35,8 +35,8 @@ from effective.keys import (
     race_prefix,
 )
 from effective.keys.frame import (
+    ARM_TAGS,
     FRAME_ARMS,
-    _leading_frames,
     branch_frames,
     is_branch_frame,
     past_frames,
@@ -515,10 +515,10 @@ def test_a_task_id_reads_the_SAME_WAY_whatever_hex_digit_it_OPENS_with(nibble):
 def test_an_ATOM_kind_is_never_a_tag_however_it_is_spelled(text, kind):
     """`is_tag` asks `kind_of`, so it covers the kinds rather than a list of them.
 
-    The first version excluded `UUID` by name and shipped one kind short: a digest is entirely
-    `[a-z0-9-]` and leads with a letter, so it matched the tag charset in every case rather than
-    six in sixteen. Asking which KIND the bytes are is the same question `kind_of` already answers
-    for atoms, and it does not need extending when a fifth kind arrives.
+    Excluding `UUID` by name leaves one kind short: a digest is entirely `[a-z0-9-]` and leads
+    with a letter, so it matches the tag charset in every case rather than six in sixteen. Asking
+    which KIND the bytes are is the same question `kind_of` already answers for atoms, and it
+    does not need extending when a fifth kind arrives.
     """
     assert kind_of(text) is kind
     assert not is_tag(text)
@@ -737,6 +737,17 @@ def test_split_frames_and_the_identity_reconstruct_the_key():
     assert wrapped > 100, "the generator stopped minting the case this test is about"
 
 
+def _frames_of(terms):
+    """The leading frames, read from the grammar rather than the walk under test: every term ahead
+    of the identity but a wrapping foreign one, where the identity opens at the first arm that is
+    not a frame, or at the last term."""
+    arms = [
+        at for at, term in enumerate(terms) if term.tag in ARM_TAGS and term.tag not in FRAME_ARMS
+    ]
+    identity = min([*arms, len(terms) - 1])
+    return {at for at in range(identity) if not (terms[at].foreign and terms[at].wraps_payload)}
+
+
 def test_past_frames_is_split_frames_with_a_filter_over_the_first_half():
     """The relationship the new function is FOR: one walk, two readers.
 
@@ -756,10 +767,8 @@ def test_past_frames_is_split_frames_with_a_filter_over_the_first_half():
         for key in keys:
             # By POSITION, as the walk filters: an identity term whose bytes echo a dropped
             # frame's (`rec:0;event;rec:0`) must survive, and a value filter would remove it.
-            found = _leading_frames(key)
-            assert found is not None, "every generated key is in the language"
-            at_frames, _at_identity = found
             terms = parse(key).terms
+            at_frames = _frames_of(terms)
             removed = {at for at in at_frames if terms[at].tag in drop and terms[at].coordinates}
             survivors = list(parse(past_frames(key, drop=drop)).terms)
             expected = [t for at, t in enumerate(terms) if at not in removed]

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from effective.keys import AuthorityTag, Key, Run, Scope, Segment, compose_key
-from effective.keys.grammar import KeySyntaxError, ParsedKey, Term, parse
+from effective.keys.grammar import KeySyntaxError, Term, parse, render_terms
 from effective.ops import LedgerRow, Writer
 
 if TYPE_CHECKING:
@@ -341,7 +341,7 @@ def fork_unscoped(event_id: str, child_run_id: str) -> str:
         case [Term(tag=str(tag), coordinates=(coordinate,)), *rest] if (
             tag == FORK_SCOPE and coordinate.render() == child_run_id and rest
         ):
-            return ParsedKey(tuple(rest)).render()
+            return render_terms(tuple(rest))
         case _:
             return event_id
 

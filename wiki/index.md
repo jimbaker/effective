@@ -72,6 +72,7 @@ models cite none, and state their invariants in their own words. Numbers with no
 | [concepts/evidence](concepts/evidence.md) | a ratification is a claim, an instrument is a claim, and a green test can be weaker than it looks |
 | [concepts/key-order](concepts/key-order.md) | `Key.covers` as a partial order that injectivity makes antisymmetric, the allow-set's canonical form, and the lift to attenuation |
 | [concepts/agent-firm](concepts/agent-firm.md) | the AR firm: its combinators, its ERP port's contract, and the questions its tests answer |
+| [concepts/template-shape](concepts/template-shape.md) | a processor reads a template's structure once per call site: the statics plus each hole's expression, conversion and evaluated spec, the spec being the part that looks static and is not |
 
 ## References
 

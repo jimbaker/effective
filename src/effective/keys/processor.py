@@ -5,14 +5,17 @@ key's syntax and the holes as its values, and every `_refuse_*` here is a case t
 represent, caught where the template still has structure to inspect.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import pairwise
 from string.templatelib import Interpolation, Template
-from typing import Any, NoReturn, assert_never
+from typing import Any, Literal, NoReturn, assert_never
 
 from effective.keys.frame import admits, scope_prefix
 from effective.keys.grammar import (
     COORDINATE_NAME_SEPARATOR,
+    FOREIGN_TAG,
     OCCURRENCE_SIGIL,
     PATH_SEPARATOR,
     TERM_SEPARATOR,
@@ -28,7 +31,6 @@ from effective.keys.grammar import (
     SkeletonTerm,
     Splice,
     Term,
-    parse,
     parse_skeleton,
 )
 from effective.keys.marker import AuthorityTag, Index, Segment, Tag
@@ -184,7 +186,7 @@ def _expressions(interpolations: list[Interpolation]) -> list[str]:
 
 
 def _refuse_a_directive_out_of_position(
-    skeleton: Skeleton, directives: _Directives, expressions: list[str]
+    skeleton: Skeleton, directives: _Directives, expressions: Sequence[str]
 ) -> None:
     """Each directive belongs to ONE position, and the two swap places exactly.
 
@@ -284,7 +286,7 @@ def _fill(
     skeleton: Skeleton,
     interpolations: list[Interpolation],
     defaults: dict[int, str],
-    expressions: list[str],
+    expressions: Sequence[str],
 ) -> ParsedKey:
     """Put the values into the parsed skeleton: the composer's whole job, once parsing is done.
 
@@ -310,14 +312,7 @@ def _fill(
     fences do most of the work (an arbitrary object and a `bool` die on the delimiter-freeness
     scan, an `int` on `Term`'s tag validation), but "nothing delivers a bad value today" is a
     statement about the callers, and this arm's parameter is `Any`. The check states the arm's own
-    contract instead.
-
-    Two corrections earned that shape, both from reading rather than running, and both worth
-    keeping because the arm invites exactly this. An early draft called the arm a laundering hole;
-    it never was — nothing reached it that could launder. A later one recorded the `Segment` case
-    as an open question; it had already been ruled and pinned. **What survives both is the
-    measurement:** the live domain was `Tag | Segment`, and the ruling takes it
-    to `Tag`."""
+    contract instead."""
     values = [interpolation.value for interpolation in interpolations]
     terms: list[Term] = []
     occurrence: int | None = None
@@ -331,7 +326,7 @@ def _fill(
                 # says whether it extends the sequence or stands as a zero-arity qualifier.
                 if isinstance(spliced, Key):
                     _refuse_a_wrong_splice(element, spliced, expressions[hole.index])
-                    parsed = parse(spliced.stored())
+                    parsed = spliced.structure()
                     if parsed.occurrence is not None:
                         _refuse_a_hoisted_occurrence(parsed, expressions[hole.index], index, last)
                         occurrence = parsed.occurrence
@@ -392,7 +387,7 @@ def _refuse_a_wrong_splice(element: Splice, spliced: Key, expression: str) -> No
             f"`{{{expression}:{DOMAIN_DIRECTIVE}={Domain.ADDRESS.value}}}`, "
             f"`…={Domain.IDENTITY.value}`, or `…={Domain.ANY.value}` if it really is either."
         )
-    if not admits(element.hole.domain, spliced.stored()):
+    if not admits(element.hole.domain, spliced):
         expected = (
             "opens with an op arm, so it is an op's own identity and not an address"
             if element.hole.domain is Domain.ADDRESS
@@ -411,8 +406,7 @@ def _refuse_a_non_tag_term_head(value: Any, expression: str) -> None:
 
     **One decision, two arms** — `_fill`'s non-`Key` splice, where a lone hole stands as a
     zero-arity term, and `_fill_tag`'s `Hole`, where a hole heads a term with coordinates. Written
-    once because the pilot that surfaced this found four spellings of one enumeration in this same
-    function, and a rule spelled twice is the next one of those.
+    once: a second spelling of this rule is a second place for it to drift.
 
     **What this is NOT is a safety fix, and saying so is what keeps it from being over-trusted.**
     `Term.__post_init__` re-checks the head against the very predicate `Tag.__new__` runs —
@@ -426,6 +420,12 @@ def _refuse_a_non_tag_term_head(value: Any, expression: str) -> None:
 
     A `Key` never arrives here — it splices by induction, which is a different arm."""
     if isinstance(value, Tag):
+        if FOREIGN_TAG.match(value):
+            raise ValueError(
+                f"compose_key: {expression!r} is the foreign tag {value!r}. Another grammar "
+                f"mints a foreign term, so it is read back from that grammar's bytes; a key "
+                f"composed here heads its terms with tags of ours."
+            )
         return
     raise TypeError(
         f"compose_key: {expression!r} stands as a term's namespace and is a "
@@ -457,7 +457,7 @@ def _fill_coordinate(
             )
 
 
-def _fill_tag(tag: str | Hole, values: list[Any], expressions: list[str]) -> str:
+def _fill_tag(tag: str | Hole, values: list[Any], expressions: Sequence[str]) -> str:
     """A term's namespace, which a template may write or interpolate::
 
         t"govern:{gate}"      the tag written out
@@ -585,7 +585,8 @@ def compose_key(template: Template) -> Key:
     # the directive maps, the source expressions, the runtime values, and the `Hole` ordinals
     # `_parts` mints — addresses a position in this list.
     interpolations = _interpolations(items)
-    directives = _directives(interpolations)
+    holes = tuple((i.expression, i.conversion, i.format_spec) for i in interpolations)
+    directives = _directives_of(holes)
     # EVERY hole must be delimiter-free: there is no terminal exemption.
     #
     # It existed because the last hole "took the rest of the string", which is only a coherent
@@ -629,12 +630,43 @@ def compose_key(template: Template) -> Key:
     #
     # The f-string/`str.join` backend survives INSIDE `render`, which is the one exempt position:
     # eager format-then-concat is exactly right once every structural decision is already made.
-    skeleton = parse_skeleton(_parts(items, directives))
-    expressions = _expressions(interpolations)
-    _refuse_a_directive_out_of_position(skeleton, directives, expressions)
-    _refuse_misplaced_defaults(skeleton, directives.defaults)
+    skeleton, expressions = _skeleton(template.strings, holes)
     parsed = _fill(skeleton, interpolations, directives.defaults, expressions)
     return Key(parsed, declared)
+
+
+type _Hole = tuple[str, Literal["a", "r", "s"] | None, str]
+"""A hole as its template's shape sees it: its expression, conversion and spec."""
+
+
+@lru_cache(maxsize=4096)
+def _directives_of(holes: tuple[_Hole, ...]) -> _Directives:
+    """`_directives` once per shape: a hole's spec, conversion and expression are all it reads."""
+    return _directives([Interpolation(None, *hole) for hole in holes])
+
+
+@lru_cache(maxsize=4096)
+def _skeleton(
+    strings: tuple[str, ...], holes: tuple[_Hole, ...]
+) -> tuple[Skeleton, tuple[str, ...]]:
+    """A template's checked skeleton and its holes' source expressions, read once per shape.
+
+    `strings` are a template's statics and `holes` each hole's expression, conversion and spec:
+    everything but the values, so every call from one site shares the answer.
+
+    The parts go back through `Template`, which drops an empty static as the caller's template did,
+    so each `Hole` takes the ordinal `compose_key` gave its interpolation."""
+    parts: list[str | Interpolation] = [strings[0]]
+    for hole, static in zip(holes, strings[1:], strict=True):
+        parts += [Interpolation(None, *hole), static]
+    items: list[str | Interpolation] = list(Template(*parts))
+    interpolations = _interpolations(items)
+    directives = _directives_of(holes)
+    skeleton = parse_skeleton(_parts(items, directives))
+    expressions = tuple(_expressions(interpolations))
+    _refuse_a_directive_out_of_position(skeleton, directives, expressions)
+    _refuse_misplaced_defaults(skeleton, directives.defaults)
+    return skeleton, expressions
 
 
 # `_refuse_forged_frames` is GONE. It refused the frame delimiter in a template

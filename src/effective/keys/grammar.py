@@ -37,8 +37,10 @@ the terms before the last::
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
+from functools import lru_cache
+from itertools import zip_longest
 from typing import Any, assert_never
 
 from pydantic_core import core_schema
@@ -143,6 +145,7 @@ class Kind(Enum):
     NAME = "name"
 
 
+@lru_cache(maxsize=4096)
 def kind_of(text: str) -> Kind | None:
     """The atom's kind from its bytes alone; ``None`` when the text is not a well-formed atom.
 
@@ -188,12 +191,46 @@ class KeySyntaxError(ValueError):
     there is nobody to hand it to."""
 
 
+_SPLITS_A_NAME = (TERM_SEPARATOR, ARITY_SEPARATOR, COORDINATE_NAME_SEPARATOR, OCCURRENCE_SIGIL)
+"""What ends a coordinate name where `parse` reads one, and `#`, which reads as the key's
+occurrence unless one follows."""
+
+
+def _no_subclass(cls: type, **kwargs: Any) -> None:
+    raise TypeError(
+        f"{cls.__name__} subclasses a key structure. Equality compares the class, so a subclass "
+        f"instance never equals what `parse` reads back from its bytes."
+    )
+
+
+def _restored(self: Any, state: Sequence[Any]) -> None:
+    """Restore a pickled structure field by field, then check it as construction would."""
+    if len(state) != len(every := fields(self)):
+        raise ValueError(
+            f"a pickled {type(self).__name__} carries {len(state)} fields, not {len(every)}"
+        )
+    for each, value in zip(every, state, strict=True):
+        object.__setattr__(self, each.name, value)
+    self.__post_init__()
+
+
 @dataclass(frozen=True, slots=True)
 class Atom:
     """One typed component of a coordinate."""
 
     text: str
     kind: Kind
+
+    __init_subclass__ = _no_subclass
+    __setstate__ = _restored
+
+    def __post_init__(self) -> None:
+        """The kind is the one the text reads as, so a parse of the rendering returns this atom."""
+        if (read := kind_of(self.text)) is not self.kind:
+            raise KeySyntaxError(
+                f"{self.text!r} reads as {read.value if read else 'no atom'}, "
+                f"not {self.kind.value}"
+            )
 
     @classmethod
     def of(cls, text: str) -> Atom:
@@ -223,6 +260,22 @@ class Coordinate:
 
     atoms: tuple[Atom, ...]
     name: str | None = None
+
+    __init_subclass__ = _no_subclass
+    __setstate__ = _restored
+
+    def __post_init__(self) -> None:
+        """At least one atom, and a name the rendering keeps whole."""
+        if not self.atoms:
+            raise KeySyntaxError("a coordinate holds at least one atom")
+        if self.name is not None and (
+            not self.name or any(s in self.name for s in _SPLITS_A_NAME)
+        ):
+            raise KeySyntaxError(
+                f"coordinate name {self.name!r} is empty or carries one of "
+                f"{''.join(_SPLITS_A_NAME)!r}, so its rendering would not read back as this "
+                f"coordinate"
+            )
 
     @property
     def path(self) -> str:
@@ -256,6 +309,9 @@ class Term:
     them. Two distinct durable names collapsing to one is exactly the collision the grammar exists
     to forbid, and for a checkpoint name, rendering the other spelling is a lookup that misses."""
 
+    __init_subclass__ = _no_subclass
+    __setstate__ = _restored
+
     def __post_init__(self) -> None:
         """The tag is checked HERE, so nothing can build a term outside the language.
 
@@ -282,16 +338,79 @@ class Term:
                 f"foreign tag matching {FOREIGN_TAG.pattern}. A term's tag names a namespace, so "
                 f"a value belongs in a COORDINATE — `tag:{self.tag}` rather than `{self.tag}`."
             )
+        if self.foreign != bool(FOREIGN_TAG.match(self.tag)) or (
+            self.wraps_payload and not self.foreign
+        ):
+            raise KeySyntaxError(
+                f"{self.tag!r} with foreign={self.foreign} and wraps_payload="
+                f"{self.wraps_payload}: a term is foreign exactly when its tag carries "
+                f"{FOREIGN_SIGIL!r}, and only a foreign term wraps a payload. Another grammar "
+                f"mints a foreign term, so it is read from that grammar's bytes, never composed."
+            )
+        _refuse_coordinates_out_of_order(self)
 
     @property
     def arity(self) -> int:
         return len(self.coordinates)
 
     def render(self) -> str:
-        if not self.coordinates:
-            return self.tag
-        args = ARITY_SEPARATOR.join(c.render() for c in self.coordinates)
-        return f"{self.tag}{TAG_SEPARATOR}{args}"
+        return _render_term(self.tag, self.coordinates)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectedTerm:
+    """A term in a projection: a label with coordinates dropped, which need not read back as a
+    key, so it carries `Term`'s fields without `Term`'s checks."""
+
+    tag: str
+    coordinates: tuple[Coordinate, ...] = ()
+    foreign: bool = False
+    wraps_payload: bool = False
+
+    def render(self) -> str:
+        return _render_term(self.tag, self.coordinates)
+
+
+def _render_term(tag: str, coordinates: tuple[Coordinate, ...]) -> str:
+    if not coordinates:
+        return tag
+    return f"{tag}{TAG_SEPARATOR}{ARITY_SEPARATOR.join(c.render() for c in coordinates)}"
+
+
+def _refuse_coordinates_out_of_order(term: Term) -> None:
+    """The coordinates `parse` would read back from `term`'s rendering, and no others.
+
+    | the term              | refused when                                             |
+    |-----------------------|----------------------------------------------------------|
+    | any                   | a name repeats, or a bare coordinate follows a named one |
+    | foreign, wrapping     | it has coordinates: its payload is the next term         |
+    | foreign, not wrapping | its coordinates render as one of our tags, read back as  |
+    |                       | the payload of a wrapping term                           |
+    """
+    if not term.coordinates:
+        return
+    names = [c.name for c in term.coordinates if c.name is not None]
+    if len(names) != len(set(names)):
+        raise KeySyntaxError(f"term {term.tag!r} names a coordinate twice: {names}")
+    bare = [c.name is None for c in term.coordinates]
+    if bare != sorted(bare, reverse=True):
+        raise KeySyntaxError(
+            f"term {term.tag!r} has a bare coordinate after a named one: bare means required, "
+            f"and the required ones come first"
+        )
+    if term.wraps_payload and term.coordinates:
+        raise KeySyntaxError(
+            f"wrapping term {term.tag!r} carries coordinates; the next term is its payload"
+        )
+    if (
+        term.foreign
+        and not term.wraps_payload
+        and is_tag(ARITY_SEPARATOR.join(c.render() for c in term.coordinates).partition(":")[0])
+    ):
+        raise KeySyntaxError(
+            f"foreign term {term.tag!r}'s payload reads as our tag, so it would read back "
+            f"as a wrapping term"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +422,35 @@ class ParsedKey:
 
     terms: tuple[Term, ...]
     occurrence: int | None = None
+    _flat: str | None = field(default=None, init=False, compare=False, repr=False)
+    """`render()`'s answer, filled by its first call. Two threads racing to fill it write the same
+    string, so either write is the answer."""
+
+    def __getstate__(self) -> tuple[tuple[Term, ...], int | None]:
+        return self.terms, self.occurrence
+
+    __init_subclass__ = _no_subclass
+
+    def __setstate__(self, state: tuple[Any, ...]) -> None:
+        """The fields, checked as construction checks them, with the rendering left to the first
+        `render()`. A pickle from before the rendering slot carries two fields."""
+        terms, occurrence, *_flat = state
+        _restored(self, (terms, occurrence, None))
+
+    def __post_init__(self) -> None:
+        """An occurrence the wire can spell, and a payload after every wrapping term."""
+        if self.occurrence is not None and self.occurrence < 2:
+            raise KeySyntaxError(
+                f"occurrence {self.occurrence} has no wire form: a first occurrence is the "
+                f"bare key"
+            )
+        for term, after in zip_longest(self.terms, self.terms[1:]):
+            if term.wraps_payload and (after is None or after.foreign):
+                raise KeySyntaxError(
+                    f"wrapping term {term.tag!r} is followed by "
+                    f"{'nothing' if after is None else after.tag!r}: its payload is one of our "
+                    f"terms"
+                )
 
     @property
     def tags(self) -> tuple[str, ...]:
@@ -343,13 +491,21 @@ class ParsedKey:
         """The flat form. An f-string/`str.join` backend below a processor that has already made
         every structural decision — the one position where eager format-then-concat is exactly
         right, and the single exemption in "no f-string composes a `Key`"."""
-        flat = _render_terms(self.terms)
-        if self.occurrence is None:
+        if (flat := self._flat) is not None:
             return flat
-        return f"{flat}{OCCURRENCE_SIGIL}{self.occurrence}"
+        flat = render_terms(self.terms, self.occurrence)
+        object.__setattr__(self, "_flat", flat)
+        return flat
 
 
-def _render_terms(terms: tuple[Term, ...]) -> str:
+def render_terms(terms: tuple[Term | ProjectedTerm, ...], occurrence: int | None = None) -> str:
+    """The flat form of a term sequence, for a projection that need not be a key: frames
+    dropped, a prefix peeled, names attached. A key renders through it too."""
+    flat = _render_terms(terms)
+    return flat if occurrence is None else f"{flat}{OCCURRENCE_SIGIL}{occurrence}"
+
+
+def _render_terms(terms: tuple[Term | ProjectedTerm, ...]) -> str:
     """Join terms, giving a payload-wrapping FOREIGN term the `:` its own grammar chose.
 
     The SDK writes `f"$awaitEvent:{event_name}"`, so rendering that join our way would produce
@@ -361,7 +517,13 @@ def _render_terms(terms: tuple[Term, ...]) -> str:
         gather:0,0;$awaitEvent:review:m1   and one under a frame, which reaches here too
     """
     match terms:
-        case (Term(foreign=True, wraps_payload=True) as head, *rest) if rest:
+        case (
+            (
+                Term(foreign=True, wraps_payload=True)
+                | ProjectedTerm(foreign=True, wraps_payload=True)
+            ) as head,
+            *rest,
+        ) if rest:
             return f"{head.tag}{TAG_SEPARATOR}{_render_terms(tuple(rest))}"
         case (head, *rest):
             tail = _render_terms(tuple(rest))
@@ -682,7 +844,12 @@ def parse_skeleton(parts: Sequence[Part]) -> Skeleton:
         if len(head) != 1:
             raise KeySyntaxError(f"a term's tag must be one static or one Tag hole, got {head!r}")
         tag = head[0]
-        if isinstance(tag, str) and not TAG.match(tag) and not FOREIGN_TAG.match(tag):
+        if isinstance(tag, str) and FOREIGN_TAG.match(tag):
+            raise KeySyntaxError(
+                f"{tag!r} is a foreign tag. Another grammar mints a foreign term, so it is read "
+                f"back from that grammar's bytes; a template heads its terms with tags of ours."
+            )
+        if isinstance(tag, str) and not TAG.match(tag):
             raise KeySyntaxError(f"{tag!r} is not a well-formed tag in a template")
         if not rest:
             elements.append(SkeletonTerm(tag))
@@ -872,6 +1039,27 @@ class Scope(Enum):
     child's event under a namespace nobody registered."""
 
 
+@lru_cache(maxsize=1024)
+def _fragment(prefix: str) -> tuple[Term, ...]:
+    """The terms of a scope prefix, read once per prefix: whole terms, each closed by `;`.
+
+    A prefix fronts other terms, so an occurrence in it would land mid-key."""
+    if not prefix:
+        return ()
+    if not prefix.endswith(TERM_SEPARATOR):
+        raise KeySyntaxError(
+            f"scope prefix {prefix!r} does not end in {TERM_SEPARATOR!r}, so its last term would "
+            f"run into the key it fronts"
+        )
+    parsed = parse(prefix.removesuffix(TERM_SEPARATOR))
+    if parsed.occurrence is not None:
+        raise KeySyntaxError(
+            f"scope prefix {prefix!r} carries occurrence {parsed.occurrence}, which would land "
+            f"mid-key, where the grammar has no place for it"
+        )
+    return parsed.terms
+
+
 @dataclass(frozen=True, slots=True)
 class Key:
     """A composed op-key: the finished identity of an op, and **opaque by construction**.
@@ -906,6 +1094,9 @@ class Key:
     _parsed: ParsedKey
     _scope: Scope | None = field(default=None, compare=False)
     """The reach the leading `AuthorityTag` declared, retained from composition — see `scope`."""
+
+    __init_subclass__ = _no_subclass
+    __setstate__ = _restored
 
     def __post_init__(self) -> None:
         """The empty key is refused HERE rather than in `parse`, because every route into the type
@@ -1005,6 +1196,16 @@ class Key:
         A field read: the structure is the truth and `stored()` is derived from it."""
         return self._parsed.terms
 
+    def structure(self) -> ParsedKey:
+        """This key's terms and occurrence. A field read, like `terms`."""
+        return self._parsed
+
+    def unnumbered(self) -> Key:
+        """This key without its occurrence: the identity every one of its occurrences numbers."""
+        if self._parsed.occurrence is None:
+            return self
+        return Key(replace(self._parsed, occurrence=None), self._scope)
+
     def stored(self) -> str:
         """The durable/wire form — a checkpoint name, an event name, a DB parameter, JSON.
 
@@ -1077,11 +1278,14 @@ class Key:
         entirely rather than be absorbed by the composer. Applying a frame path to a finished
         identity is still composition, so it goes through a name rather than an f-string, which
         would compose the *repr*.
+
+        The prefix's terms go in front of this key's, and the reach travels with the identity: a
+        framed `depth-grant:` is still a settlement.
         """
-        # The reach travels with the identity: a framed `depth-grant:` is still a settlement.
-        # The prefix is still TEXT here — a `;`-terminated fragment the frame layer builds — so it
-        # is parsed back with the key it fronts. Taking terms directly is the next step.
-        return Key(parse(prefix + self._parsed.render()), self._scope)
+        if not prefix:
+            return self
+        parsed = self._parsed
+        return Key(replace(parsed, terms=_fragment(prefix) + parsed.terms), self._scope)
 
     def occurrence(self, count: int) -> Key:
         """The suffix an engine appends when one name runs more than once::
@@ -1126,6 +1330,11 @@ class Key:
         if count == 1:
             return self  # a first occurrence is the bare key — unrepresented, as the SDK writes it
         return Key(replace(parsed, occurrence=count), self._scope)
+
+    def is_occurrence_of(self, key: Key) -> bool:
+        """Is this the unnumbered `key` itself, or `key` with `#N`? `False` for a numbered `key`,
+        which already names its one occurrence."""
+        return key._parsed.occurrence is None and self._parsed.terms == key._parsed.terms
 
     def covers(self, other: Key) -> bool:
         """Is `other` this key or a narrowing of it? A partial order over keys::

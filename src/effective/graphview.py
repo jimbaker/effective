@@ -89,10 +89,10 @@ from effective.keys.grammar import (
     TERM_SEPARATOR,
     KeySyntaxError,
     Kind,
-    ParsedKey,
     ProjectedKey,
-    Term,
+    ProjectedTerm,
     parse,
+    render_terms,
     split_occurrence,
 )
 from effective.keys.grammar import kind_of as atom_kind
@@ -725,9 +725,9 @@ def _projected(key: str, found: Mapping[tuple[str, ...], frozenset[Column]]) -> 
         # wrote — and a hand-rolled join emits `$awaitEvent;review:m1`, which parses as a
         # DIFFERENT valid key, so nothing downstream can notice.
         rendered.append(
-            Term(term.tag, kept, foreign=term.foreign, wraps_payload=term.wraps_payload)
+            ProjectedTerm(term.tag, kept, foreign=term.foreign, wraps_payload=term.wraps_payload)
         )
-    return ParsedKey(tuple(rendered)).render()
+    return render_terms(tuple(rendered))
 
 
 def project(graph: RunGraph) -> RunGraph:
