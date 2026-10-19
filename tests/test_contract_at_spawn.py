@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from _conformance import Fault, private
+from _steps import placed_step
 from pydantic import BaseModel
 
 from effective.api import ask_llm, await_event
@@ -56,6 +57,9 @@ class _Reviewed(BaseModel):
     second: dict
 
 
+FIRST, SECOND = placed_step("first", "llm"), placed_step("second", "llm")
+
+
 def _reviewed():
     first = yield from ask_llm("first", "first", dict)
     yield from await_event("review", dict)
@@ -92,10 +96,10 @@ def test_a_startup_run_parked_by_another_body_resumes_with_its_usage_recorded(tm
         "second": {"answer": "ok"},
     }
     assert {
-        key: "usage" in state for key, state in recorded.items() if key.startswith("step:")
+        key: "usage" in state for key, state in recorded.items() if not key.startswith("event;")
     } == {
-        "step:first": True,
-        "step:second": True,
+        FIRST: True,
+        SECOND: True,
     }
 
 
@@ -113,7 +117,7 @@ def test_a_record_its_contract_cannot_read_fails_naming_the_contract(tmp_path):
         assert (waiting and waiting.state) == "waiting", waiting
         app.conn.execute(
             "UPDATE checkpoints SET state = ? WHERE name = ?",
-            (json.dumps({"answer": "ok"}), "step:first"),
+            (json.dumps({"answer": "ok"}), FIRST),
         )
         app.emit_event("review", {})
         failed = app.run_until_result(task_id)
@@ -145,7 +149,7 @@ def test_an_engine_marks_every_run_it_spawns(backend):
     name = private("unmarked-spawn")
     backend.engine.spawn(name, {"run_id": "r-unmarked"})
     ((_task_id, params),) = backend.enqueued(name)
-    assert params[FORMAT_PARAM] == RecordedFormat.V1.value
+    assert params[FORMAT_PARAM] == NEWEST_FORMAT.value
 
 
 def test_an_engine_marks_a_run_whose_params_carry_a_mark(backend):
@@ -159,4 +163,4 @@ def test_this_release_records_one_format():
     """A second format has three things to decide before this test may change: whether a child or
     a fork records under its parent's format, how each decoder chooses by format, and what format
     an entry bridged from a base's record carries."""
-    assert list(RecordedFormat) == [RecordedFormat.V1]
+    assert list(RecordedFormat) == [NEWEST_FORMAT]

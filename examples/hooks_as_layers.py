@@ -11,13 +11,13 @@ from typing import Any
 from first_workflow import House, run_durably
 
 from effective.layers import op_layer
-from effective.ops import Step, WorkflowOp
+from effective.ops import Step, WorkflowOp, step_name_text
 
 
 def describe(op: WorkflowOp) -> str:
     match op:
         case Step(name=name):
-            return name
+            return step_name_text(name)
         case _:
             return type(op).__name__
 

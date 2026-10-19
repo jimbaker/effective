@@ -15,7 +15,7 @@ from _clock import HeldClock
 
 from effective.engines import sqlite
 from effective.engines.sqlite import ClaimLost, SqliteApp
-from effective.keys import Key
+from effective.keys import Index, Key, compose_key
 from effective.ops import DONE_EVENT_PARAM, Unretryable
 
 
@@ -169,7 +169,7 @@ def test_a_checkpoint_extends_the_claim(tmp_path: Any, monkeypatch: pytest.Monke
 
     @live.register_task("t")
     def live_task(params: Any, ctx: Any) -> Any:
-        return [ctx.step(Key.parse(f"s{n}"), lambda n=n: held(n)) for n in (1, 2)]
+        return [ctx.step(compose_key(t"s:{Index(n)}"), lambda n=n: held(n)) for n in (1, 2)]
 
     @poller.register_task("t")
     def poller_task(params: Any, ctx: Any) -> Any:

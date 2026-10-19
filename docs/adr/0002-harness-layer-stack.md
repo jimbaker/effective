@@ -39,7 +39,7 @@ The determinism boundary decides which seam a factor belongs to:
 
 Retry alters control flow; telemetry observes; a guardrail shapes one call's schema. Compaction
 rewrites the transcript, and the transcript is workflow state between yields, where no layer
-reaches, so `run_agent` records compaction as its own `react:compact` step ([ADR-0004](0004-react-loop-driver.md)).
+reaches, so `run_agent` records compaction as its own `step;llm;react:compact` step ([ADR-0004](0004-react-loop-driver.md)).
 
 ### Two seams, deliberately not unified
 

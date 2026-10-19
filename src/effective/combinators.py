@@ -68,6 +68,16 @@ from effective.skills import Pin, activate_skill
 from effective.spawning import join_answer, spawn_child
 
 
+def depth_frame(depth: int) -> Key:
+    """The frame a descent's level at `depth` runs under, `d:{depth}`."""
+    return compose_key(t"d:{Index(depth)}")
+
+
+def state_frame(name: str) -> Key:
+    """The frame a named state or role runs under, `state:{name}`."""
+    return compose_key(t"state:{Name(name)}")
+
+
 def hoisted[T](
     skills: Sequence[str],
     body: Callable[[Mapping[str, Pin]], Effect[T]],
@@ -157,7 +167,7 @@ def route[C, T](
     recurse deeper (a nested ``recurse`` / ``run_agent``), run a pinned skill
     script (``run_code(pin.script(...))`` — zero marginal exploration tokens),
     run improvised code (metered — no scope frame, so its segments key as
-    ``step;code:seg,{n},{name}``), or answer flat (a plain
+    ``step;tool;code:seg,{n},{name}``), or answer flat (a plain
     ``ask_llm``). ``classifier`` is a sealed op returning a handler label, so
     which path each chunk took is checkpoint-recorded and replay re-dispatches
     identically; the improvised-vs-pinned rate per label is the promotion /
@@ -488,7 +498,7 @@ def _grower[C, T](
             final = remaining == 0
             model = promote(depth) if promote is not None else ""
             decision = yield from scoped(
-                compose_key(t"d:{Index(depth)}"),
+                depth_frame(depth),
                 partial(node, context, Level(depth, model, final)),
             )
             match decision:
@@ -735,7 +745,7 @@ def _role_scopes[K: str](names: Iterable[K]) -> dict[K, Key]:
     scopes: dict[K, Key] = {}
     for name in names:
         try:
-            scopes[name] = compose_key(t"state:{Name(name)}")
+            scopes[name] = state_frame(name)
         except ValueError as unusable:
             raise UnusableRoleName(f"mutual: role {name!r} cannot be a key: {unusable}") from None
     return scopes
@@ -971,18 +981,18 @@ def respawn[S, T](
     # `respawn ∘ respawn`, refused here rather than in a handler: an interpreter never sees "we
     # are inside a respawn" — this combinator is ordinary workflow code until its step returns
     # `Again`, so the handler observes exactly one `Respawn` op, the INNER one. The fact lives
-    # where it is known. Reset is the handlers' job, at the task boundary (`ops.enter_task_run`);
-    # a `finally` here does NOT run when a branch's refusal abandons this generator.
+    # where it is known. The handlers hold the chain state for the task run (`ops.chain_held`),
+    # since a refusal or a park can leave this generator unfinished.
     if CHAIN_DEPTH.get():
         refuse_nested_respawn(chain.task)
-    CHAIN_DEPTH.set(CHAIN_DEPTH.get() + 1)
+    depth_token = CHAIN_DEPTH.set(CHAIN_DEPTH.get() + 1)
     # The generation any grant park inside this step will name. Set here rather than passed,
     # so an author who writes `descend(...)` inside a chain cannot forget it — a forgotten
     # coordinate would alias two generations' grants, silently.
     generation_token = CHAIN_GENERATION.set(chain.generation)
     outcome = yield from step(chain.state, Turn(generation=chain.generation, final=final))
     CHAIN_GENERATION.reset(generation_token)
-    CHAIN_DEPTH.set(CHAIN_DEPTH.get() - 1)
+    CHAIN_DEPTH.reset(depth_token)
     match outcome:
         case Done(value):
             return value

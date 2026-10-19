@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from effective.contexts import RecordingCtx
-from effective.cost import RecordedFormat, Usage
+from effective.cost import NEWEST_FORMAT, RecordedFormat, Usage
 from effective.domain import AskLLM, CallTool
 from effective.govern import BudgetRefused, Exceeded
 from effective.handlers.durable import DurableHandler
@@ -76,7 +76,7 @@ def test_a_banked_critique_replays_without_a_critic(tmp_path):
     review = critic.run(world, tmp_path / "task.db")
     with closing(sqlite3.connect(tmp_path / "task.db")) as db:
         ((params,),) = db.execute("SELECT params FROM tasks").fetchall()
-    assert RecordedFormat.from_params(json.loads(params)) is RecordedFormat.V1
+    assert RecordedFormat.from_params(json.loads(params)) is NEWEST_FORMAT
     assert critic.replay(tmp_path / "task.db") == review
 
 

@@ -10,9 +10,10 @@ from collections.abc import Mapping
 
 import pytest
 
-from effective.api import Effect, ask_llm, step
+from effective.api import Effect, ask_llm, scoped, step
 from effective.domain import CallTool
 from effective.handlers.recording import RecordingHandler
+from effective.keys import Key
 
 
 class Computed(Mapping[str, object]):
@@ -49,7 +50,7 @@ def test_a_responder_reporting_itself_EMPTY_is_still_consulted():
     Reddens when: the guard goes back to truthiness. Verified — with `responses if responses
     else {}` restored, this raises `KeyError: no canned response for step 'ask'`."""
     handler = RecordingHandler(responses=Computed())
-    assert handler.run(_program) == "answered ask"
+    assert handler.run(_program) == "answered llm:ask"
 
 
 def test_a_dict_is_copied_so_a_later_mutation_cannot_leak_in():
@@ -80,9 +81,24 @@ def test_no_responses_at_all_still_builds_and_raises_on_the_first_op():
         handler.run(_program)
 
 
+def test_each_frame_is_answered_before_a_kinded_bare_entry():
+    """A per-frame entry addresses one frame, so it outranks an entry for the name anywhere."""
+
+    def lanes():
+        answers = []
+        for lane in ("talk:0", "talk:1"):
+            answers.append(
+                (yield from scoped(Key.parse(lane), lambda: ask_llm("enrich", "x", str)))
+            )
+        return answers
+
+    table = {"talk:0;enrich": "A0", "talk:1;enrich": "A1", "llm:enrich": "K"}
+    assert RecordingHandler(responses=table).run(lanes) == ["A0", "A1"]
+
+
 def test_the_seam_reaches_a_call_tool_op_too():
     """Not only `ask_llm`: the lookup is the Step arm, so a tool call reaches the same responder.
     Named because a fixture that answered one and not the other would look correct until the
     first tool op."""
 
-    assert RecordingHandler(responses=Computed()).run(_tool_program) == "answered probe"
+    assert RecordingHandler(responses=Computed()).run(_tool_program) == "answered tool:probe"

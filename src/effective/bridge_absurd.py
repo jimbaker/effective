@@ -27,14 +27,14 @@ from effective.budget import BUDGET_GRANT_LIKE, Grant, names_a_budget_grant
 from effective.checkpoints import (
     ENGINE_INTERNAL,
     Checkpoint,
+    dense_key,
     is_engine_internal,
     is_step_checkpoint,
-    positional_key,
 )
 from effective.cost import refuse_an_unread_format
 from effective.engines.absurd import read_absurd_params
 from effective.fork import Bridged
-from effective.keys import Key
+from effective.keys import FramePosition, Key
 from effective.ruling import answer_of
 
 # Queries use PEP 750 t-strings (psycopg ≥ 3.3): `{table:i}` is a safely-quoted identifier,
@@ -48,7 +48,7 @@ def export_measured_prefix(
     refuse_an_unread_format(read_absurd_params(conn, task_id, queue))
     c_tbl = f"c_{queue}"
     entries: list[Bridged] = []
-    seen: dict[Key, int] = {}
+    seen = FramePosition()
     rows = _committed(conn, task_id, queue)
     steps = [(name, state, at) for name, state, at in rows if is_step_checkpoint(name)]
     _refuse_ambiguous_order(steps, task_id, c_tbl, "the positionally-indexed prefix")
@@ -60,11 +60,10 @@ def export_measured_prefix(
         # re-enters the typed world here, through the one named door for that (a cast accepted
         # until the writer side closes; see `Key.parse`).
         #
-        # `split_occurrence` reads the `#k` suffix off the PARSE, so the strip and the render
-        # cannot drift. `#0`, `#1` (which has no wire form) and `#02` are not occurrences: they
-        # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
-        # rather than being admitted as a Step.
-        key = positional_key(name, seen)  # name#2 → name, refusing a gap
+        # `#0`, `#1` (which has no wire form) and `#02` are not occurrences: `Key.parse`
+        # refuses them, so a counting bug surfaces as a refusal rather than being admitted as a
+        # Step.
+        key = dense_key(name, seen)  # refusing a gap
         entries.append(Bridged(key=key, state=state))
 
     # `payload IS NOT NULL` selects only DELIVERED grants: an Absurd park writes a pending-await

@@ -21,7 +21,7 @@ from effective.code import canonical, run_code
 from effective.combinators import Level
 from effective.interrupts import Interrupted as Interrupted
 from effective.interrupts import tool_interrupt as tool_interrupt
-from effective.keys import Index, Name
+from effective.keys import Index, Key, Name
 from effective.react import (
     Act,
     Decide,
@@ -42,6 +42,11 @@ class HumanAnswer(BaseModel):
     """The reviewer's reply to an Ask — delivered as the awaited event's value."""
 
     text: str
+
+
+def sub_scope(name: str) -> Key:
+    """The scope a nested agent named `name` runs under, `sub:{name}`."""
+    return compose_key(t"sub:{Name(name)}")
 
 
 def make_act(ask_tools: Set[str] = frozenset({ASK_HUMAN})) -> Act:
@@ -145,7 +150,7 @@ def spawn_subagent(
     spawned child Absurd task (a true fork); that needs Absurd spawn primitives.
     """
     traj = yield from scoped(
-        compose_key(t"sub:{Name(name)}"),
+        sub_scope(name),
         lambda: run_agent(task, max_iters=max_iters, decide=decide, act=act, interrupt=interrupt),
     )
     return ToolResult(content=unwrap(traj))

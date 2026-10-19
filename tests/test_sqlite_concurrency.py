@@ -29,10 +29,11 @@ from uuid import UUID
 
 import pytest
 from _authority import ruled
+from _steps import placed_step
 
 from effective.api import GatherBranch, qualified_event_name
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
-from effective.keys import Index, Key, compose_key
+from effective.keys import Index, Key, compose_key, gather_prefix
 
 pytestmark = pytest.mark.adversarial
 
@@ -57,6 +58,11 @@ def _ctx(sqlite_app) -> tuple[SqliteApp, SqliteTaskContext]:
     """
     app = sqlite_app(":memory:")
     return app, app.context(app.spawn("run", {}))
+
+
+def _tool_step(branch: int, i: int) -> Key:
+    """The key of tool step `i` in branch `branch` of gather 0."""
+    return Key.parse(placed_step(compose_key(t"t:{Index(i)}"), "tool", gather_prefix(0, branch)))
 
 
 def _run_concurrently(*targets) -> None:
@@ -104,7 +110,7 @@ def test_a_concurrent_peek_never_answers_with_another_branchs_row(sqlite_app):
     def commit_checkpoints() -> None:
         # A writer on the same connection: this is what the branch's read races against.
         for i in range(ITERATIONS):
-            ctx.step(Key.parse(f"gather:0,2;step;tool:t{i}"), lambda i=i: {"i": i})
+            ctx.step(_tool_step(2, i), lambda i=i: {"i": i})
 
     _run_concurrently(
         lambda: peek(APPROVED, True, STORED_APPROVAL),
@@ -129,7 +135,7 @@ def test_concurrent_steps_commit_every_checkpoint_exactly_once(sqlite_app):
 
     def commit(branch: int) -> None:
         for i in range(per_branch):
-            ctx.step(Key.parse(f"gather:0,{branch};step;tool:t{i}"), lambda i=i: {"i": i})
+            ctx.step(_tool_step(branch, i), lambda i=i: {"i": i})
 
     _run_concurrently(*[(lambda b=b: commit(b)) for b in range(branches)])
 
@@ -182,7 +188,7 @@ def test_concurrent_spawns_never_alias_two_idempotency_keys_onto_one_task(sqlite
 
     def spawn_many(branch: int) -> None:
         for i in range(per_thread):
-            key = f"b{branch}-{i}"
+            key = compose_key(t"b:{Index(branch)},{Index(i)}").stored()
             try:
                 task_id = app.spawn("child", {"n": i}, idempotency_key=key)
             except Exception as exc:  # the exception SHAPE is the finding, so catch broadly
@@ -196,7 +202,7 @@ def test_concurrent_spawns_never_alias_two_idempotency_keys_onto_one_task(sqlite
 
     def commit_checkpoints() -> None:
         for i in range(per_thread):
-            ctx.step(Key.parse(f"gather:0,9;step;tool:t{i}"), lambda i=i: {"i": i})
+            ctx.step(_tool_step(9, i), lambda i=i: {"i": i})
 
     _run_concurrently(lambda: spawn_many(0), lambda: spawn_many(1), commit_checkpoints)
 
@@ -240,7 +246,7 @@ def test_a_task_emitting_from_inside_its_own_run_serializes_with_its_siblings(sq
 
     def commit_checkpoints() -> None:
         for i in range(per_thread):
-            ctx.step(Key.parse(f"gather:0,8;step;tool:t{i}"), lambda i=i: {"i": i})
+            ctx.step(_tool_step(8, i), lambda i=i: {"i": i})
 
     _run_concurrently(lambda: emit_from_inside(0), lambda: emit_from_inside(1), commit_checkpoints)
 
@@ -281,7 +287,7 @@ def test_an_outside_in_emit_never_tears_against_a_running_branch(sqlite_app):
 
     def commit_checkpoints() -> None:
         for i in range(per_thread):
-            ctx.step(Key.parse(f"gather:0,7;step;tool:t{i}"), lambda i=i: {"i": i})
+            ctx.step(_tool_step(7, i), lambda i=i: {"i": i})
 
     def read_back(branch: int) -> None:
         for i in range(per_thread):

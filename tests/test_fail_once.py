@@ -11,6 +11,7 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -19,14 +20,14 @@ import pytest
 from _conformance import Fault, private
 from _durable import DSN, IMMEDIATE_RETRY, pg_ready
 
-from effective.api import ask_llm, await_event, call_tool, gather
+from effective.api import ask_llm, await_event, call_tool, gather, scoped
 from effective.budget import MeasuredBudget
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import SPAWN_TOOL, CallTool, DomainOp
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import make_tool_runner, spawn_tool
-from effective.keys import Run, compose_key
+from effective.keys import Index, Run, compose_key
 from effective.lint import _expanded
 from effective.ops import CompositionRefused, leaves
 from effective.spawning import (
@@ -267,7 +268,7 @@ def test_a_child_whose_measured_budget_trips_answers_its_parent_refused(backend)
 
     def overspends():
         for n in range(3):
-            yield from ask_llm(f"ask-{n}", "x", str)
+            yield from scoped(compose_key(t"ask:{Index(n)}"), partial(ask_llm, "ask", "x", str))
 
     def child_body(params, ctx):
         budget = MeasuredBudget(overall=0.0015, run_id=params["run_id"], on_exhaust="fail")

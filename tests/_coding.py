@@ -212,7 +212,7 @@ written down so a reader does not have to infer it."""
 def _placed(key: str) -> tuple[dict[str, str], str]:
     """Split a placed key into `{frame tag: its first coordinate}` and the author's own op name.
 
-    `turn:3;phase:code;step:edit` -> `({"turn": "3", "phase": "code"}, "edit")`. Total: text the
+    `turn:3;phase:code;edit` -> `({"turn": "3", "phase": "code"}, "edit")`. Total: text the
     parser refuses comes back as its own name, which the caller then fails to find rather than
     mis-answering."""
     try:

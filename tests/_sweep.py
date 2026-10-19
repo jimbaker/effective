@@ -56,7 +56,7 @@ from effective.domain import CallTool
 from effective.engines import open
 from effective.govern import REFUSALS, Refused
 from effective.handlers.durable import DurableHandler
-from effective.keys import Segment, compose_key
+from effective.keys import Name, Segment, compose_key
 from effective.layers import op_layer
 from effective.ops import Step, leaves
 
@@ -165,11 +165,17 @@ def layered(op: Any) -> Any:
             return (yield op)
 
 
+def tool[T](kind: str, path: str, schema: type[T]) -> Effect[T]:
+    """A call to the tool of the leaf of `kind` at `path`, its step named by both."""
+    named = compose_key(t"leaf:{Name(kind)},{Name(path)}")
+    return step(named, CallTool(name=f"{kind}.{path}", args={}, result_schema=schema))
+
+
 def reads(kind: str, path: str, field: str) -> Callable[[], Effect[Any]]:
     """A leaf whose workflow reads `field` of its tool's result."""
 
     def read() -> Effect[Any]:
-        got = yield from call_tool(f"{kind}.{path}", {}, dict)
+        got = yield from tool(kind, path, dict)
         return got[field]
 
     return read
@@ -180,7 +186,7 @@ def defaulted(path: str, probe: Probe) -> Callable[[], Effect[Any]]:
         n: int = Field(default_factory=lambda: probe.default(path))
 
     def workflow() -> Effect[Any]:
-        got = yield from call_tool(f"default.{path}", {}, Defaulted)
+        got = yield from tool("default", path, Defaulted)
         if got.n == 0:
             raise ValueError("the default was 0")
         return got.n
@@ -197,7 +203,7 @@ def failed_factory(path: str) -> Callable[[], Effect[Any]]:
 
 def unserializable(path: str) -> Callable[[], Effect[Any]]:
     def workflow() -> Effect[Any]:
-        yield from call_tool(f"unserializable.{path}", {}, dict)
+        yield from tool("unserializable", path, dict)
         return object()
 
     return workflow
@@ -211,17 +217,18 @@ def leaf(kind: str, path: str, probe: Probe) -> Callable[[], Effect[Any]]:
         case "fallback":
             return reads(kind, path, "n")
         case "reject":
-            return lambda: call_tool(f"reject.{path}", {}, Shape)
+            return lambda: tool("reject", path, Shape)
         case "default":
             return defaulted(path, probe)
         case "bad_name":
+            # lint: key-composition: the leaf's subject is a step name that is no atom, refused
             return lambda: step(f"bad/{path}", CallTool(name=f"bad.{path}", result_schema=dict))
         case "factory":
             return failed_factory(path)
         case "unserializable":
             return unserializable(path)
         case _:
-            return lambda: call_tool(f"{kind}.{path}", {}, dict)
+            return lambda: tool(kind, path, dict)
 
 
 def program(tree: list[Any], probe: Probe, path: str = "t") -> Callable[[], Effect[Any]]:

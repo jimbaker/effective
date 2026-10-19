@@ -45,7 +45,7 @@ def reviewed_rag(request_id: str, question: str, k: int = 3) -> Effect[GenerateA
     """`rag` with a reviewer's approval between the search and the answer."""
     passages = yield from call_tool("search", {"query": question, "k": k}, list[str])
     yield from call_tool("notify", {"passages": passages}, str)
-    review = compose_key(t"review:{Subject(request_id)}")
+    review = compose_key(t"answer-review:{Subject(request_id)}")
     if not (yield from await_event(review, bool)):
         return Repair("the reviewer refused the passages")
     return (yield from ask(question, passages))

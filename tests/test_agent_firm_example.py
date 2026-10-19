@@ -15,6 +15,7 @@ import pytest
 
 from effective import RecordedFormat
 from effective.checkpoints import read_sqlite_conn
+from effective.cost import NEWEST_FORMAT
 from effective.ledgerread import sqlite_payloads
 from examples.agent_firm.__main__ import (
     CONTROLLER,
@@ -85,5 +86,5 @@ def test_the_examples_own_run_spends_what_its_tape_recorded(tmp_path, name, spen
     assert (recorded.spend, recorded.model_calls, marked) == (
         Decimal(spend),
         calls,
-        RecordedFormat.V1,
+        NEWEST_FORMAT,
     )

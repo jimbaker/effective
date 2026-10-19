@@ -90,12 +90,6 @@ src/agent/skillsbench.py :: 'unknown arm  (use )' :: raise -> structured excepti
 src/agent/skillsbench.py :: 'unknown skill ; available: ' :: prompt -> channels
 src/agent/skillsbench.py :: 'unresolvable turn: ' :: raise -> structured exception
 src/agent/tape_bank.py :: '  ' :: text
-src/agent/tape_bank.py :: ' missing or unreadable — not banked by the tape writer' :: text
-src/agent/tape_bank.py :: 'no  in ' :: text
-src/agent/tape_bank.py :: 'no  in  — banked before the sidecar was kept' :: text
-src/agent/tape_bank.py :: 'no  tree at ' :: text
-src/agent/tape_bank.py :: 'stamp says era , current era is ' :: text
-src/agent/tape_bank.py :: 'tape is vacuous for the walk:  turn(s) and  action(s), below the / the property needs to witness anything' :: text
 src/agent/tape_bank.py :: 'the fresh tape VIOLATES the transcript property ( violation(s) over  witnessed turn(s)):\n\n\nThat is a defect in the loop, not in the run — banking it would install a fixture that agrees with the bug. Nothing was displaced.' :: text
 src/agent/tape_bank.py :: 'this tape is vacuous for the walk ( turns,  actions; need /). The model gave up rather than working the problem, which happens. Re-run to try again; nothing was displaced.' :: text
 src/agent/tasks.py :: '(?<!\\d)(?!\\d)' :: text
@@ -150,7 +144,6 @@ src/effective/channels.py :: 'skill  discloses itself (via )' :: raise -> struct
 src/effective/channels.py :: 'skill  interpolated but render() got no registry' :: raise -> structured exception
 src/effective/channels.py :: 'unknown role directive  (use system|user|assistant)' :: raise -> structured exception
 src/effective/channels.py :: '{:} marks , which the prompt composes rather than quotes. Drop the : spec.' :: raise -> structured exception
-src/effective/checkpoints.py :: ' is occurrence  of , and the prefix holds  before it: an earlier ask was refused and left no checkpoint, so a positional replay would bind the wrong answer' :: raise -> structured exception
 src/effective/checkpoints.py :: 'file:?mode=ro' :: text
 src/effective/choice.py :: 'branch  ended with a value, and this attempt stopped it before it returned one: its value rests on an op its record does not hold' :: raise -> structured exception
 src/effective/choice.py :: 'not a stored choice: ' :: raise -> structured exception
@@ -252,11 +245,8 @@ src/effective/fork.py :: 'cannot fork at a : `fork_at` replays one sequential sc
 src/effective/fork.py :: "fork boundary  not among the base's  ckpts" :: raise -> structured exception
 src/effective/fork.py :: 'fork completed without crossing fork_point  — it never fired (wrong fork_point, or the workflow does not await it).' :: raise -> structured exception
 src/effective/fork.py :: 'fork index  out of range [0, ]' :: raise -> structured exception
-src/effective/fork.py :: 'fork point :  != ' :: raise -> structured exception
 src/effective/fork.py :: 'fork seed had unconsumed keys ' :: raise -> structured exception
 src/effective/fork.py :: "fork_point  names an await INSIDE a  region. The fork point is a boundary on `await_event`, but a gather branch's await resolves by `peek_event` on every replay, so the phase would cross once and never again. A gather is ONE node in the fork's order: fork at an await before it, or after the whole region." :: raise -> structured exception
-src/effective/fork.py :: 'measured prefix divergence at : ' :: raise -> structured exception
-src/effective/fork.py :: 'prefix divergence at :  != ' :: raise -> structured exception :: 2
 src/effective/govern.py :: '. [] ' :: prompt -> channels
 src/effective/govern.py :: ': the ruling by  rules on , and the effect is ' :: raise -> structured exception
 src/effective/govern.py :: "a govern park resolution must be a Resolution or a mapping of policy-name -> answer; got . If a policy needs a custom payload type, put it UNDER its own key: {'<policy>': payload}." :: raise -> structured exception
@@ -306,8 +296,6 @@ src/effective/graphview.py :: 'ms' :: key -> compose_key :: 2
 src/effective/graphview.py :: 'n' :: key -> compose_key
 src/effective/graphview.py :: 'x' :: key -> compose_key
 src/effective/handlers/admission.py :: 'no stable witness for a ' :: raise -> structured exception :: 3
-src/effective/handlers/base.py :: 'Step name  carries a separator, so it is read as a KEY — and it is not one: . A term is `tag:arg,arg`, and a nested name is its own term after  — so `a:b:c` is two separators in one term: write `a:b;c` if `c` is a nested name, or `a:b,c` if it is a second coordinate.' :: raise -> structured exception
-src/effective/handlers/base.py :: 'Step name  is not one well-formed atom, so it cannot be a coordinate of the `step` arm: . Give the step a name in an author namespace instead (`tool:`), which composes as `step;tool:`.' :: raise -> structured exception
 src/effective/handlers/base.py :: 'StoreArtifact content_type  is not `type/subtype`. An artifact key carries the media type as a two-atom PATH (RFC 2045), so the shape of the key cannot depend on the value.' :: raise -> structured exception
 src/effective/handlers/base.py :: "a  has no standalone op key: its identity is positional (the g-th gather or r-th race, branch i), the `gather:{g},{i};` or `race:{r},{i};` frame a handler assigns while walking the execution tree, not a content function of one op. Every handler keys a branch's leaf by that path; the gather or race itself is pure structure." :: raise -> structured exception
 src/effective/handlers/base.py :: 'a race cannot run under : its choice is a settled checkpoint, which the fork can neither seed nor steer. Run the race outside the fork.' :: raise -> structured exception
@@ -336,14 +324,12 @@ src/effective/handlers/durable.py :: 'this ctx () waits on an event alone, so it
 src/effective/handlers/durable.py :: "this spawn's checkpoint carries no done event (): it was recorded before the handler named done events, so its join cannot be re-bound. Drain runs parked on a child-done or fork-done join." :: raise -> structured exception
 src/effective/handlers/recording.py :: '' :: text
 src/effective/handlers/recording.py :: "RecordingHandler cannot suspend on a layer-injected event : the in-memory recorder holds the live generator and cannot park a mid-layer stack (no call/cc). Provide a canned response to test the layer's logic, or use DurableHandler for real durable suspend/resume." :: raise -> structured exception
-src/effective/handlers/recording.py :: 'RecordingHandler: no canned response for step ' :: raise -> structured exception
 src/effective/handlers/recording.py :: 'gather resume delivers to the lowest parked branch , not : the recorder wakes branches by POSITION, not name.' :: raise -> structured exception
 src/effective/handlers/recording.py :: 'resume delivers to the parked await , not : the recorder binds by POSITION, so naming a different event would silently swap payloads (the engines bind by name).' :: raise -> structured exception :: 2
 src/effective/handlers/recording.py :: 'the wait on  named a deadline, so it is answered by an `Arrived(payload)` or an `Expired()`. This delivered .' :: raise -> structured exception
 src/effective/handlers/recording.py :: 'unknown op: ' :: raise -> structured exception
 src/effective/handlers/replay.py :: '<, no placed key>' :: text
 src/effective/handlers/replay.py :: 'race  under  has no recorded choice' :: raise -> structured exception
-src/effective/handlers/replay.py :: 'replay divergence at position : recorded , workflow yielded ' :: raise -> structured exception
 src/effective/handlers/replay.py :: 'workflow ended after  ops but  were recorded' :: raise -> structured exception
 src/effective/handlers/replay.py :: 'workflow yielded an extra op  at position ' :: raise -> structured exception
 src/effective/interpreters/cli.py :: ' exited : ' :: raise -> structured exception

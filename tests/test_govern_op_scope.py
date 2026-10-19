@@ -20,6 +20,7 @@ from typing import Any
 
 from _authority import ruled
 from _gate import at_spend
+from _steps import called_step
 
 from effective import permission
 from effective.api import call_tool
@@ -28,7 +29,6 @@ from effective.budget import as_policy as budget_policy
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import Usage
 from effective.govern import GateState, Proceed, govern
-from effective.handlers.base import step_key
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Key
@@ -58,9 +58,7 @@ def _two_gated_calls():
 def _park_name(op_name: str, pass_n: int = 0) -> Key:
     """The name the gate mints for a gated `call_tool` — derived, not hard-coded, so this test
     cannot drift from `GateState.park_name`."""
-    return GateState(
-        run_id=RUN, gate=GATE, pass_n=pass_n, op_key=step_key(f"tool:{op_name}").stored()
-    ).park_name
+    return GateState(run_id=RUN, gate=GATE, pass_n=pass_n, op_key=called_step(op_name)).park_name
 
 
 def _run(tmp_path, sqlite_app, policy, *, max_attempts: int = 12):
@@ -127,17 +125,15 @@ def test_a_budget_grant_outlives_the_op_it_was_granted_for():
     accumulates is not that (it made op1 re-park on replay when I first wrote this), and faking it
     would test the fake. The durable metered path is covered against the real engine in
     `test_govern_durable.py`."""
-    from effective.domain import CallTool
     from effective.govern import Park, Resolution
 
     budget = MeasuredBudget(overall=0.005, run_id=RUN, on_exhaust="park")
     over = 0.006  # already past the ceiling
     policy = at_spend(over, budget_policy(budget))
-    call = CallTool(name="wire_transfer", args={}, result_schema=dict)
-    op = Step(name="tool:wire_transfer", op=call)
+    op = next(call_tool("wire_transfer", {}, dict))
 
     # op1's gate: over the ceiling, no grant yet -> park (the ask)
-    first = GateState(run_id=RUN, gate=GATE, op_key=step_key("tool:charge_card").stored())
+    first = GateState(run_id=RUN, gate=GATE, op_key=called_step("charge_card"))
     assert isinstance(policy(op, first), Park)
 
     # a grant is delivered and absorbed
@@ -148,14 +144,14 @@ def test_a_budget_grant_outlives_the_op_it_was_granted_for():
     second = GateState(
         run_id=RUN,
         gate=GATE,
-        op_key=step_key("tool:wire_transfer").stored(),
+        op_key=called_step("wire_transfer"),
         run_answers=dict(granted.run_answers),
     )
     assert isinstance(policy(op, second), Proceed), "the grant did not carry to the next op"
 
     # and WITHOUT the run scope op2 would ask again: the run scope, not a shared park name,
     # carries the grant
-    unscoped = GateState(run_id=RUN, gate=GATE, op_key=step_key("tool:wire_transfer").stored())
+    unscoped = GateState(run_id=RUN, gate=GATE, op_key=called_step("wire_transfer"))
     assert isinstance(policy(op, unscoped), Park)
 
 
@@ -164,7 +160,7 @@ def test_the_two_answer_scopes_are_distinct():
     folds into both; carrying to a NEW op keeps only the run scope."""
     from effective.govern import Resolution, answers_for, run_answers_for
 
-    state = GateState(run_id=RUN, gate=GATE, op_key=step_key("tool:a").stored())
+    state = GateState(run_id=RUN, gate=GATE, op_key=called_step("a"))
     state = state.absorb(Resolution(answers={"budget": {"add_dollars": 1.0}}))
     assert len(answers_for(state, "budget")) == 1
     assert len(run_answers_for(state, "budget")) == 1
@@ -173,7 +169,7 @@ def test_the_two_answer_scopes_are_distinct():
     next_op = GateState(
         run_id=RUN,
         gate=GATE,
-        op_key=step_key("tool:b").stored(),
+        op_key=called_step("b"),
         run_answers=dict(state.run_answers),
     )
     assert answers_for(next_op, "budget") == ()
@@ -218,9 +214,7 @@ class _Amounts(_Dom):
 
 
 def _occ_name(occ: int, op_name: str = "charge_card") -> Key:
-    return GateState(
-        run_id=RUN, gate=GATE, op_key=step_key(f"tool:{op_name}").stored(), occurrence=occ
-    ).park_name
+    return GateState(run_id=RUN, gate=GATE, op_key=called_step(op_name), occurrence=occ).park_name
 
 
 def test_each_occurrence_of_one_tool_needs_its_own_approval(tmp_path, sqlite_app):
@@ -266,7 +260,7 @@ def test_the_park_name_is_occurrence_scoped_and_injective():
         for r in ("a", "b")
         for n in range(2)
         for occ in range(3)
-        for k in (step_key("tool:charge_card").stored(), step_key("tool:wire_transfer").stored())
+        for k in (called_step("charge_card"), called_step("wire_transfer"))
     ]
     names = {
         GateState(run_id=r, gate=g, pass_n=n, occurrence=occ, op_key=k).park_name

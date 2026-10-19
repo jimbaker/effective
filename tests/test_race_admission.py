@@ -17,11 +17,13 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal, localcontext
 from enum import Enum
+from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from _conformance import private, review_name
+from _steps import called_step
 from pydantic import BaseModel, Field, PrivateAttr
 from test_race import _AnyTool
 from test_race_durable import SHAPES, _described, _Sequential, _Settled, _Tools
@@ -42,7 +44,7 @@ from effective.domain import CallTool
 from effective.engines.sqlite import SqliteApp, SqliteTaskContext
 from effective.govern import Refused
 from effective.handlers.admission import digest, observed
-from effective.handlers.base import Racing, Stopping
+from effective.handlers.base import Racing, Stopping, op_key
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
@@ -608,7 +610,9 @@ def test_A10_a_first_attempt_reads_no_refusal_record(backend, shape):
     def branch(tag: str) -> Callable[[], Any]:
         def calls() -> Any:
             for n in range(3):
-                yield from call_tool(f"{tag}{n}", {}, str)
+                yield from scoped(
+                    compose_key(t"call:{Index(n)}"), partial(call_tool, tag, {}, str)
+                )
             return tag
 
         return calls
@@ -907,7 +911,7 @@ def test_A16_a_loser_that_returned_after_a_leafless_structure_replays_to_its_val
     monkeypatch.setattr(Racing, "concurrently", ordered)
 
     def holds(op: Any) -> Any:
-        if isinstance(op, Step) and op.name == "tool:a":
+        if isinstance(op, Step) and op_key(op).stored() == called_step("a"):
             assert finished.wait(10)
         return (yield op)
 

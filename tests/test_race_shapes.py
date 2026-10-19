@@ -20,11 +20,11 @@ import pytest
 from _clock import HeldClock
 from _schedules import Turnstile
 from _shapes import allowed, cut_short_by_a_race, placed_step, run
+from _steps import called_step
 from test_race_durable import _described, _ReleasedByChoice, _Tools
 
-from effective.api import append_ledger, call_tool, direct_tool_key, quorum, race, scoped
+from effective.api import append_ledger, call_tool, quorum, race, scoped
 from effective.choice import Chosen
-from effective.handlers.base import step_key
 from effective.keys import Index, Key, Run, compose_key, race_choice, race_prefix
 from effective.keys.frame import scope_prefix
 from effective.keys.grammar import TERM_SEPARATOR
@@ -206,7 +206,7 @@ orders nothing, since nothing but branch 0's own call moves the clock."""
 def _placed(tool: str, index: int) -> str:
     """Where a call in branch `index` of the first race runs, composed as the handler composes it,
     which is the name a `placed_step` turnstile orders it by."""
-    return step_key(direct_tool_key(tool).stored()).prefixed(race_prefix(0, index)).stored()
+    return called_step(tool, race_prefix(0, index))
 
 
 def _cut_mid_flight(_run_id: str):

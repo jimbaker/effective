@@ -32,6 +32,7 @@ from _durable import (
     pg_ready,
 )
 from _gate import at_spend
+from _steps import placed_step
 
 from effective import permission
 from effective.budget import Grant, MeasuredBudget
@@ -50,7 +51,9 @@ LIMIT = 0.005
 OVER = 0.010  # a meter reading over the ceiling, so the budget policy parks
 
 
-def _park_name(mid: str, before: str = "step:assess_request", pass_n: int = 0) -> Key:
+def _park_name(
+    mid: str, before: str = placed_step("assess_request", "llm"), pass_n: int = 0
+) -> Key:
     """The gate's park name, DERIVED from `GateState`. It is op-scoped, so a hard-coded
     `govern:{gate}:{run}:{pass}` would silently fail to match."""
     return GateState(run_id=mid, gate=GATE, pass_n=pass_n, op_key=before).park_name

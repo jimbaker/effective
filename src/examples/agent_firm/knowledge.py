@@ -74,11 +74,15 @@ class Mismatched(Unretryable):
     """A snapshot whose contents do not hash to the digest the run was admitted with."""
 
 
+def knowledge_key(books: str, pinned: Pinned) -> Key:
+    """The name of the step that loads the snapshot `pinned` names."""
+    return compose_key(t"knowledge:{Name(books)},height={Index(pinned.height):default=0}")
+
+
 def load_knowledge(books: str, pinned: Pinned) -> Effect[Knowledge]:
     """The snapshot `pinned` names, as a recorded step, refused when its contents do not match."""
-    key = compose_key(t"knowledge:{Name(books)},height={Index(pinned.height):default=0}")
     call = CallTool(name="knowledge", args={"digest": pinned.digest}, result_schema=Knowledge)
-    loaded = Knowledge.model_validate((yield from step(key.stored(), call)))
+    loaded = Knowledge.model_validate((yield from step(knowledge_key(books, pinned), call)))
     if loaded.digest != pinned.digest:
         raise Mismatched(f"the snapshot read as {loaded.digest}, admitted as {pinned.digest}")
     return loaded

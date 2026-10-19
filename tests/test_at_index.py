@@ -13,12 +13,16 @@ at every prefix length, two independent projections that must not drift. Sibling
 the other end of the same boundary (the measured driver indexes Step-only).
 """
 
+import pytest
+from _steps import placed_step
+
 from effective.api import append_ledger, ask_llm, await_event, call_tool, scoped, store_artifact
 from effective.checkpoints import is_step_checkpoint
 from effective.fork import OpIndex, to_step_index
+from effective.handlers.base import step_key
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Key, Subject, compose_key
-from effective.ops import LedgerRow
+from effective.ops import CompositionRefused, LedgerRow
 
 
 def _shaped():
@@ -53,7 +57,7 @@ def test_the_recorded_trace_has_the_expected_all_ops_shape():
     assert keys == [
         "step;tool:fetch_email",
         keys[1],  # artifact:<content hash> — id is content-addressed, not fixed here
-        "step:extract",
+        placed_step("extract", "llm"),
         "ledger;extracted:m1",
         "event;review:m1",
         "ledger;reviewed:m1",
@@ -102,32 +106,20 @@ def test_to_step_index_agrees_with_the_bridge_step_filter_at_every_boundary():
             assert to_step_index(trace, OpIndex(at)) == bridge_kept, f"disagree at {at}"
 
 
-def test_a_step_name_that_merely_starts_like_an_arm_tag_is_still_a_step():
-    """The attack: name a step `monitoring:daily` and see whether the Step filter believes it.
+def test_a_key_that_merely_starts_like_an_arm_tag_is_still_a_step():
+    """The attack: a checkpoint keyed `monitoring:daily`, and whether the Step filter believes it.
 
     Every arm marker is a TAG — it ends in the delimiter — so the prefix test is exact by
-    construction. A marker without its colon matches any name that merely begins with the same
+    construction. A marker without its colon matches any key that merely begins with the same
     letters, which is a step the bridges would drop from a Step-only projection and a measured
-    prefix would index short.
-
-    `monitoring:` is the reachable case: `op_key` reserves `monitor:`, so `monitoring:daily` is a
-    name an author may legally choose."""
-
-    from effective.domain import CallTool
-    from effective.handlers.base import op_key
-    from effective.ops import Step
-
-    legal = "monitoring:daily"
-    assert (
-        op_key(Step(name=legal, op=CallTool(name="x", result_schema=dict))).stored()
-        == f"step;{legal}"
-    )
-    assert is_step_checkpoint(legal), "a legal step name was read as a substrate arm"
-
-    # …while the arm itself is not a Step. The author MAY take that name, because the arm makes
-    # the regions disjoint by CONSTRUCTION rather than by a list somebody keeps complete: an
-    # author's `monitor:0` keys as `step;monitor:0` and cannot be the walk's `monitor:0`.
+    prefix would index short."""
+    assert is_step_checkpoint("monitoring:daily"), "a step's key was read as a substrate arm"
     assert not is_step_checkpoint("monitor:0")
-    authored = op_key(Step(name="monitor:0", op=CallTool(name="x", result_schema=dict)))
-    assert authored.stored() == "step;monitor:0"
-    assert authored.stored() != "monitor:0"
+
+
+def test_an_authors_step_name_cannot_take_an_arm_tag():
+    """An author's step name is an atom, so neither `monitoring:daily` nor the arm's own
+    `monitor:0` can name a step: the arm keeps the regions disjoint by construction."""
+    for structured in ("monitoring:daily", "monitor:0"):
+        with pytest.raises(CompositionRefused):
+            step_key(structured, "tool")

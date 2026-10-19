@@ -11,6 +11,7 @@ import pytest
 from _authority import ruled
 from _conformance import Fault, private
 from _shapes import Outcome, governing, run
+from _steps import placed_step
 
 from effective import permission
 from effective.api import Effect, ask_llm
@@ -36,7 +37,9 @@ def node(path: str, level: Level):
     if level.depth == 0:
         yield from ask_llm("select", "select", str)
         return Branch(LEAVES, join)
-    yield from ask_llm(f"leaf-{path}", f"leaf-{path}", str)
+    # Each leaf asks in its own branch, so the branch frame keeps the `leaf` steps apart; the
+    # prompt carries the path, which is what a policy below reads to tell one leaf from another.
+    yield from ask_llm("leaf", f"leaf-{path}", str)
     return Answered(1)
 
 
@@ -99,8 +102,8 @@ def test_a_trip_inside_the_branches_keeps_the_rounds_before_it(backend):
     assert outcome.snap.state == "completed", outcome.snap
     assert outcome.snap.result == 0
     keys = backend.checkpoint_keys(outcome.task)
-    assert any(k.endswith("step:select") for k in keys)
-    assert not any("step:leaf-" in k for k in keys)
+    assert any(k.endswith(placed_step("select", "llm")) for k in keys)
+    assert not any(k.endswith(placed_step("leaf", "llm")) for k in keys)
 
 
 def test_a_denial_beside_a_budget_refusal_is_raised_on(backend):

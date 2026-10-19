@@ -16,6 +16,7 @@ import pytest
 from _clock import HeldClock
 from _conformance import review_name
 from _shapes import run
+from _steps import placed_step
 
 from effective.api import Effect, await_until, call_tool, gather
 from effective.api import sleep_until as api_sleep_until
@@ -425,7 +426,9 @@ def test_a_layer_injected_wait_settles_clear_of_the_op_it_wraps(tmp_path) -> Non
         app.emit_event(NAME, {"n": 1})
         app.work_batch()
         stored = dict(app.conn.execute("SELECT name, state FROM checkpoints").fetchall())
-        assert stored.get("step:s1") == "1", f"the step's checkpoint holds {stored!r}"
+        assert stored.get(placed_step("s1", "tool")) == "1", (
+            f"the step's checkpoint holds {stored!r}"
+        )
         assert "event;ev:x" in stored, f"the wait settled nowhere of its own: {stored!r}"
     finally:
         app.close()

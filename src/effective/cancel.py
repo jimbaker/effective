@@ -22,7 +22,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from effective.ops import CompositionRefused, Unretryable
+from effective.keys import Key
+from effective.ops import CompositionRefused, Unretryable, step_name_text
 
 CANCELLED = "__cancelled__"
 """The checkpoint key a cancelled result is stored under, reserved like the substrate's params."""
@@ -56,13 +57,13 @@ class ReservedShape(CompositionRefused):
         super().__init__("a step's result holds the key reserved for a cancel", name)
 
 
-def served(name: str, raw: Any) -> Any:
+def served(name: str | Key, raw: Any) -> Any:
     """A step's result as the workflow receives it: a `Cancelled` becomes `OpCancelled`, and a
     result in the reserved shape is refused on every handler."""
     if isinstance(raw, Cancelled):
-        raise OpCancelled(name, raw.partial)
+        raise OpCancelled(step_name_text(name), raw.partial)
     if load_cancelled(raw) is not None:
-        raise ReservedShape(name)
+        raise ReservedShape(step_name_text(name))
     return raw
 
 

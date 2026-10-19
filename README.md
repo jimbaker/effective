@@ -217,7 +217,7 @@ All under `src/effective/` unless noted.
 |---|---|
 | the op set and the authoring API: `step`, `ask_llm`, `call_tool`, `await_event`, `await_until`, `sleep_until`, `append_ledger` | `ops.py`, `domain.py`, `api.py` |
 | typed prompt channels: `render`, `Gated`, `Repair`, cache and role directives, skill disclosure | `channels.py`, `skills.py` |
-| identity: every op key composed from a t-string by one injective grammar | `keys/` |
+| identity: every op key composed from a t-string by one injective grammar, and numbered where it repeats, so two positions in a run never share one | `keys/` |
 | concurrency: `gather`, `race`, `quorum` | `api.py`, `choice.py` |
 | combinators: `recurse`, `route`, `descend`, `fixpoint` and `mutual` (loops in constant stack), `respawn` (a long loop as a chain of tasks), `hoisted` (a skill activated once above a fan-out), and sandboxed code as an effect (`run_code`, on Pydantic Monty) | `combinators.py`, `code.py`, `monty.py` |
 | judgments: `judge` and `select` ask typed questions from a t-string | `judgment.py`, `api.py` |

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _steps import placed_step
 
 pytestmark = pytest.mark.journey
 
@@ -25,6 +26,8 @@ assert _SPEC is not None
 assert _SPEC.loader is not None
 first = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(first)
+
+SETPOINT = placed_step("setpoint", "llm")
 
 
 def section(title: str) -> str:
@@ -46,7 +49,7 @@ def test_a_durable_run_asks_the_model_sets_the_thermostat_and_appends_one_row():
     house = first.House()
     done, steps = first.run_durably(house, "make it warmer")
     assert (done.state, done.result) == ("completed", 22.0)
-    assert steps == ("step:setpoint", "step;tool:thermostat", "ledger;setpoint:r1")
+    assert steps == (SETPOINT, "step;tool:thermostat", "ledger;setpoint:r1")
     assert house.asked == 1
 
 
@@ -56,7 +59,7 @@ def test_a_retry_after_an_outage_replays_the_answer_it_already_has():
     assert (done.state, done.result, house.outages) == ("completed", 22.0, 0)
     assert house.attempts == 2, "the outage failed the first attempt and the task ran again"
     assert house.asked == 1, "the retry was served the setpoint from the file"
-    assert steps == ("step:setpoint", "step;tool:thermostat", "ledger;setpoint:r1")
+    assert steps == (SETPOINT, "step;tool:thermostat", "ledger;setpoint:r1")
 
 
 def test_an_outage_past_the_last_attempt_fails_the_run_and_still_asks_once():
@@ -64,14 +67,14 @@ def test_an_outage_past_the_last_attempt_fails_the_run_and_still_asks_once():
     done, steps = first.run_durably(house, "make it warmer")
     assert done.state == "failed"
     assert house.asked == 1
-    assert steps == ("step:setpoint",)
+    assert steps == (SETPOINT,)
 
 
 def test_the_guardrail_refuses_before_the_thermostat_runs():
     house = first.House(celsius=45)
     done, steps = first.run_durably(house, "make it much warmer")
     assert done.result == {"reason": "celsius outside the allowed range"}
-    assert steps == ("step:setpoint",)
+    assert steps == (SETPOINT,)
 
 
 def _run_as_script() -> str:

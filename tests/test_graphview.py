@@ -15,6 +15,7 @@ from uuid import UUID
 
 import pytest
 from _keymap import including
+from _steps import placed_step
 
 from effective.api import append_ledger, ask_llm, await_event, call_tool, gather
 from effective.checkpoints import keys, read_sqlite_conn
@@ -45,7 +46,7 @@ from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Index, Key, Segment, Subject, compose_key
-from effective.ops import AwaitEvent, LedgerRow, Step
+from effective.ops import AwaitEvent, CompositionRefused, LedgerRow, Step
 from effective.parked import ParkedTask, pending_key, read_sqlite_parked_conn
 
 # A hand-built `ParkedTask` for the bridge tests — no engine involved, so the id is a
@@ -348,13 +349,14 @@ def test_the_normalizer_stops_at_the_STEP_arm_so_an_authored_name_is_not_read_as
     hunting a data-loss bug that did not happen."""
     from effective.graphview import ledger_collisions
 
-    authored = "step;ledger;dup:m1"
+    named = Key.parse("ledger;dup:m1")
+    authored = placed_step(named, "tool")
     assert bare_name(authored) == authored  # not `ledger;dup:m1`
     assert kind_of(authored) == "step"
     assert ledger_collisions(from_keys("r", [authored, f"{authored}#2"])) == ()
 
     # ...and the stop is at the arm, not at the string: frames OUTSIDE it still peel.
-    assert bare_name("gather:0,0;rec:0;step;ledger;dup:m1") == authored
+    assert bare_name(placed_step(named, "tool", "gather:0,0;rec:0;")) == authored
 
 
 def test_a_frame_must_FRAME_something_to_be_dropped():
@@ -405,10 +407,8 @@ def test_a_scope_with_no_coordinate_is_not_folded():
     """`improve`'s `seed` frame carries nothing to index, so there is no second execution it could
     be confused with — and the seed IS scored at a different program position from a round's
     candidate. It needs no ruling; a coordinate-free term simply is not an unrolling one."""
-    trace = ["seed;step:score", "cand:0,0;step:score"]
-    assert "seed;step:score" in [
-        n.key for n in fold_cycles(from_keys("r1", trace), drop=(Index,)).nodes
-    ]
+    trace = [placed_step("score", "llm", "seed;"), placed_step("score", "llm", "cand:0,0;")]
+    assert trace[0] in [n.key for n in fold_cycles(from_keys("r1", trace), drop=(Index,)).nodes]
 
 
 def test_a_scope_the_map_cannot_resolve_is_KEPT_and_hides_nothing_behind_it():
@@ -533,14 +533,19 @@ def test_a_pending_node_cannot_collide_with_a_recorded_key():
 
     `to_mermaid` ids nodes by key, so a synthesized key equal to a recorded one emits two node
     lines sharing an id and a self-edge, silently wrong. It cannot arise: a Step's key opens
-    with its OWN arm, so an author naming a step `event;review:m1` gets `step;event;review:m1`,
-    which is not an await's key and cannot be, whatever the author writes. **Disjoint by
-    construction beats a list somebody has to keep complete**, which is why this asserts "the key
-    it composes is not the one it imitates" rather than "the name is refused"."""
+    with its OWN arm, so a step named by the key `event;review:m1` is a `step` node, which is not
+    an await's key and cannot be. **Disjoint by construction beats a list somebody has to keep
+    complete**, which is why this asserts "the key it composes is not the one it imitates"."""
     for imitation in ("event;review:m1", "event;x"):
-        composed = op_key(Step(name=imitation, op=CallTool(name="x", result_schema=int)))
-        assert composed.stored() != imitation
-        assert composed.stored() == f"step;{imitation}"
+        composed = placed_step(Key.parse(imitation), "tool")
+        assert composed != imitation
+        assert kind_of(composed) == "step"
+
+
+@pytest.mark.parametrize("imitation", ["event;review:m1", "event;x"])
+def test_a_step_named_with_an_awaits_text_is_refused(imitation: str):
+    with pytest.raises(CompositionRefused):
+        op_key(Step(name=imitation, op=CallTool(name="x", result_schema=int)))
 
 
 def test_states_alone_cannot_introduce_the_pending_node():
@@ -664,6 +669,10 @@ def _domain():
     return MeteredInterpreter(llm=lambda _op: ({"answer": "ans"}, Usage()), tools=lambda _op: 7)
 
 
+EXTRACT = placed_step("extract", "llm")
+"""The key of `small_wf`'s model call."""
+
+
 def small_wf(message_id: str):
     """~10 nodes: the decision shape, which is a step, a ledger row, a gate and a branch.
 
@@ -714,7 +723,10 @@ def fan_wf(message_id: str, width: int = 4):
         def thunk():
             value = yield from call_tool("fetch", {}, int)
             yield from append_ledger(
-                LedgerRow(event_id=Key.parse(f"b{i}:{message_id}"), kind="branch")
+                LedgerRow(
+                    event_id=compose_key(t"b:{Subject(str(i))},{Segment(message_id)}"),
+                    kind="branch",
+                )
             )
             return value
 
@@ -843,11 +855,11 @@ def test_experiment_legibility_at_three_scales(tmp_path, capsys, sqlite_app):
 
     fan_unrolled, fan_folded = by_name["fan"]
     assert len(fan_unrolled.nodes) == 9  # 4 branches x (tool + ledger) + the join row
-    # SIX, not three — and this is the experiment's second finding. The branch COORDINATE folds
-    # (four `gather:0,i;tool:fetch` become one `tool:fetch` x4), but each branch's ledger row was
-    # given a branch-varying event id by its author (`b0:{subject}`…`b3:{subject}`), and the fold
-    # works on
-    # the KEY. Data-dependent names are different nodes, because as ledger rows they really are.
+    # SIX, the experiment's second finding. The branch COORDINATE folds (four
+    # `gather:0,i;tool:fetch` become one `tool:fetch` x4), but each branch's ledger row carries
+    # the branch as data in its id (`b:0,{subject}`…`b:3,{subject}`, a `Subject`), and the fold
+    # works on the KEY. Data-dependent names are different nodes, because
+    # as ledger rows they really are.
     assert len(fan_folded.nodes) == 6
     assert next(n.count for n in fan_folded.nodes if n.key == "gather:*,*;step;tool:fetch") == 4
 
@@ -858,7 +870,7 @@ def test_experiment_legibility_at_three_scales(tmp_path, capsys, sqlite_app):
 
     scrubbed = fold_cycles(
         from_keys(
-            "r-fan", list(canonical(keys_of(fan_unrolled), scrub=[f"b{i}" for i in range(4)]))
+            "r-fan", list(canonical(keys_of(fan_unrolled), scrub=[f"b:{i}" for i in range(4)]))
         )
     )
     assert len(scrubbed.nodes) == 3  # fetch, the branch row, the join row
@@ -1097,7 +1109,7 @@ def test_a_parked_run_projects_a_pending_node_end_to_end_on_the_embedded_engine(
     (park,) = read_sqlite_parked_conn(app.conn, clock=app.clock)
     assert park.wake_event == "review:m-p"  # RAW, as the reader reports it
     recorded = list(keys(read_sqlite_conn(app.conn, task_id)))
-    assert recorded == ["step:extract", "ledger;extracted:m-p"]
+    assert recorded == [EXTRACT, "ledger;extracted:m-p"]
 
     graph = from_keys("r-p", recorded, pending=pending_key(park))
     assert [n.key for n in graph.nodes] == [*recorded, "event;review:m-p"]
@@ -1122,7 +1134,7 @@ def test_a_parked_run_projects_a_pending_node_end_to_end_on_the_embedded_engine(
     )  # no park, so no pending node to synthesize
     after = list(keys(read_sqlite_conn(app.conn, task_id, exclude=())))
     assert after == [
-        "step:extract",
+        EXTRACT,
         "ledger;extracted:m-p",
         "ledger;reviewed:m-p",
         "ledger;committed:m-p",
@@ -1159,7 +1171,7 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
     base_keys = list(keys(read_sqlite_conn(app.conn, base_id)))
     seed = fork_seed(read_sqlite_conn(app.conn, base_id), through=f"ledger;extracted:{message_id}")
     assert [k.stored() for k in seed] == [
-        "step:extract",
+        EXTRACT,
         f"ledger;extracted:{message_id}",
     ]  # the prefix, nothing more
 
@@ -1207,7 +1219,7 @@ def test_the_run_you_look_at_is_a_run_you_can_fork(tmp_path, sqlite_app):
     ]
     assert child_keys[: len(seed)] == base_keys[: len(seed)]
     assert keys_of(from_keys("r-fork", child_keys))[:2] == [
-        "step:extract",
+        EXTRACT,
         f"ledger;extracted:{message_id}",
     ]
     app.close()
@@ -1649,9 +1661,10 @@ def test_a_flat_tape_draws_flat_and_that_is_the_honest_picture():
     A renderer that manufactured levels here would be claiming a shape the tape does not carry;
     `project` is what recovers structure from a flat tape, and it is the caller's choice to apply
     it."""
-    tape = ["step;plan", "step;tool:list_dir", "step;review"]
+    plan, review = placed_step("plan", "llm"), placed_step("review", "llm")
+    tape = [plan, "step;tool:list_dir", review]
     assert to_text(from_keys("run-1", tape)) == "\n".join(
-        ["run-1", "├─ step;plan", "├─ step;tool:list_dir", "└─ step;review"]
+        ["run-1", f"├─ {plan}", "├─ step;tool:list_dir", f"└─ {review}"]
     )
 
 

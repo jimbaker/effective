@@ -39,6 +39,9 @@ from collections.abc import Callable, Collection, Generator, Sequence
 from itertools import combinations
 from typing import Any
 
+from effective.api import direct_tool_key
+from effective.domain import CallTool
+from effective.keys import Key
 from effective.keys.frame import branch_frames
 from effective.layers import current_placement, op_layer
 from effective.ops import AppendLedgerRow, Step, WorkflowOp
@@ -53,8 +56,16 @@ def ledger_path(op: WorkflowOp) -> str | None:
 
 
 def step_name(op: WorkflowOp) -> str | None:
-    """Order a step by the name its author gave it."""
-    return str(op.name) if isinstance(op, Step) else None
+    """Order a step by the name its author gave it, a tool call's as `tool:{name}`."""
+    match op:
+        case Step(op=CallTool(name=tool)):
+            return direct_tool_key(tool).stored()
+        case Step(name=str() as name):
+            return name
+        case Step(name=Key() as key):
+            return key.stored()
+        case _:
+            return None
 
 
 def branch_of(placement: str) -> tuple[str, ...]:

@@ -29,6 +29,7 @@ from effective.api import Effect
 from effective.cache import Cache, FileStore
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import Answers, AskLLM, CallTool, DomainOp, Judge
+from effective.handlers.base import step_key
 from effective.interpreters.web import Fetched, Hit, NotHeld, Page, Searched, brave_url
 from effective.search import Round
 from effective.telemetry import otlp_jsonl_sink, sidecar_spans, traced
@@ -431,12 +432,16 @@ def traced_run(root: Path, run_id: str) -> list[dict[str, Any]]:
     return sidecar_spans(root / "spans.jsonl", session_id=run_id)
 
 
+READ = step_key("read", "llm").terms()[-1].render()
+"""The summary's row for `ask_llm("read")`: the last term of its key."""
+
+
 def test_the_summary_counts_each_op_and_what_the_cache_answered(tmp_path):
     traced_run(tmp_path, "first")
     second = traced_run(tmp_path, "second")
     rows = {cells(line)[0]: cells(line)[1:] for line in command.summary(second).splitlines()[2:]}
-    assert set(rows) == {"judge:worth", "step:read", "tool:fetch", "tool:search"}
-    for op in ("judge:worth", "step:read", "tool:fetch"):
+    assert set(rows) == {"judge:worth", READ, "tool:fetch", "tool:search"}
+    for op in ("judge:worth", READ, "tool:fetch"):
         asked, cached, *_ = rows[op]
         assert asked == cached != "0"
     assert rows["tool:search"][1] == "0"
@@ -480,7 +485,7 @@ def test_the_command_prints_its_answers_and_its_summary_as_markdown(monkeypatch,
     assert cells(summary.splitlines()[0])[:3] == ["op", "asked", "from cache"]
     assert {cells(line)[0] for line in summary.splitlines()[2:]} == {
         "judge:worth",
-        "step:read",
+        READ,
         "tool:fetch",
         "tool:search",
     }

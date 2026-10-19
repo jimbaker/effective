@@ -51,6 +51,7 @@ def test_a_door_refuses_text_holding_any_metacharacter_and_names_its_role():
     named = {}
     for byte in METACHARACTERS:
         with pytest.raises(FormattedEventName) as refused:
+            # lint: key-composition: the subject is a name holding each metacharacter, refused
             event_name(f"ev{byte}x")
         named[byte] = f"the {METACHARACTER_ROLES[byte]} {byte!r}" in str(refused.value)
     assert named == dict.fromkeys(METACHARACTERS, True)

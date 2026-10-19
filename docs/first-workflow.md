@@ -18,9 +18,9 @@ uv run python examples/first_workflow.py
 The first `uv sync` installs the whole development environment, so give it a minute or two. Then:
 
 ```text
-run:       22.0 via step:setpoint step;tool:thermostat ledger;setpoint:r1
+run:       22.0 via step;llm:setpoint step;tool:thermostat ledger;setpoint:r1
 resume:    22.0 after an outage: 2 attempts, and the model was asked 1 time
-guardrail: {'reason': 'celsius outside the allowed range'} via step:setpoint
+guardrail: {'reason': 'celsius outside the allowed range'} via step;llm:setpoint
 ```
 
 `uv run pytest --no-cov tests/test_first_workflow.py` pins each of those lines, and this block.
@@ -87,7 +87,7 @@ generator: it yields ops and returns a `float` or a `Repair`.
 | `t"…"` | a PEP 750 template. `render` walks it: `{request}` is an input, rendered into the prompt; `{celsius}` is a `Gated` **output channel**, declaring a field the response must carry and a check it must pass. A channel is named by what is inside its braces, and the channels must match the fields of `output=` one to one: rename the variable to `temp`, or give `Setpoint` a field no channel fills, and `render` raises `ChannelMismatchError` |
 | `ask_llm("setpoint", setpoint.messages, dict)` | one model step. The first argument is the step's **name**, the identity replay matches on. A name like `setpoint` or `set_point.v2` is one atom; the handler refuses one that is not, such as `water plan`, when it mints the step's key, and its error lists the forms an atom takes. The last is the type of the raw response. It is shorthand for `step("setpoint", AskLLM(setpoint.messages, dict))` |
 | `setpoint.resolve(response)` | parses the response into a `Setpoint`, or returns a `Repair` whose `reason` says what was wrong: a missing field, a bad value, a failed check, or a response that is not a mapping of fields at all. The `reason` is the text a re-prompt would send back |
-| `call_tool("thermostat", {"celsius": target}, str)` | one tool step: the tool's name, its arguments, and the type of its result. Its step is named `tool:` plus the tool, so it is shorthand for `step("tool:thermostat", CallTool(name="thermostat", result_schema=str, args={"celsius": target}))` |
+| `call_tool("thermostat", {"celsius": target}, str)` | one tool step: the tool's name, its arguments, and the type of its result. Its step is named for the tool, so it is shorthand for `step("thermostat", CallTool(name="thermostat", result_schema=str, args={"celsius": target}))` |
 | `append_ledger(LedgerRow(…))` | one row on the append-only ledger. `LedgerRow` is a pydantic model, and fields past `event_id` and `kind`, like `celsius`, ride on the row |
 | `compose_key(t"setpoint:{Subject(request_id)}")` | the row's id. A bare `str` is refused because it could carry a separator and make two ids collide. A marker says what the coordinate is: `Subject` for the domain's own value, `Run` for a run id, `Name` for a position, `Index` for a counter over re-executions of ONE position, `Ordinal` for a counter over distinct positions of one kind. The last two read alike and a view treats them oppositely: it folds the `Index` away and keeps the `Ordinal`. Each marks one atom, such as `r1` or `bed-1`, and `compose_key` refuses what is not one, such as `a:b`, `007` or `2026-09-11`. A second coordinate follows a comma: `t"setpoint:{Name(house)},{Index(n)}"` |
 | `case unreachable: assert_never(…)` | makes `ty`, the type checker the repo's gate runs, fail if `resolve` ever gains a third outcome |
@@ -176,7 +176,7 @@ registers the workflow as a task on `SqliteApp`, spawns it, and runs it until it
 
 | output line | what happened |
 |---|---|
-| `run` | `DurableHandler` runs each op as a checkpointed step of the task, so the file records each result before the workflow sees it. The keys printed are those checkpoints: `step:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`, where `;` joins the terms of one key |
+| `run` | `DurableHandler` runs each op as a checkpointed step of the task, so the file records each result before the workflow sees it. The keys printed are those checkpoints: `step;llm:setpoint`, `step;tool:thermostat`, and the ledger row's `ledger;setpoint:r1`, where `;` joins the terms of one key and a step's second term names its kind of op: a model call, a judgment, or a tool call |
 | `resume` | the thermostat is offline on the first attempt, so the attempt fails and the engine retries the task: two attempts. The retry runs the workflow from the top, the file serves `setpoint` its recorded result, and only the thermostat call runs again: the model was asked once. Nothing is captured from a frame; suspension is replay |
 | `guardrail` | the model responds with 45°C, the channel's check fails, and the workflow returns the `Repair` before reaching the thermostat. A task's result is stored as JSON, so the `Repair` comes back as its fields |
 

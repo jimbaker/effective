@@ -5,8 +5,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from _steps import placed_step
 
 from effective.graphview import from_keys, to_sequence
+from effective.keys import Key
 
 _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
@@ -56,10 +58,15 @@ def _swapped_pages(text: str) -> str:
     return re.sub(r"│  └─ rec:[02]\n", lambda m: swap[m[0]], text)
 
 
+def _asked(name: str, frames: str) -> str:
+    """The sequence label of the model call `name` under `frames`, as Mermaid draws it."""
+    return placed_step(name, "llm", frames).replace(";", "#59;")
+
+
 def _read_after_consolidating(text: str) -> str:
     """A page read drawn after the consolidation that merges every page's themes."""
-    read = "  b3->>world: rec:2#59;step:observe\n"
-    consolidated = "  run->>world: d:1#59;step:consolidate\n"
+    read = f"  b3->>world: {_asked('observe', 'rec:2;')}\n"
+    consolidated = f"  run->>world: {_asked('consolidate', 'd:1;')}\n"
     assert consolidated in text
     return _without(text, read).replace(consolidated, consolidated + read, 1)
 
@@ -89,21 +96,17 @@ def test_a_block_drawing_another_program_fails_the_check(tmp_path, monkeypatch, 
 
 
 def test_every_view_agrees_across_interleavings_that_keep_each_branch_in_order():
+    """One run, redrawn with its routing branches in the reverse of the order they first ran."""
     keys = list(projected.timeline("voice"))
-    routing = [k for k in keys if k.startswith("gather:2,")]
-    assert len(routing) == 6
-    reordered = [
-        "gather:2,2;step;judge:kind",
-        "gather:2,1;step;judge:kind",
-        "gather:2,2;step;tool:file",
-        "gather:2,1;step;tool:file",
-        "gather:2,0;step;judge:kind",
-        "gather:2,0;step;tool:file",
-    ]
-    assert sorted(reordered) == sorted(routing)
-    other = from_keys("voice", [k for k in keys if k not in routing] + reordered)
+    routing = [key for key in keys if key.startswith("gather:2,")]
+    branch = {key: Key.parse(key).terms()[0] for key in routing}
+    first_ran = list(dict.fromkeys(branch.values()))
+    assert len(first_ran) == 3
+    reversed_branches = iter(sorted(routing, key=lambda key: -first_ran.index(branch[key])))
+    other = [next(reversed_branches) if key in branch else key for key in keys]
     for view in projected.FENCE:
-        drawn, redrawn = projected.drawn("voice", view), projected.render(view, other)
+        drawn = projected.render(view, from_keys("voice", keys))
+        redrawn = projected.render(view, from_keys("voice", other))
         assert drawn != redrawn or view == "graph"
         assert projected.agreed(view, drawn) == projected.agreed(view, redrawn)
 
@@ -117,7 +120,8 @@ def test_two_interleavings_of_one_program_agree():
 
 
 def test_a_step_named_with_a_gather_term_keeps_its_edges():
-    keys = ["step;authorize", "step;gather:metrics", "step;charge"]
+    gathered = Key.parse("gather:metrics")
+    keys = [placed_step(name, "tool") for name in ("authorize", gathered, "charge")]
     forward = projected.render("graph", from_keys("r", keys))
     backward = projected.render("graph", from_keys("r", keys[::-1]))
     assert projected.agreed("graph", forward) != projected.agreed("graph", backward)
@@ -127,15 +131,19 @@ def _tree(keys: list[str]) -> object:
     return projected.agreed("tree", projected.render("tree", from_keys("r", keys)))
 
 
+def _branch(gather: int, branch: int, name: str) -> str:
+    return placed_step(name, "llm", f"gather:{gather},{branch};")
+
+
 def test_a_gathers_branches_may_swap_and_two_gathers_may_not():
-    first = ["gather:0,0;step:a", "gather:0,1;step:b"]
-    second = ["gather:1,0;step:c", "gather:1,1;step:d"]
+    first = [_branch(0, 0, "a"), _branch(0, 1, "b")]
+    second = [_branch(1, 0, "c"), _branch(1, 1, "d")]
     assert _tree(first + second) == _tree(first[::-1] + second[::-1])
     assert _tree(first + second) != _tree(second + first)
 
 
 def test_a_second_root_is_part_of_the_tree():
-    block = projected.render("tree", from_keys("r", ["step:a"]))
-    grafted = block.replace("\n```", "\nFAKE ROOT\n└─ step;pay\n```")
+    block = projected.render("tree", from_keys("r", [placed_step("a", "llm")]))
+    grafted = block.replace("\n```", f"\nFAKE ROOT\n└─ {placed_step('pay', 'llm')}\n```")
     assert grafted != block
     assert projected.agreed("tree", grafted) != projected.agreed("tree", block)

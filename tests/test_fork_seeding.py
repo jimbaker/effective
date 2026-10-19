@@ -204,7 +204,7 @@ def test_an_event_name_is_a_fact_not_a_queue_so_awaits_are_name_keyed(sqlite_app
 
     def twice():
         a = yield from await_event(compose_key(t"rev:{Segment('r2')},{Segment('m1')}"), dict)
-        yield from step("tool:mid", CallTool(name="m", result_schema=str))
+        yield from step("mid", CallTool(name="m", result_schema=str))
         b = yield from await_event(compose_key(t"rev:{Segment('r2')},{Segment('m1')}"), dict)
         return [a, b]
 

@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from _authority import ruled
 from _schedules import Turnstile, step_name
+from _steps import placed_step
 
 from effective.api import Effect, ask_llm, call_tool, gather
 from effective.budget import Grant, MeasuredBudget, OnExhaust
@@ -16,7 +17,7 @@ from effective.budget import as_policy as budget_policy
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import DomainOp
 from effective.govern import GateState, Policy, Proceed, Resolution, govern
-from effective.handlers.base import _walk_run, walk_run
+from effective.handlers.base import _walk_run, step_key, walk_run
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Key, Run, compose_key
@@ -38,6 +39,16 @@ class Unmetered:
 
     def run(self, op: DomainOp[Any]) -> Any:
         return "ans"
+
+
+def asked(name: str) -> str:
+    """The stored key of `ask_llm(name)` at the task root."""
+    return placed_step(name, "llm")
+
+
+def last_term(name: str) -> str:
+    """The last term of `ask_llm(name)`'s key, under whatever frames place it."""
+    return step_key(name, "llm").terms()[-1].render()
 
 
 def asks(*names: str) -> Callable[[str], Effect[list[str]]]:
@@ -98,7 +109,7 @@ def test_a_metered_run_refuses_the_ask_after_the_spend_crosses_the_ceiling(backe
     task, snap = gated(backend, asks("first", "second"), ceiling(DOLLAR / 2))
     assert snap.state == "failed", snap
     assert backend.failure_kind(snap) == "BudgetRefused", snap.failure
-    assert backend.checkpoint_keys(task) == ["step:first"], "the second ask was refused"
+    assert backend.checkpoint_keys(task) == [asked("first")], "the second ask was refused"
 
 
 @pytest.mark.parametrize("grants", [[1.0], [0.25, 1.0]], ids=["enough", "short then enough"])
@@ -109,33 +120,33 @@ def test_a_grant_resumes_on_the_spend_the_replay_derives(backend, grants):
     names = []
     for dollars in grants:
         assert snap.state not in ("completed", "failed"), snap
-        assert backend.checkpoint_keys(task) == ["step:a", "step:b"]
+        assert backend.checkpoint_keys(task) == [asked("a"), asked("b")]
         (parked,) = backend.parked(task)
         names.append(parked.wake_event)
         backend.emit_event(task, Key.parse(parked.wake_event), ruled(granted(dollars)))
         snap = backend.run_until_result(task)
     assert snap.state == "completed", snap
-    assert backend.checkpoint_keys(task) == ["step:a", "step:b", "step:c"]
+    assert backend.checkpoint_keys(task) == [asked(name) for name in "abc"]
     assert len(set(names)) == len(grants), "each park has its own name"
-
-
-def leaf(tag: str) -> Callable[[], Effect[str]]:
-    return lambda: ask_llm(f"leaf-{tag}", "p", str)
-
-
-def branch(i: int) -> Callable[[], Effect[list[str]]]:
-    return lambda: gather([leaf(f"{i}a"), leaf(f"{i}b")])
-
-
-def nested(_run_id: str) -> Effect[str]:
-    yield from ask_llm("before", "p", str)
-    yield from gather([branch(0), branch(1)])
-    yield from ask_llm("after", "p", str)
-    return "done"
 
 
 LEAVES = ("leaf-0a", "leaf-0b", "leaf-1a", "leaf-1b")
 """The nested gather's four leaves, in branch-index order."""
+
+
+def leaf(name: str) -> Callable[[], Effect[str]]:
+    return lambda: ask_llm(name, "p", str)
+
+
+def branch(names: tuple[str, ...]) -> Callable[[], Effect[list[str]]]:
+    return lambda: gather([leaf(name) for name in names])
+
+
+def nested(_run_id: str) -> Effect[str]:
+    yield from ask_llm("before", "p", str)
+    yield from gather([branch(LEAVES[:2]), branch(LEAVES[2:])])
+    yield from ask_llm("after", "p", str)
+    return "done"
 
 
 @pytest.mark.parametrize(
@@ -182,12 +193,9 @@ def test_a_gate_in_a_branch_reads_the_root_spend(backend, order):
 
     assert snap.state == "completed", snap
     assert seen == {
-        "step:before": 0.0,
-        "step:leaf-0a": DOLLAR,
-        "step:leaf-0b": DOLLAR,
-        "step:leaf-1a": DOLLAR,
-        "step:leaf-1b": DOLLAR,
-        "step:after": 5 * DOLLAR,
+        last_term("before"): 0.0,
+        **{last_term(leaf): DOLLAR for leaf in LEAVES},
+        last_term("after"): 5 * DOLLAR,
     }
     assert len(threads) > 1, "the branches ran on their own threads"
     if turnstile is None:
@@ -216,7 +224,7 @@ def only_the_second(policy: Policy) -> Policy:
 
 PLACEMENTS = {
     "a gate holding the policy": (lambda p: p, []),
-    "a policy wrapped for the second ask": (only_the_second, ["step:first"]),
+    "a policy wrapped for the second ask": (only_the_second, [asked("first")]),
 }
 """How the policy reaches the gate, and the ops that run before the refusal."""
 

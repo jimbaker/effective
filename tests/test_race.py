@@ -7,19 +7,21 @@ only if it stopped at an admission once the choice was saved.
 
 import threading
 from collections.abc import Callable, Iterator, Mapping
+from functools import partial
 from typing import Any
 
 import pytest
+from _steps import called_step
 
 from effective.api import await_event, call_tool, gather, quorum, race, scoped
 from effective.choice import Chosen, Impossible, Raised, Refusal, Stopped, Won
 from effective.domain import CallTool
 from effective.govern import Refused
 from effective.handlers import recording
-from effective.handlers.base import BranchRaised, Racing, TraceEntry
+from effective.handlers.base import BranchRaised, Racing, TraceEntry, op_key
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
-from effective.keys import Key
+from effective.keys import Index, Key, compose_key
 from effective.ops import CompositionRefused, RaceUndecided, Step, leaves
 
 
@@ -47,7 +49,7 @@ def _returns(name: str):
 
 def _refuses(reason: str):
     def branch():
-        yield from call_tool(f"before-{reason}", {}, str)
+        yield from call_tool("before", {}, str)
         raise Refused(
             Step(name="gate", op=CallTool(name="gate", args={}, result_schema=str)), reason
         )
@@ -65,7 +67,7 @@ def _forever(name: str):
 
     def branch():
         for n in range(LONG):
-            yield from call_tool(f"{name}{n}", {}, str)
+            yield from scoped(compose_key(t"loop:{Index(n)}"), partial(call_tool, name, {}, str))
         return "ran out"
 
     return branch
@@ -176,7 +178,7 @@ def test_a_race_inside_a_loser_never_chooses():
         return (yield from race([_returns("won"), inner]))
 
     inner_started = threading.Event()
-    held = _Held("tool:won", until=inner_started, marks={"tool:p0": inner_started})
+    held = _Held("tool:won", until=inner_started, marks={"tool:p": inner_started})
     answer, handler = _recorded(program, held)
     assert answer == Chosen((Won(0, "won"),), (Won(0, "won"), Stopped(1)))
     keys = [entry.key.stored() for entry in handler.trace]
@@ -235,7 +237,7 @@ def test_a_flagged_loser_stops_at_a_structure(monkeypatch, structure):
     decided = _after_a_read(monkeypatch, lambda race, batch, slots: race.decided())
 
     def holds(op: Any) -> Any:
-        if isinstance(op, Step) and op.name == "tool:a":
+        if isinstance(op, Step) and op_key(op).stored() == called_step("a"):
             assert asked.wait(10)
         elif isinstance(op, Step):
             asked.set()

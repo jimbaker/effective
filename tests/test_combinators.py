@@ -11,11 +11,12 @@ the sugar adds no replay machinery of its own.
 """
 
 import pytest
+from _steps import placed_step
 from pydantic import TypeAdapter
 
 from effective.api import GatherBranch, await_event, qualified_event_name, scoped, step
 from effective.budget import Grant, depth_grant_name
-from effective.code import CodeOutcome, run_code
+from effective.code import CodeOutcome, _segment_key, run_code
 from effective.combinators import (
     AcrossTasks,
     Answered,
@@ -47,7 +48,7 @@ from effective.react import (
     Trajectory,
     run_agent,
 )
-from effective.skills import Pin
+from effective.skills import Pin, activation_key
 
 # ------------------------------------------------------------- run_code + code_act
 
@@ -68,7 +69,9 @@ def test_run_code_names_its_own_key_and_a_scope_places_it():
         responses={"rec:0;code:seg,0,audit": CodeOutcome(status="complete", output=2)}
     )
     assert handler.run(wf) == 2
-    assert [e.key.stored() for e in handler.trace] == ["rec:0;step;code:seg,0,audit"]
+    assert [e.key.stored() for e in handler.trace] == [
+        placed_step(_segment_key("audit", False, 0), "tool", "rec:0;")
+    ]
 
 
 def test_run_code_rejects_a_slashed_name():
@@ -203,17 +206,19 @@ def test_recurse_tree_folds_with_singleton_passthrough():
     # gather:1, gather:1` — fold levels 1 and 2 both `gather:1`, the very arity collision B3
     # fixes; they are now `gather:2` and `gather:3`.)
     assert [e.key.stored() for e in handler.trace] == [
-        "step:decompose",
-        "gather:0,0;rec:0;step:leaf",  # g=0: the leaf map over 5 chunks
-        "gather:0,1;rec:1;step:leaf",
-        "gather:0,2;rec:2;step:leaf",
-        "gather:0,3;rec:3;step:leaf",
-        "gather:0,4;rec:4;step:leaf",
+        placed_step("decompose", "tool"),
+        placed_step("leaf", "tool", "gather:0,0;rec:0;"),  # g=0: the leaf map over 5 chunks
+        placed_step("leaf", "tool", "gather:0,1;rec:1;"),
+        placed_step("leaf", "tool", "gather:0,2;rec:2;"),
+        placed_step("leaf", "tool", "gather:0,3;rec:3;"),
+        placed_step("leaf", "tool", "gather:0,4;rec:4;"),
         # g=1: fold level 0 — [A,B] [C,D] merge; [E] passes through
-        "gather:1,0;fold:0,0;step:merge",
-        "gather:1,1;fold:0,1;step:merge",
-        "gather:2,0;fold:1,0;step:merge",  # g=2: fold level 1 — [AB,CD] merge; [E] passes through
-        "gather:3,0;fold:2,0;step:merge",  # g=3: fold level 2 — [ABCD,E] merge
+        placed_step("merge", "tool", "gather:1,0;fold:0,0;"),
+        placed_step("merge", "tool", "gather:1,1;fold:0,1;"),
+        placed_step(
+            "merge", "tool", "gather:2,0;fold:1,0;"
+        ),  # g=2: fold level 1, [AB,CD] merge; [E] passes through
+        placed_step("merge", "tool", "gather:3,0;fold:2,0;"),  # g=3: fold level 2, [ABCD,E] merge
     ]
 
 
@@ -285,7 +290,10 @@ def test_route_dispatches_on_the_recorded_label():
         )
 
     assert handler.run(wf) == "ran"
-    assert [e.key.stored() for e in handler.trace] == ["q:0;step:classify", "q:0;step:script"]
+    assert [e.key.stored() for e in handler.trace] == [
+        placed_step("classify", "tool", "q:0;"),
+        placed_step("script", "tool", "q:0;"),
+    ]
 
 
 def test_route_unknown_label_is_loud():
@@ -374,12 +382,12 @@ def test_descend_full_trace_pins_the_durable_key_sequence():
     assert parked.awaiting.stored() == f"q;{depth_grant_name('r', depth=3, generation=0).stored()}"
     assert parked.resume(Grant(add_depth=0)) == "best"
     assert [e.key.stored() for e in handler.trace] == [
-        "q;d:0;step:judge",
+        placed_step("judge", "tool", "q;d:0;"),
         f"q;event;{depth_grant_name('r', depth=1, generation=0).stored()}",
-        "q;d:1;step:judge",
-        "q;d:2;step:judge",
+        placed_step("judge", "tool", "q;d:1;"),
+        placed_step("judge", "tool", "q;d:2;"),
         f"q;event;{depth_grant_name('r', depth=3, generation=0).stored()}",
-        "q;d:3;step:judge",
+        placed_step("judge", "tool", "q;d:3;"),
     ]
 
 
@@ -645,10 +653,10 @@ def test_a_branch_gathers_its_children_one_level_deeper_then_joins():
 
     assert handler.run(lambda: unfold("root", _splitter, budget=3)) == "joined"
     assert [e.key.stored() for e in handler.trace] == [
-        "d:0;step:split",
-        "gather:0,0;rec:0;d:1;step:leaf",
-        "gather:0,1;rec:1;d:1;step:leaf",
-        "step:join",
+        placed_step("split", "tool", "d:0;"),
+        placed_step("leaf", "tool", "gather:0,0;rec:0;d:1;"),
+        placed_step("leaf", "tool", "gather:0,1;rec:1;d:1;"),
+        placed_step("join", "tool"),
     ]
 
 
@@ -724,8 +732,8 @@ def test_tree_search_runs_each_round_under_its_own_scope():
     assert result == ["seen", "seen"]
     assert seen == [[], ["seen"]]
     assert [e.key.stored() for e in handler.trace] == [
-        "search:0;d:0;step:look",
-        "search:1;d:0;step:look",
+        placed_step("look", "tool", "search:0;d:0;"),
+        placed_step("look", "tool", "search:1;d:0;"),
     ]
 
 
@@ -765,10 +773,10 @@ def test_fix_closes_an_open_recursion_as_the_literal_z_does():
     assert literal.run(lambda: _z(_countdown)(3)) == "xxxx"
     assert [e.key.stored() for e in closed.trace] == [e.key.stored() for e in literal.trace]
     assert [e.key.stored() for e in closed.trace] == [
-        "d:3;step:leaf",
-        "d:2;step:leaf",
-        "d:1;step:leaf",
-        "d:0;step:leaf",
+        placed_step("leaf", "tool", "d:3;"),
+        placed_step("leaf", "tool", "d:2;"),
+        placed_step("leaf", "tool", "d:1;"),
+        placed_step("leaf", "tool", "d:0;"),
     ]
 
 
@@ -893,8 +901,9 @@ def test_hoisted_activates_once_above_the_fanout():
 
     assert handler.run(wf) == "AB"
     keys = [e.key.stored() for e in handler.trace]
-    assert keys[0] == "step;skill:slicing,activate"  # hoisted: before decompose + gathers
-    assert keys.count("step;skill:slicing,activate") == 1
+    activated = placed_step(activation_key("slicing"), "tool")
+    assert keys[0] == activated  # hoisted: before decompose + gathers
+    assert keys.count(activated) == 1
 
 
 # --- one park name must mean one schema -------------------------------------------------

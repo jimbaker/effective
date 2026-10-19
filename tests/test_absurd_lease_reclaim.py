@@ -13,8 +13,7 @@ import psycopg
 import pytest
 from _durable import DSN, absurd, pg_ready
 
-from effective.api import step
-from effective.domain import CallTool
+from effective.api import call_tool
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.handlers.durable import DurableHandler
 
@@ -31,8 +30,8 @@ class _Domain:
 
 
 def _wf():
-    yield from step("tool:a", CallTool(name="a", result_schema=str))
-    yield from step("tool:b", CallTool(name="b", result_schema=str))
+    yield from call_tool("a", {}, str)
+    yield from call_tool("b", {}, str)
     return "done"
 
 

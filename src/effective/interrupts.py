@@ -1,6 +1,6 @@
 """The interrupt channel a loop polls: steer a turn, or escape it.
 
-A poll is a recorded `CallTool` on `INTERRUPT_TOOL`, keyed `tool:interrupt,{phase}` inside the
+A poll is a recorded `CallTool` on `INTERRUPT_TOOL`, keyed `step;tool;interrupt:{phase}` inside the
 turn's `d:{i}` frame, so whichever of a keypress and an op wins the race is a checkpoint, and a
 replay re-serves it. The domain answers the poll from the channel a face writes into.
 
@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from effective.api import Effect, step
 from effective.domain import INTERRUPT_TOOL, CallTool
-from effective.keys import Name, compose_key
+from effective.keys import Key, Name, compose_key
 
 type Phase = Literal["pre", "post", "act"]
 """Where a turn polls: before the decide, after it, and after the action returns."""
@@ -70,28 +70,31 @@ def signal_of(answer: Interrupted, name: str | None = None) -> Signal:
     return Quiet() if answer.redirect is None else Redirect(answer.redirect)
 
 
+def interrupt_key(phase: Phase) -> Key:
+    """The name of the step that polls for an interrupt at `phase`."""
+    return compose_key(t"interrupt:{Name(phase)}")
+
+
 def tool_interrupt(phases: Set[Phase] = BETWEEN_TURNS) -> Interrupt:
     """A non-blocking poll, recorded as a `CallTool` per turn and phase in `phases`.
 
     A phase outside `phases` answers `Quiet` and yields nothing, so a loop that polls at every
     phase records only the ones this poll subscribes to.
 
-    The key is `tool:interrupt,{phase}`. The literal `interrupt` and the arity separate it from an
-    author's `tool:{name}`, as `spawn` separates the spawn key; the domain dispatches on
-    `INTERRUPT_TOOL` and reads the turn and the phase from the args."""
+    The step is named `interrupt:{phase}`, a minter's key, so no author's tool named `interrupt`
+    shares it; the domain dispatches on `INTERRUPT_TOOL` and reads the turn and the phase from
+    the args."""
 
     def poll(turn: int, phase: Phase) -> Effect[Signal]:
         if phase not in phases:
             return Quiet()
-        # `interrupt` STATIC: an interpolated discriminator is a hole to the key registry, so
-        # the shape would be "not provably disjoint" from any other arity-3 `tool:` variant.
-        name = compose_key(t"tool:interrupt,{Name(phase)}").stored()
+        name = interrupt_key(phase)
         answer = yield from step(
             name,
             CallTool(
                 name=INTERRUPT_TOOL, args={"turn": turn, "phase": phase}, result_schema=Interrupted
             ),
         )
-        return signal_of(answer, name)
+        return signal_of(answer, name.stored())
 
     return poll

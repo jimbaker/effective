@@ -21,6 +21,7 @@ from pydantic_core import to_jsonable_python
 
 from effective.api import Effect
 from effective.choice import Answer, answer, stored_endings
+from effective.domain import OpKind, op_kind
 from effective.govern import all_refusals, delivered
 from effective.handlers.admission import ChoiceBox, drive_racing
 from effective.handlers.base import (
@@ -37,6 +38,7 @@ from effective.handlers.base import (
     deadline_of,
     ending_of,
     keyed_call,
+    kinded_name,
     placed_await_name,
     placed_key,
     placing,
@@ -47,6 +49,7 @@ from effective.handlers.base import (
 from effective.keys import (
     FramePosition,
     Key,
+    carries_structure,
     compose_key,
     frame_path,
     gather_prefix,
@@ -62,6 +65,7 @@ from effective.ops import (
     AppendLedgerRow,
     Arrived,
     AwaitEvent,
+    ChainPosition,
     Expired,
     Gather,
     LedgerRow,
@@ -74,10 +78,12 @@ from effective.ops import (
     StoreArtifact,
     WorkflowOp,
     awaits_an_absolute_name,
+    chain_held,
     refuse_a_bounded_wait_in_a_branch,
     refuse_a_park_in_a_race_branch,
     refuse_absolute_await_in_branch,
     refuse_respawn_in_branch,
+    step_name_text,
 )
 from effective.permission import Refused
 
@@ -108,6 +114,8 @@ class Suspended[T]:
     A deadline-free park resumes with the payload; a bounded one resumes with an `Arrived` or an
     `Expired`, and a bare payload delivered to one is refused rather than sent into a workflow
     whose arms would all miss it."""
+    chain: ChainPosition = field(default_factory=ChainPosition.current, kw_only=True)
+    """The chain position the run parked at, which the resumed walk holds while it continues."""
 
     def resume(self, event: Any, *, name: Key | None = None) -> T | Suspended[T]:
         # Pass `name` to assert WHICH event this delivers. The recorder binds POSITIONALLY
@@ -132,16 +140,15 @@ class Suspended[T]:
             self.awaiting, self.schema, addressing=self.addressing, deadline=self.deadline
         )
         answer = _canned_answer(parked, event)
-        self.handler.trace.append(
-            TraceEntry(
-                key
-                if self.addressing is Addressing.ABSOLUTE
-                else key.prefixed(self.handler._prefix),
-                parked,
-                answer,
-            )
-        )
-        return self.handler._drive(self.gen, answer)
+        if self.addressing is not Addressing.ABSOLUTE:
+            key = key.prefixed(self.handler._prefix)
+        self.handler.trace.append(TraceEntry(self.handler._position.place(key), parked, answer))
+        return self._continue(answer)
+
+    def _continue(self, sent: Any, throw: BaseException | None = None) -> T | Suspended[T]:
+        """Drive the parked generator on, at the chain position it parked at."""
+        with chain_held(self.chain):
+            return self.handler._drive(self.gen, sent, throw=throw)
 
 
 def _canned_answer(op: AwaitEvent[Any], response: Any) -> Any:
@@ -258,11 +265,11 @@ class GatherSuspended[T](Suspended[T]):
             case None if parked:
                 return self
             case None:
-                return self.handler._drive(self.gen, self.handler._merge_children(self.children))
+                return self._continue(self.handler._merge_children(self.children))
             case raised:
                 if all_refusals(raised):  # delivered to the parent, so the round's record is kept
                     self.handler._merge_children(self.children)
-                return self.handler._drive(self.gen, None, throw=delivered(raised))
+                return self._continue(None, throw=delivered(raised))
 
 
 @dataclass
@@ -302,7 +309,7 @@ class ScopedSuspended[T](Suspended[T]):
             try:
                 out = self.inner.resume(event)
             except Exception as raised:
-                return self.handler._drive(self.gen, None, throw=delivered(raised))
+                return self._continue(None, throw=delivered(raised))
             if isinstance(out, Suspended):
                 # The body parked again (a second await, or a gather round inside it). Stay a
                 # ScopedSuspended: the parent frame is still owed a return value.
@@ -312,7 +319,7 @@ class ScopedSuspended[T](Suspended[T]):
                 return self
         # The body returned. Its value is what the parent's `yield from scoped(...)` evaluates
         # to — continue the parent OUTSIDE the scope, since the scope ended with the body.
-        return self.handler._drive(self.gen, out)
+        return self._continue(out)
 
 
 @dataclass(frozen=True)
@@ -359,6 +366,17 @@ type Structural = Joined | Parked | Deliver | Ended
 """What interpreting a structural op can produce. A closed marker union rather than a sentinel or
 an `isinstance` ladder: the four outcomes are different control flow, and a `match` over them
 is where a fifth would have to declare itself."""
+
+
+class NoCannedResponse(KeyError):
+    """A step the recorder holds no canned answer for, by its name as text."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return f"RecordingHandler: no canned response for step {self.name!r}"
 
 
 class RecordingHandler:
@@ -581,16 +599,18 @@ class RecordingHandler:
             # A layer (a permission cascade) blocked the op. Record the refusal and deliver it
             # *into* the workflow so a loop can catch it (e.g. route around a denied tool). If the
             # workflow doesn't catch it, `gen.throw` re-raises and it propagates out.
-            self._record(
-                TraceEntry(placed_key(op).prefixed(self._prefix), op, None, error=refused)
-            )
+            self._record(TraceEntry(self._placed(op), op, None, error=refused))
             return Deliver(refused)
         return self._record_result(op, result)
 
     def _record_result(self, op: WorkflowOp, result: Any) -> Joined:
         """Record a resolved op at its path-prefixed key and hand the value to the workflow."""
-        self._record(TraceEntry(placed_key(op).prefixed(self._prefix), op, result))
+        self._record(TraceEntry(self._placed(op), op, result))
         return Joined(result)
+
+    def _placed(self, op: WorkflowOp) -> Key:
+        """The op's key under this handler's frames, at its occurrence in this thread."""
+        return self._position.place(placed_key(op).prefixed(self._prefix))
 
     @contextmanager
     def _scope(self, prefix: str) -> Iterator[None]:
@@ -814,8 +834,23 @@ class RecordingHandler:
             results.append(result)
         return results
 
-    def _canned(self, name: str) -> tuple[bool, Any]:
-        """Look up a canned response for `name`, QUALIFIED first, then bare.
+    def _canned(self, name: str | Key, kind: OpKind | None = None) -> tuple[bool, Any]:
+        """Look up a canned response for `name`, in this order:
+
+        ===================  ===================================
+        tried                for `call_tool("x")` inside `s:0`
+        ===================  ===================================
+        kinded, qualified    `s:0;tool:x`
+        qualified            `s:0;x`
+        kinded               `tool:x`
+        bare                 `x`
+        ===================  ===================================
+
+        A frame's entry comes before any entry for the name anywhere, so a table can answer each
+        lane apart while a kinded entry answers the rest.
+
+        A minter's key has no kinded spelling, so it is tried qualified and then bare. A table
+        keyed by the bare name answers any kind.
 
         Once a scope is structural, an op's bare name does not distinguish the frame it ran in:
         three identical lanes under `scoped(t"talk:{i}")` all yield `ask_llm("enrich")`,
@@ -824,18 +859,22 @@ class RecordingHandler:
         (`talk:1;enrich`), and falling back to the bare name keeps every existing table working
         and stays the right default: most tests do not care which branch asked.
 
-        The fallback is a TEST-surface convenience and nothing more — the *recorded* key is
+        The fallback is a TEST-surface convenience and nothing more: the *recorded* key is
         always the qualified one, so what replay binds to is unaffected by which arm hit.
 
         **Text in, because the table is text.** It is authored by a test
-        (`RecordingHandler(responses={"tool:a": 1})`, 111 sites), so it is a READER keyed by
-        author text, and nothing here is persisted. A caller holding a `Key` renders it; a
-        caller holding a `Step`'s author name — which is a coordinate value and not a key at
-        all — passes it straight through. The concatenation is a lookup, not a composition."""
-        if (qualified := f"{self._prefix}{name}") in self.responses:
-            return True, self.responses[qualified]
-        if name in self.responses:
-            return True, self.responses[name]
+        (`RecordingHandler(responses={"tool:a": 1})`), so it is a READER keyed by author text,
+        and nothing here is persisted. A minter's `Key` is looked up by its rendering, and an
+        atom by itself under its kind. The concatenation is a lookup, not a composition."""
+        text = step_name_text(name)
+        kinded = kind is not None and not carries_structure(text)
+        names = (kinded_name(name, kind).stored(), text) if kinded else (text,)
+        for each in names:
+            if (qualified := f"{self._prefix}{each}") in self.responses:
+                return True, self.responses[qualified]
+        for each in names:
+            if each in self.responses:
+                return True, self.responses[each]
         return False, None
 
     def _stop_if_chosen(self) -> None:
@@ -863,13 +902,13 @@ class RecordingHandler:
                 # A key nobody but the handler may write refuses here as on the engines; a
                 # minted one needs no task, since a canned response calls no tool.
                 keyed_call(op, inner)
-                # The AUTHOR's name, not `op_key(op)`. The arm term makes a Step's key
-                # `step:{name}` / `step;{name}` — substrate bookkeeping the fixture author never
-                # wrote and should not have to, so the table stays keyed by what they typed.
-                match self._canned(name):
+                # The AUTHOR's name, not `op_key(op)`. The arm and the kind make a Step's key
+                # `step;llm:{name}` or `step;tool;{key}`: substrate bookkeeping the fixture author
+                # never wrote and should not have to, so the table stays keyed by what they typed.
+                match self._canned(name, op_kind(inner)):
                     case (True, response):
                         return response
-                raise KeyError(f"RecordingHandler: no canned response for step {name!r}")
+                raise NoCannedResponse(step_name_text(name))
             case AwaitEvent(name=name):
                 # An op-layer (e.g. a permission cascade) injected an AwaitEvent the
                 # workflow never yielded, so it arrives here at the base rather than the

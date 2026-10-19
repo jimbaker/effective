@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from _steps import placed_step
 
 from effective.cost import Usage
 from effective.keys import Key, compose_key
@@ -472,19 +473,21 @@ def test_a_span_written_after_a_torn_line_survives_it(tmp_path):
 
     path = tmp_path / "spans.jsonl"
     sink = otlp_jsonl_sink(path, clock=lambda: NOW)
-    sink(_model_span(key=compose_key(t"step;n:0")))
+    before, after = (Key.parse(placed_step(name, "llm")) for name in ("before", "after"))
+    sink(_model_span(key=before))
     with path.open("a") as handle:
         handle.write('{"resourceSpans": [{"scopeSp')  # the writer died here
-    sink(_model_span(key=compose_key(t"step;n:1")))  # and a resumed run appends
+    sink(_model_span(key=after))  # and a resumed run appends
 
-    assert set(sidecar_measurements(path)) == {"step;n:0", "step;n:1"}
+    assert set(sidecar_measurements(path)) == {before.stored(), after.stored()}
 
 
 def test_an_older_span_file_is_refused_rather_than_read_as_empty(tmp_path):
     from effective.telemetry import NotASpanFile, sidecar_measurements
 
     path = tmp_path / "spans.jsonl"
-    path.write_text(json.dumps({"spanId": "a", "attributes": {"effective.key": "step;a"}}) + "\n")
+    attributes = {"effective.key": placed_step("a", "llm")}
+    path.write_text(json.dumps({"spanId": "a", "attributes": attributes}) + "\n")
 
     with pytest.raises(NotASpanFile):
         sidecar_measurements(path)

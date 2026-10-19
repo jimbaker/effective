@@ -10,6 +10,7 @@ fails closed via the default, and first-decisive-wins short-circuits.
 from dataclasses import dataclass
 
 import pytest
+from _steps import called_step
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import to_jsonable_python
 
@@ -82,7 +83,7 @@ def _act_workflow():
 
 
 def _escalate_act(op):
-    if isinstance(op, Step) and op.name == "tool:act":
+    if isinstance(op, Step) and op_key(op).stored() == called_step("act"):
         return Escalate("needs sign-off")
     return Allow()
 
@@ -196,12 +197,9 @@ def test_a_policy_a_step_returned_survives_its_checkpoint_and_a_resume(sqlite_ap
 
 
 def _charge(amount: int) -> Step:
-    from effective.domain import CallTool
-
-    return Step(
-        name="tool:charge_card",
-        op=CallTool(name="charge_card", args={"amount": amount}, result_schema=dict),
-    )
+    charged = next(call_tool("charge_card", {"amount": amount}, dict))
+    assert isinstance(charged, Step)
+    return charged
 
 
 def _park_name(tier, op):

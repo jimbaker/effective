@@ -63,6 +63,22 @@ class ReplayMismatch(Exception):
     pass
 
 
+class ReplayDivergence(ReplayMismatch):
+    """The op at trace `position` is placed at `yielded`, where the record holds `recorded`."""
+
+    def __init__(self, position: int, recorded: str, yielded: str) -> None:
+        super().__init__(position, recorded, yielded)
+        self.position = position
+        self.recorded = recorded
+        self.yielded = yielded
+
+    def __str__(self) -> str:
+        return (
+            f"replay divergence at position {self.position}: "
+            f"recorded {self.recorded!r}, workflow yielded {self.yielded!r}"
+        )
+
+
 def _named(op: Any, prefix: str) -> str:
     """An op's name for a DIAGNOSTIC, which must never be the thing that raises.
 
@@ -104,7 +120,7 @@ class ReplayHandler:
         |---------------------|---------------------------------------------------------------|
         | `run_scope()`       | a `layer_run_state` cell bumped across two ops reads `[1, 1]` |
         |                     | here and `[1, 2]` on record: a fresh dict on every call       |
-        | `enter_task_run()`  | an earlier run's `ops.CHAIN_GENERATION` in the `descend`      |
+        | `chain_held(...)`   | an earlier run's `ops.CHAIN_GENERATION` in the `descend`      |
         |                     | grant names this run composes                                 |
         """
         with walk_run():
@@ -370,11 +386,8 @@ class ReplayHandler:
                     f"workflow yielded an extra op {_named(op, prefix)} at position {self._i}"
                 )
             expected: TraceEntry = self.recorded[self._i]
-            if (actual := placed_key(op).prefixed(prefix)) != expected.key:
-                raise ReplayMismatch(
-                    f"replay divergence at position {self._i}: "
-                    f"recorded {expected.key!r}, workflow yielded {actual!r}"
-                )
+            if (actual := position.place(placed_key(op).prefixed(prefix))) != expected.key:
+                raise ReplayDivergence(self._i, expected.key.stored(), actual.stored())
         self._i += 1
         # A recorded refusal is re-delivered as a throw, so a workflow that caught it on the
         # record run re-catches it identically (deterministic, no re-running the layer).

@@ -20,8 +20,8 @@ state space small enough to check by construction, where review catches family m
 time.
 
 The proofs stop before Python's strings. Lean proves the structured key encoding injective
-(`key : Key → List Nat`), while the handlers commit serialized strings (`gather:0,0;step:s` for
-a plain name, `gather:0,1;step;a:1;b` for a structured one). A separator bug in the string layer
+(`key : Key → List Nat`), while the handlers commit serialized strings (`gather:0,0;step;llm:s`
+for an atom, `gather:0,1;step;llm;a:1;b` for a minter's key). A separator bug in the string layer
 would pass the Lean gate. The same boundary appears a second time on the value axis, where
 `canonical_form` serializes a payload. This ADR fixes the architecture that divides the
 obligations, names both boundaries as explicit assumptions, and writes the operational semantics
@@ -173,7 +173,7 @@ resumes after the barrier, on a context with the `peek_event` capability (the SQ
 **Scope prefixes.** A second prefix family composes with $p_{g,i}$: the handler applies a
 `scoped` frame ([ADR-0014](0014-rlm-combinators-run-code.md) §8) through `scope_prefix`, which terminates each atom with the term
 separator `;` and refuses an atom carrying one, so nested scopes become [ADR-0020](0020-key-composition-one-grammar.md)'s leading frame
-terms (`a:1;b:2;step:s`). The Lean model abstracts this as a scope $s$ drawn from the grammar
+terms (`a:1;b:2;step;llm:s`). The Lean model abstracts this as a scope $s$ drawn from the grammar
 $s ::= (\text{atom}\ \texttt{/})^{*}$, atoms nonempty over $\Sigma\setminus\{\texttt{/}\}$,
 with every canonical name `/`-free. The flattened name is $s\cdot n$, and well-formedness makes
 the flattening injective (split at the last `/` recovers $(s,n)$). This is the one string layer
@@ -283,7 +283,7 @@ $j$ by example.
 
 | inv | formal node | state |
 |---|---|---|
-| **I1 injectivity** | Lean `keyBad_not_injective` (the regression), `key_injective`, `branch_disjoint`, `gather_naming_injective` (L1.5, imported by Quint); `flatten_injective_on` (L1.8) | discharged: the string tier is (A-serialize), held by construction and the grid. L1.9, the composed gather-by-scope frame, is open in Lean; the runtime composite is covered by tests |
+| **I1 injectivity** | Lean `keyBad_not_injective` (the regression), `key_injective`, `branch_disjoint`, `gather_naming_injective` (L1.5, imported by Quint); `flatten_injective_on` (L1.8) | discharged for the encoding: the string tier is (A-serialize), held by construction and the grid. L1.9, the composed gather-by-scope frame, is open in Lean; the runtime composite is covered by tests. That two positions take two keys is the walks' numbering, which the models assume (Quint supplies distinct identities) and [`tests/test_occurrences.py`](../../tests/test_occurrences.py) tests on every walk |
 | **I2 totality** | Quint `gather.qnt` `total` and `noDeadlock`; the `handlerFixed=false` tooth reproduces suspend-in-gather | await and sleep in a gather are transitions on a peek-capable context and a loud `NotImplementedError` on one without |
 | **I3 liveness** | Quint `gather.qnt` `liveness` (TLC, fairness implies termination, non-vacuity guarded by `nonVacuityWitness`) | partial: checks the suspend-in-gather instance. Expired-lease reclaim on Absurd is pinned by [`tests/test_absurd_lease_reclaim.py`](../../tests/test_absurd_lease_reclaim.py) and has no formal node |
 | **I4 termination of observers** | none | out of scope: no op carries an observer; watching a run is telemetry |

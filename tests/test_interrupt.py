@@ -10,8 +10,11 @@ concurrent with the in-flight turn without cancelling it:
 Both are recorded `CallTool` polls, so the winner is a checkpoint and replay re-derives it.
 """
 
+from _steps import placed_step
+
 from effective import RecordingHandler, ReplayHandler
 from effective.compose import Interrupted, tool_interrupt
+from effective.interrupts import Phase, interrupt_key
 from effective.react import (
     AssistantTurn,
     ToolRequest,
@@ -22,6 +25,11 @@ from effective.react import (
 
 ANSWER = AssistantTurn(thought="redirected", answer="answered per the interrupt")
 ACT_SEARCH = AssistantTurn(thought="act", tool=ToolRequest(name="search", args={}))
+
+
+def _poll(frame: str, phase: Phase) -> str:
+    """The canned-table key that answers the interrupt poll at `phase` under `frame`."""
+    return interrupt_key(phase).prefixed(frame).stored()
 
 
 def counting_decide(calls, *turns):
@@ -41,9 +49,9 @@ def counting_decide(calls, *turns):
 def test_pending_interrupt_wins_pre_turn_and_skips_the_model_call():
     calls: list[str] = []
     responses = {
-        "d:0;tool:interrupt,pre": Interrupted(redirect="stop, just answer"),  # pending: wins
-        "d:1;tool:interrupt,pre": Interrupted(),
-        "d:1;tool:interrupt,post": Interrupted(),
+        _poll("d:0;", "pre"): Interrupted(redirect="stop, just answer"),  # pending: wins
+        _poll("d:1;", "pre"): Interrupted(),
+        _poll("d:1;", "post"): Interrupted(),
     }
     h = RecordingHandler(responses)
     # iteration 0 is skipped before decide, so only one turn (the answer) is ever consumed
@@ -55,19 +63,19 @@ def test_pending_interrupt_wins_pre_turn_and_skips_the_model_call():
     # iteration 0's decide was NEVER called — the pre-turn interrupt won first
     assert calls == [1]
     assert [e.key.stored() for e in h.trace] == [
-        "d:0;step;tool:interrupt,pre",  # pending -> wins, turn skipped
-        "d:1;step;tool:interrupt,pre",  # quiet
-        "d:1;step;tool:interrupt,post",  # quiet -> the turn proceeds to finish
+        placed_step(interrupt_key("pre"), "tool", "d:0;"),  # pending -> wins, turn skipped
+        placed_step(interrupt_key("pre"), "tool", "d:1;"),  # quiet
+        placed_step(interrupt_key("post"), "tool", "d:1;"),  # quiet -> the turn proceeds to finish
     ]
 
 
 def test_interrupt_during_the_turn_wins_post_turn_and_drops_the_action():
     calls: list[str] = []
     responses = {
-        "d:0;tool:interrupt,pre": Interrupted(),  # quiet before the turn
-        "d:0;tool:interrupt,post": Interrupted(redirect="stop searching"),  # landed during
-        "d:1;tool:interrupt,pre": Interrupted(),
-        "d:1;tool:interrupt,post": Interrupted(),
+        _poll("d:0;", "pre"): Interrupted(),  # quiet before the turn
+        _poll("d:0;", "post"): Interrupted(redirect="stop searching"),  # landed during
+        _poll("d:1;", "pre"): Interrupted(),
+        _poll("d:1;", "post"): Interrupted(),
         # NO "d:0;tool:search" — the action must never run, or this KeyErrors
     }
     h = RecordingHandler(responses)
@@ -96,10 +104,10 @@ def test_quiet_channel_leaves_loop_behavior_unchanged():
         return decide
 
     quiet = {
-        "d:0;tool:interrupt,pre": Interrupted(),
-        "d:0;tool:interrupt,post": Interrupted(),
-        "d:1;tool:interrupt,pre": Interrupted(),
-        "d:1;tool:interrupt,post": Interrupted(),
+        _poll("d:0;", "pre"): Interrupted(),
+        _poll("d:0;", "post"): Interrupted(),
+        _poll("d:1;", "pre"): Interrupted(),
+        _poll("d:1;", "post"): Interrupted(),
         "d:0;tool:search": ToolResult(content="a result"),
     }
     h = RecordingHandler(quiet)
@@ -114,9 +122,9 @@ def test_quiet_channel_leaves_loop_behavior_unchanged():
 
 def test_interrupted_trajectory_replays_deterministically():
     responses = {
-        "d:0;tool:interrupt,pre": Interrupted(redirect="stop, just answer"),
-        "d:1;tool:interrupt,pre": Interrupted(),
-        "d:1;tool:interrupt,post": Interrupted(),
+        _poll("d:0;", "pre"): Interrupted(redirect="stop, just answer"),
+        _poll("d:1;", "pre"): Interrupted(),
+        _poll("d:1;", "post"): Interrupted(),
     }
     rec = RecordingHandler(responses)
     live = rec.run(

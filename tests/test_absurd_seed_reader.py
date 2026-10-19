@@ -21,6 +21,7 @@ from uuid import UUID
 import psycopg
 import pytest
 from _durable import DSN, absurd, pg_ready
+from _steps import placed_step
 
 from effective.api import append_ledger, call_tool, step
 from effective.bridge_absurd import (
@@ -33,12 +34,29 @@ from effective.cost import MeteredInterpreter, Usage, marked
 from effective.domain import AskLLM
 from effective.engines.absurd import ConcurrentAbsurdCtx
 from effective.fork import fork_seed
+from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
-from effective.keys import Key
+from effective.keys import Key, Run, compose_key
 from effective.ledger import PostgresLedger
-from effective.ops import LedgerRow
+from effective.ops import AppendLedgerRow, LedgerRow
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (just pgt-up)")
+
+
+EXTRACT = placed_step("extract", "llm")
+
+
+def _extracted(run_id: str) -> Key:
+    return compose_key(t"extracted:{Run(run_id)}")
+
+
+def _reviewed(run_id: str) -> Key:
+    return compose_key(t"reviewed:{Run(run_id)}")
+
+
+def _appended(event_id: Key) -> str:
+    """The stored key of the append of the row `event_id` names."""
+    return op_key(AppendLedgerRow(LedgerRow(event_id=event_id, kind="any"))).stored()
 
 
 def _domain():
@@ -52,10 +70,8 @@ def _decision_wf(run_id: str):
     """A prefix (an ask, a tool, a ledger append) and a tail — the shape a decision fork cuts."""
     yield from step("extract", AskLLM(messages="m", response_schema=str))
     yield from call_tool("lookup", {}, int)
-    yield from append_ledger(
-        LedgerRow(event_id=Key.parse(f"{run_id}:extracted"), kind="extracted")
-    )
-    yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:reviewed"), kind="reviewed"))
+    yield from append_ledger(LedgerRow(event_id=_extracted(run_id), kind="extracted"))
+    yield from append_ledger(LedgerRow(event_id=_reviewed(run_id), kind="reviewed"))
     return "done"
 
 
@@ -113,12 +129,12 @@ def test_the_seed_reader_keeps_what_the_measured_prefix_reader_drops(app, conn):
     measured, _ = export_measured_prefix(conn, task_id, rid)
 
     assert seed_keys == (
-        "step:extract",
+        EXTRACT,
         "step;tool:lookup",
-        f"ledger;{rid}:extracted",
-        f"ledger;{rid}:reviewed",
+        _appended(_extracted(rid)),
+        _appended(_reviewed(rid)),
     )
-    assert [e.key.stored() for e in measured] == ["step:extract", "step;tool:lookup"]  # Steps only
+    assert [e.key.stored() for e in measured] == [EXTRACT, "step;tool:lookup"]  # Steps only
     assert not any(k.stored().startswith("ledger;") for k in (e.key for e in measured))
 
 
@@ -131,13 +147,13 @@ def test_the_seed_reader_carries_raw_state_a_fork_can_seed_from(app, conn):
     task_id = _run(app, rid)
 
     checkpoints = read_absurd_task(conn, task_id)
-    seed = fork_seed(checkpoints, through=f"ledger;{rid}:extracted")
+    seed = fork_seed(checkpoints, through=_appended(_extracted(rid)))
 
     assert sorted(k.stored() for k in seed) == sorted(
-        ["step:extract", "step;tool:lookup", f"ledger;{rid}:extracted"]
+        [EXTRACT, "step;tool:lookup", _appended(_extracted(rid))]
     )
-    assert f"ledger;{rid}:reviewed" not in seed  # the tail is the fork's to re-decide
-    envelope = seed[Key.parse("step:extract")]
+    assert Key.parse(_appended(_reviewed(rid))) not in seed  # the tail is the fork's to re-decide
+    envelope = seed[Key.parse(EXTRACT)]
     assert envelope["result"] == "ans"  # the value the workflow saw...
     assert envelope["usage"]["cost"] == 0.001  # ...still wrapped in the usage the meter needs
     assert (
@@ -221,7 +237,7 @@ def test_a_clock_stepped_back_across_a_retry_keeps_the_attempts_in_order(conn):
     from _conformance import AbsurdBackend, FaultInjected, private
 
     backend = AbsurdBackend()
-    first, second = Key.parse("step:first"), Key.parse("step:second")
+    first, second = placed_step("first", "tool"), placed_step("second", "tool")
     stamps = {1: "2040-01-01T00:00:00Z", 2: "2039-01-01T00:00:00Z"}
 
     def body(params, ctx):
@@ -230,10 +246,10 @@ def test_a_clock_stepped_back_across_a_retry_keeps_the_attempts_in_order(conn):
             "SELECT set_config('absurd.fake_now', %s, false)", (stamps[ctx.attempt.number],)
         )
         try:
-            ctx.step(first, lambda: 1)
+            ctx.step(Key.parse(first), lambda: 1)
             if ctx.attempt.number == 1:
                 raise FaultInjected("after the first checkpoint")
-            ctx.step(second, lambda: 2)
+            ctx.step(Key.parse(second), lambda: 2)
         finally:
             stepped.execute("SELECT set_config('absurd.fake_now', '', false)")
         return "done"
@@ -243,9 +259,9 @@ def test_a_clock_stepped_back_across_a_retry_keeps_the_attempts_in_order(conn):
     task = backend.spawn(name, f"c{uuid.uuid4().hex[:8]}")
     try:
         assert backend.run_until_result(task).state == "completed"
-        assert keys(read_absurd_task(conn, task)) == ("step:first", "step:second")
-        assert list(fork_seed(read_absurd_task(conn, task), through="step:first")) == [first]
+        assert keys(read_absurd_task(conn, task)) == (first, second)
+        assert list(fork_seed(read_absurd_task(conn, task), through=first)) == [Key.parse(first)]
         measured, _ = export_measured_prefix(conn, task, "unused")
-        assert [entry.key.stored() for entry in measured] == ["step:first", "step:second"]
+        assert [entry.key.stored() for entry in measured] == [first, second]
     finally:
         backend.close()

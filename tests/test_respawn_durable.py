@@ -10,6 +10,7 @@ What a budget addresses once a run is a chain is an open question, and
 `tests/test_carrier_audit.py` is its red test.
 """
 
+from functools import partial
 from itertools import pairwise
 from typing import Any
 from uuid import UUID
@@ -28,7 +29,7 @@ from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler, Respawned
 from effective.interpreters.tools import spawn_tool
-from effective.keys import compose_key
+from effective.keys import Index, compose_key
 from effective.ops import LedgerRow
 
 
@@ -81,12 +82,15 @@ class _Domain:
 def watch_batch(state: Watch, turn: Turn):
     """One generation: drain BATCH items, then hand the cursor forward.
 
-    Note what the author does NOT write: no scope, no generation in any name. The ops are named
+    Note what the author does NOT write: no generation in any scope or name. The ops are named
     plainly and the generation is a *task* boundary, which is why the folded view of this
     workflow is the same at `generations=3` as at `generations=None`."""
     seen = state.seen
     for i in range(BATCH):
-        yield from call_tool(f"poll{i}", {"at": f"{turn.generation}:{i}"}, str)
+        at = f"{turn.generation}:{i}"
+        yield from scoped(
+            compose_key(t"item:{Index(i)}"), partial(call_tool, "poll", {"at": at}, str)
+        )
         seen += 1
     # SUBJECT-scoped: the same item triaged twice across generations is ONE row, and a
     # run-id-scoped id here would lose a row silently.

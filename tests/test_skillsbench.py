@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
+from _steps import placed_step
 
 from agent.skillsbench import (
     ARMS,
@@ -19,6 +20,7 @@ from agent.skillsbench import (
     system_prompt,
 )
 from effective.keys import Key
+from effective.react import react_key
 from effective.skills import SkillRegistry
 from effective.telemetry import Span
 
@@ -138,6 +140,7 @@ def test_measurements_record_attributes_cost_and_duration_to_the_placed_key():
     This is the reader. What it adds over `TrialResult.cost_usd` is ATTRIBUTION: the meter is a
     scalar total, so a trial that cost twice as much could not say where, and this maps every
     dollar and nanosecond onto the op address that spent it."""
+    turn = placed_step(react_key("turn"), "llm", "d:0;")
     spans = [
         Span(
             name="LM.0",
@@ -145,7 +148,7 @@ def test_measurements_record_attributes_cost_and_duration_to_the_placed_key():
             session_id="inline:t1:0",
             duration_ns=1_000,
             usage_attributes={"effective.cost.usd": 0.25},
-            key=Key.parse("d:0;step;react:turn"),
+            key=Key.parse(turn),
         ),
         Span(
             name="tool.run.1",
@@ -157,7 +160,7 @@ def test_measurements_record_attributes_cost_and_duration_to_the_placed_key():
     ]
     record = measurements_record(spans)
     assert record == {
-        "d:0;step;react:turn": {"cost_usd": 0.25, "duration_ns": 1_000},
+        turn: {"cost_usd": 0.25, "duration_ns": 1_000},
         # `None`, NOT 0.0 — a tool span carries no cost attribute, and a zero here would read as
         # "this node was free", which is a different and false claim.
         "step;tool:run": {"cost_usd": None, "duration_ns": 2_000},

@@ -9,6 +9,7 @@ from pathlib import Path
 from string.templatelib import Template
 
 import pytest
+from _steps import placed_step
 from pydantic import BaseModel
 
 from effective.channels import (
@@ -33,7 +34,9 @@ from effective.skills import (
     SkillPackError,
     SkillRegistry,
     activate_skill,
+    activation_key,
     parse_frontmatter,
+    refresh_key,
     refresh_skill,
 )
 
@@ -373,8 +376,8 @@ def test_activate_and_refresh_mint_distinct_checkpoint_keys():
     activation, refresh = result
     # injectivity at the key level: refresh never collides with its activation
     assert [e.key.stored() for e in h.trace] == [
-        "step;skill:advice,activate",
-        "step;skill:advice,refresh,1",
+        placed_step(activation_key("advice"), "tool"),
+        placed_step(refresh_key("advice", 1), "tool"),
     ]
     # and each pin CARRIES the key of the activation that minted it, so a script taken from
     # it can be scoped to that activation rather than annotated with a provenance string.

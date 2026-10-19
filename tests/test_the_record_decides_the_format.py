@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from _conformance import PG_DSN, private
+from _steps import placed_step
 from psycopg.types.json import Jsonb
 
 from effective import bridge_sqlite
@@ -57,6 +58,9 @@ from effective.keys import Key, compose_key
 from effective.keys.processor import gather_prefix, race_prefix
 from effective.ops import DONE_EVENT_PARAM, UnreadFormat
 from effective.spawning import ChildAnswer, Failed
+
+PREFIX = placed_step("prefix", "llm")
+"""The key of the model call every workflow here makes first."""
 
 COLLISION = {"result": {"amount": 1}, "usage": {"cost": 7}, "business": "keep-me"}
 """A model call's bare result, as a release before the format recorded it, shaped like an
@@ -125,7 +129,7 @@ def _resumed(backend, build: Build, *, deployed: bool) -> tuple[Any, list[str], 
     calls: list[str] = []
 
     def legacy(params: dict[str, Any], ctx: Any) -> Any:
-        ctx.step(Key.parse("step:prefix"), lambda: COLLISION)
+        ctx.step(Key.parse(PREFIX), lambda: COLLISION)
         return ctx.await_event(Key.parse(wake))
 
     def workflow() -> Any:
@@ -282,7 +286,7 @@ def _forked(backend, fork: Fork) -> list[str]:
         )
     )
     name, child, done = private(f"fork-{uuid4().hex[:8]}"), f"c-{uuid4().hex[:8]}", uuid4().hex
-    seed = [Checkpoint(Key.parse("step:prefix"), raw)]
+    seed = [Checkpoint(Key.parse(PREFIX), raw)]
 
     def workflow(_run_id: str) -> Any:
         found = yield from ask_llm("prefix", "x", dict)
@@ -300,7 +304,7 @@ def _forked(backend, fork: Fork) -> list[str]:
                     ctx,
                     lambda: workflow("base"),
                     child_run_id=child,
-                    seed=fork_seed(seed, through="step:prefix"),
+                    seed=fork_seed(seed, through=PREFIX),
                     fork_point=Key.parse(fork.point),
                     hypothetical_ledger=ledger,
                     domain=_domain([]),
@@ -330,7 +334,7 @@ def _forked(backend, fork: Fork) -> list[str]:
         "child_run_id": child,
         "forked_from": "base",
         "base_task_id": str(uuid4()),
-        "through": "step:prefix",
+        "through": PREFIX,
         "fork_point": fork.point,
         "forked_at_event": "review",
         "delta": delta,
@@ -421,12 +425,12 @@ ENVELOPE = {"result": "r", "usage": {"cost": 0.5}}
 
 DECODED: dict[str, tuple[MeteredEntry, AskLLM[Any] | CallTool[Any], tuple[Any, Usage]]] = {
     "driven": (
-        Driven(Key.parse("step:a"), result="r", usage=Usage(cost=0.5)),
+        Driven(Key.parse(placed_step("a", "tool")), result="r", usage=Usage(cost=0.5)),
         CallTool("a", dict),
         ("r", Usage(cost=0.5)),
     ),
     "bridged model call": (
-        Bridged(Key.parse("step:a"), ENVELOPE),
+        Bridged(Key.parse(placed_step("a", "llm")), ENVELOPE),
         AskLLM([], str),
         ("r", Usage(cost=0.5)),
     ),
@@ -451,7 +455,7 @@ def _heard_at_the_point(backend, *, direct: bool) -> set[str]:
     also emitted there once the fork has run. A replay hears its answer again, so each answer
     counts once."""
     name, child, heard = private(f"answer-{uuid4().hex[:8]}"), f"c-{uuid4().hex[:8]}", []
-    seed = [Checkpoint(Key.parse("step:prefix"), {"result": {}, "usage": {"cost": 0.0}})]
+    seed = [Checkpoint(Key.parse(PREFIX), {"result": {}, "usage": {"cost": 0.0}})]
 
     def workflow(_run_id: str) -> Any:
         yield from ask_llm("prefix", "x", dict)
@@ -465,7 +469,7 @@ def _heard_at_the_point(backend, *, direct: bool) -> set[str]:
                     ctx,
                     lambda: workflow("base"),
                     child_run_id=child,
-                    seed=fork_seed(seed, through="step:prefix"),
+                    seed=fork_seed(seed, through=PREFIX),
                     fork_point=Key.parse("review"),
                     hypothetical_ledger=ledger,
                     domain=_domain([]),
@@ -494,7 +498,7 @@ def _heard_at_the_point(backend, *, direct: bool) -> set[str]:
             "child_run_id": child,
             "forked_from": "base",
             "base_task_id": str(uuid4()),
-            "through": "step:prefix",
+            "through": PREFIX,
             "fork_point": "review",
             "forked_at_event": "review",
             "delta": {"decision": "approve"},
@@ -548,7 +552,7 @@ def _parked_base(backend, *, marked: bool) -> UUID:
     name, wake = private(f"measured-{uuid4().hex[:8]}"), f"wake-{uuid4().hex}"
 
     def legacy(params: dict[str, Any], ctx: Any) -> Any:
-        ctx.step(Key.parse("step:prefix"), lambda: COLLISION)
+        ctx.step(Key.parse(PREFIX), lambda: COLLISION)
         return ctx.await_event(Key.parse(wake))
 
     backend.register_body(name, legacy, deployed=True)
@@ -572,7 +576,7 @@ def _exported(backend, task: UUID) -> Sequence[MeteredEntry]:
 
 def test_a_measured_export_refuses_a_base_whose_format_is_unread(backend):
     entries = _exported(backend, _parked_base(backend, marked=True))
-    assert [e.key.stored() for e in entries] == ["step:prefix"]
+    assert [e.key.stored() for e in entries] == [PREFIX]
     with pytest.raises(UnreadFormat):
         _exported(backend, _parked_base(backend, marked=False))
 

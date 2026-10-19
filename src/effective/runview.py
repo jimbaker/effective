@@ -46,7 +46,7 @@ the failure this module was written to prevent, arriving in the module that prev
 
 
 def _spawned_child(key: str) -> str | None:
-    """The child run id in a `tool:spawn,{child}` key, or `None` if this is not one.
+    """The child run id in a spawn step's key, `step;tool;spawn:{child}`; `None` for any other.
 
     PARSED rather than matched on text. A `startswith` against the spawn key's spelling would
     work today and is the nominal-where-structural shape this repo keeps finding as a defect: it
@@ -60,9 +60,9 @@ def _spawned_child(key: str) -> str | None:
         parsed = parse(split_occurrence(key)[0])
     except KeySyntaxError:
         return None
-    for term in parsed.terms:
-        if term.tag == "tool" and term.arity == 2 and term.coordinates[0].path == SPAWN_TOOL:
-            return term.coordinates[1].path
+    for arm, kind, term in zip(parsed.terms, parsed.terms[1:], parsed.terms[2:], strict=False):
+        if (arm.tag, kind.tag, term.tag, term.arity) == ("step", "tool", SPAWN_TOOL, 1):
+            return term.coordinates[0].path
     return None
 
 

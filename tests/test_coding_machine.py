@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
+from _steps import placed_step
 from pydantic_core import to_jsonable_python
 
 from effective.api import Effect, ask_llm
@@ -233,7 +234,8 @@ def test_a_revisited_state_mints_DISTINCT_keys():
 def test_every_op_names_its_visit_and_its_state():
     handler = RecordingHandler(responses=answers())
     drive(handler, **happy_scripts())
-    worked = [entry.key.stored() for entry in handler.trace if "step:work" in entry.key.stored()]
+    work = placed_step("work", "llm")
+    worked = [entry.key.stored() for entry in handler.trace if work in entry.key.stored()]
     assert worked, "the worker minted nothing"
     for key in worked:
         assert key.startswith("d:"), key
@@ -348,10 +350,8 @@ def _addresses(generation: int) -> list[str]:
     supplied the generation by its own route would be measuring its own arithmetic, which is the
     defect the parity arc found in the authority census.
 
-    Inside is not a detail: every handler calls `ops.enter_task_run()` at the top of `run`, which
-    sets `CHAIN_GENERATION` to `None`, because a task run starts unchained unless a respawn says
-    otherwise. Setting it around `handler.run(...)` measures nothing — the first thing the handler
-    does is throw the value away."""
+    Inside, because every walk holds `ops.ChainPosition()` for its run (`ops.chain_held`): a task
+    run starts outside any chain, so a value set around `handler.run(...)` is replaced in it."""
 
     def driver() -> Effect[Session]:
         token = CHAIN_GENERATION.set(generation)

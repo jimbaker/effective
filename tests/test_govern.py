@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from _gate import at_spend
+from _steps import called_step, placed_step
 
 from effective import permission
 from effective.budget import Grant, MeasuredBudget
@@ -44,7 +45,6 @@ from effective.govern import (
     refuse,
     routable,
 )
-from effective.handlers.base import step_key
 from effective.handlers.durable import _load
 from effective.keys import Index, Key, Segment, compose_key
 from effective.layers import drive_through, placement_scope
@@ -127,7 +127,7 @@ def test_the_fused_payload_keeps_argument_order():
 
 
 def test_the_park_name_is_deterministic_gate_run_pass_occurrence_and_OP_scoped():
-    state = GateState(run_id=RUN, gate="spend", op_key=step_key("tool:charge_card").stored())
+    state = GateState(run_id=RUN, gate="spend", op_key=called_step("charge_card"))
     # OP-scoped: without the op component one approval would settle every later gated op in the
     # run. Five components: `occurrence` separates a repeated op_key, which the op component alone
     # cannot (see `test_govern_op_scope.py`).
@@ -138,9 +138,7 @@ def test_the_park_name_is_deterministic_gate_run_pass_occurrence_and_OP_scoped()
     )
     # The SAME op at a later occurrence, the only thing that differs between these two names, so
     # the comparison reads one coordinate at a time.
-    keyed = GateState(
-        run_id=RUN, gate="spend", op_key=step_key("tool:charge_card").stored(), occurrence=2
-    )
+    keyed = GateState(run_id=RUN, gate="spend", op_key=called_step("charge_card"), occurrence=2)
     assert keyed.park_name.stored() == f"govern:spend,{RUN},occurrence=2;step;tool:charge_card"
 
 
@@ -152,14 +150,14 @@ def test_park_names_are_injective_across_gate_run_pass_and_op():
         for g in ("spend", "approve")
         for r in ("a", "b")
         for n in range(3)
-        for k in (step_key("tool:charge_card").stored(), step_key("tool:wire_transfer").stored())
+        for k in (called_step("charge_card"), called_step("wire_transfer"))
     ]
     names = {GateState(run_id=r, gate=g, pass_n=n, op_key=k).park_name for g, r, n, k in combos}
     assert len(names) == len(combos) == 24
 
 
 def test_absorb_appends_per_policy_history():
-    state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored())
+    state = GateState(run_id=RUN, gate="g", op_key=called_step("x"))
     state = state.absorb(Resolution(answers={"budget": 1, "permission": "yes"}))
     state = state.absorb(Resolution(answers={"budget": 2}))
     assert state.answers["budget"] == (1, 2)  # accrual
@@ -366,7 +364,10 @@ def test_a_ruling_reaches_its_policy_only_naming_the_effect_its_ask_binds(ask, a
         assert (read, recorded) == ([], [])
 
 
-@pytest.mark.parametrize("placed", ["gather:0,0;step:memo", "gather:0,1;step:memo", None])
+@pytest.mark.parametrize(
+    "placed",
+    [placed_step("memo", "tool", "gather:0,0;"), placed_step("memo", "tool", "gather:0,1;"), None],
+)
 def test_a_policy_reads_where_the_gated_op_runs(placed):
     """Two gather branches gating one op differ in placement alone."""
     seen = []
@@ -443,7 +444,7 @@ def test_one_policy_refusing_blocks_the_other_policys_park():
 def test_permission_policy_folds_pure_tiers_by_decide():
     allow = permission.as_policy([permission.rules(lambda op: Allow())])
     deny = permission.as_policy([permission.rules(lambda op: Deny("nope"))])
-    state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored())
+    state = GateState(run_id=RUN, gate="g", op_key=called_step("x"))
     assert allow(OP, state) == Proceed()
     assert _refusals(deny(OP, state)) == ((Refusal("permission", "nope"),), None)
 
@@ -451,20 +452,20 @@ def test_permission_policy_folds_pure_tiers_by_decide():
 def test_permission_policy_escalation_becomes_the_gates_park():
     """The human tier stops being a special tier: escalation IS the park."""
     policy = permission.as_policy([permission.rules(lambda op: Escalate())])
-    ruling = policy(OP, GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()))
+    ruling = policy(OP, GateState(run_id=RUN, gate="g", op_key=called_step("x")))
     assert isinstance(ruling, Park)
     assert ruling.asks[0].policy == "permission"
 
 
 def test_permission_policy_can_fail_closed_where_no_park_is_possible():
     policy = permission.as_policy([permission.rules(lambda op: Escalate())], on_escalate="deny")
-    verdict = policy(OP, GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()))
+    verdict = policy(OP, GateState(run_id=RUN, gate="g", op_key=called_step("x")))
     assert _refusals(verdict) == ((Refusal("permission", permission.FAIL_CLOSED.reason),), None)
 
 
 def test_permission_policy_reads_the_latest_answer_not_the_history():
     policy = permission.as_policy([permission.rules(lambda op: Escalate())])
-    state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()).absorb(
+    state = GateState(run_id=RUN, gate="g", op_key=called_step("x")).absorb(
         Resolution(answers={"permission": {}})
     )
     assert isinstance(policy(OP, state), Refuse)  # a non-approval settles as a refusal
@@ -476,7 +477,7 @@ def test_budget_policy_accrues_the_whole_grant_history():
     """The trip is defined over a LIST of grants — collapsing to the latest would lose it."""
     budget = MeasuredBudget(overall=0.005, run_id=RUN, on_exhaust="park")
     policy = at_spend(0.010, budget_policy(budget))
-    state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored())
+    state = GateState(run_id=RUN, gate="g", op_key=called_step("x"))
     assert isinstance(policy(OP, state), Park)
     state = state.absorb(Resolution(answers={"budget": Grant(add_dollars=0.002)}))
     assert isinstance(policy(OP, state), Park)  # $0.007 ceiling, still under $0.010 spend
@@ -488,7 +489,7 @@ def test_budget_policy_accepts_the_shapes_an_operator_surface_sends():
     budget = MeasuredBudget(overall=0.005, run_id=RUN, on_exhaust="park")
     policy = at_spend(0.010, budget_policy(budget))
     for answer in (Grant(add_dollars=0.01), {"add_dollars": 0.01}, 0.01):
-        state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()).absorb(
+        state = GateState(run_id=RUN, gate="g", op_key=called_step("x")).absorb(
             Resolution(answers={"budget": answer})
         )
         assert policy(OP, state) == Proceed()
@@ -497,7 +498,7 @@ def test_budget_policy_accepts_the_shapes_an_operator_surface_sends():
 def test_a_stop_grant_refuses_through_the_policy():
     budget = MeasuredBudget(overall=0.005, run_id=RUN, on_exhaust="park")
     policy = at_spend(0.010, budget_policy(budget))
-    state = GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()).absorb(
+    state = GateState(run_id=RUN, gate="g", op_key=called_step("x")).absorb(
         Resolution(answers={"budget": Grant(stop=True)})
     )
     assert isinstance(policy(OP, state), Refuse)
@@ -529,7 +530,7 @@ def test_a_yielding_tier_is_rejected_with_the_migration_message():
 
     policy = permission.as_policy([permission.human(_Approval)])
     with pytest.raises(TypeError, match="the gate owns the single park"):
-        policy(OP, GateState(run_id=RUN, gate="g", op_key=step_key("tool:x").stored()))
+        policy(OP, GateState(run_id=RUN, gate="g", op_key=called_step("x")))
 
 
 def test_a_non_verdict_tier_fails_loudly_rather_than_closed_and_silent():

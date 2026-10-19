@@ -15,7 +15,7 @@ from effective.cost import Usage
 from effective.domain import AskLLM, CallTool
 from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import subagent_runner
-from effective.interrupts import Interrupted, tool_interrupt
+from effective.interrupts import Interrupted, interrupt_key, tool_interrupt
 from effective.ops import CompositionRefused
 from effective.react import (
     AssistantTurn,
@@ -94,8 +94,8 @@ def test_a_redirect_on_a_repair_turn_carries_the_refusal_to_the_next_tail():
         {
             "react:turn": [searching(), answering(7), answering(1)],
             "tool:search": [PASSAGES],
-            "tool:interrupt,pre": [quiet, quiet, Interrupted(redirect="hurry"), quiet],
-            "tool:interrupt,post": [quiet, quiet, quiet],
+            interrupt_key("pre").stored(): [quiet, quiet, Interrupted(redirect="hurry"), quiet],
+            interrupt_key("post").stored(): [quiet, quiet, quiet],
         },
         interrupt=tool_interrupt(),
     )
@@ -228,8 +228,8 @@ def test_a_redirect_before_the_final_level_carries_the_refusal_into_it():
             "react:turn": [searching(), answering(7)],
             "react:final": [answering(1)],
             "tool:search": [PASSAGES],
-            "tool:interrupt,pre": [quiet, quiet, Interrupted(redirect="hurry")],
-            "tool:interrupt,post": [quiet, quiet],
+            interrupt_key("pre").stored(): [quiet, quiet, Interrupted(redirect="hurry")],
+            interrupt_key("post").stored(): [quiet, quiet],
         },
         max_iters=2,
         interrupt=tool_interrupt(),

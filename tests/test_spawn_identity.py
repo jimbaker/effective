@@ -35,6 +35,7 @@ from effective.spawning import (
     join_answer,
     run_child,
     spawn_child,
+    spawn_key,
 )
 from effective.viewing import ViewingCtx
 
@@ -86,8 +87,8 @@ def test_a_spawn_that_lands_before_its_checkpoint_enqueues_one_child(backend):
     """Reddens if a retried spawn is named differently from the attempt that crashed."""
     child_task, parent = private("child"), private("parent")
     backend.register_body(child_task, child)
-    fault = after_the_spawn("tool:spawn")
     correlation = str(uuid4())
+    fault = after_the_spawn(spawn_key(correlation).stored())
     backend.register(
         parent, lambda _rid: subagent(child_task, correlation), spawning(backend), fault, layers=[]
     )

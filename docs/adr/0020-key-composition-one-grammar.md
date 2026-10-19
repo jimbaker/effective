@@ -136,11 +136,13 @@ author boundary and additionally refuses an occurrence suffix (§7).
 
 ### 6. Identity positions are linted by position
 
-`effective.lint --key-composition` flags a name built by formatting in an identity slot: the first
-argument of `step(...)`/`Step(...)` and the `idempotency_key`/`event_id` keywords, following one hop
-of local binding so it reports the line that built the name. It is scoped by position because an
-f-string is the correct render backend everywhere else (messages, logs, display text, and inside
-`render` itself). A bare f-string in an identity, SQL or prompt position means a decision was
+`effective.lint --key-composition` flags a name built by formatting in an identity slot: the name
+slot of every call that takes an op's or an event's name (`step`, `ask_llm`, `judge`, `select`,
+`call_tool`, the await and emit calls), by position and by keyword, and the
+`idempotency_key`/`event_id` keywords wherever they appear. It follows one hop of local binding,
+so it reports the line that built the name, and it reads `src`, `examples`, `tests` and `scripts`.
+It is scoped by position because an f-string is the correct render backend everywhere else
+(messages, logs, display text, and inside `render` itself). A bare f-string in an identity, SQL or prompt position means a decision was
 skipped.
 
 Concatenating a prefix onto a name is judged by the type of the right operand:
@@ -180,9 +182,22 @@ the Absurd SDK and `SqliteTaskContext` already store for a repeated checkpoint n
 atom charset, `authored_key` refuses it in an author's name, and `KeyMap.explain` reports it as
 `Explanation.occurrence`, separate from the template's fields.
 
-**Fences.** A `Step`'s key opens with its own arm term (`step;approve:x`), so the step region is
-disjoint from every substrate namespace by construction and needs no denylist. An await is
-addressed by its event name, which carries no arm, so `RESERVED_AUTHORITY_TAGS` fences awaits, and
+**Fences.** A `Step`'s key opens with its own arm term and then its op's kind, `llm`, `judge` or
+`tool`, so the step region is disjoint from every substrate namespace by construction and needs no
+denylist, and two kinds of op under one name keep two keys:
+
+| the step's name | its key |
+|---|---|
+| an atom: `ask_llm("extract")`, `call_tool("search")` | `step;llm:extract`, `step;tool:search` |
+| a minter's unnumbered `Key`: a ReAct turn, a spawn | `step;llm;react:turn`, `step;tool;spawn:child` |
+| text holding key structure: `ask_llm("tool:search")` | refused |
+| a `Key` carrying an occurrence | refused |
+
+Context goes in a scope or a frame (`rec:3;step;llm:summarize`), never in the name. A minter's tag
+is owned by one package: `--key-registry` refuses a registered tag minted in a second package, so
+a fold reading a coordinate's role reads the owner's declaration.
+
+An await is addressed by its event name, which carries no arm, so `RESERVED_AUTHORITY_TAGS` fences awaits, and
 `effective.lint --authority-tags` checks it equal to the `AuthorityTag` declarations in both
 directions. The set is matched as a parsed leading tag, so there is no prefix spelling to go stale.
 
@@ -265,9 +280,11 @@ failed.
 It cannot prove a shape's fields are a complete coordinate of the question being asked, which is
 why scope is declared (§7). `--authority-scopes` reads same-module constants only, so a tag
 declared in one module and composed in another is not resolved; every authority tag in the tree is
-declared and composed in one module. `Step.name` is still a `str`, so an author's step name is
-checked at `step_key` and never registered. Serialization injectivity is held by construction and
-by sampling ([`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py)), and Lean proves it only for the structured
+declared and composed in one module. A step's name is an atom checked at `step_key` or a minter's
+`Key`, and tag ownership covers this tree's minters only: an author's own composed `Key` passed as
+a step's name can borrow another minter's tag within its kind, so `compose_key(t"react:turn")` in
+author code records `step;llm;react:turn`, a ReAct turn's key.
+Serialization injectivity is held by construction and by sampling ([`tests/test_op_key_injectivity.py`](../../tests/test_op_key_injectivity.py)), and Lean proves it only for the structured
 encoding.
 
 ## Alternatives considered

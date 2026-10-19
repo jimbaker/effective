@@ -54,15 +54,17 @@ def spawn_child(
     once this task's depth is spent."""
     return (
         yield from step(
-            # `spawn` is a static discriminator: a key-registry scan reads the template, and an
-            # interpolated one would be a hole that no other arity-2 `tool:` variant is disjoint
-            # from. `SPAWN_TOOL` is what a domain dispatches on.
-            compose_key(t"tool:spawn,{Run(name)}").stored(),
+            spawn_key(name),
             SpawnArgs(
                 task_name=task_name, params=dict(params), queue=queue, max_attempts=max_attempts
             ).call(),
         )
     )
+
+
+def spawn_key(name: str) -> Key:
+    """The name of the step that spawns the child placed by `name`."""
+    return compose_key(t"spawn:{Run(name)}")
 
 
 def join_child[T](spawned: Spawned, schema: type[T]) -> Effect[T]:

@@ -24,6 +24,7 @@ from uuid import UUID
 import pytest
 from _coder_script import FIXED, MODULE, TEST, Deployment, fixing
 from _conformance import StubbornSuiteDomain, coding_machine_wf
+from _steps import placed_step
 from textual.widgets import Input, Static, Tree
 
 from effective import runread
@@ -34,11 +35,14 @@ from effective.handlers.base import op_key
 from effective.handlers.durable import DurableHandler
 from effective.keys import Name
 from effective.ops import StoreArtifact
+from effective.react import react_key
 from effective.runs import RunState
 from effective.runview import to_markdown
 from tui.app import RunViewApp, _summary
 
 pytestmark = pytest.mark.journey
+
+TURN = placed_step(react_key("turn"), "llm")
 
 COMMITTED = op_key(
     StoreArtifact({MODULE: FIXED, "test_mod.py": TEST}, "application/json")
@@ -172,22 +176,22 @@ def test_the_tree_draws_the_run_the_way_it_ran(store):
                 "d:0",
                 "  state:work",
                 "    d:0",
-                "      step;react:turn",
+                f"      {TURN}",
                 "      step;tool:bash",
                 "    d:1",
-                "      step;react:turn",
+                f"      {TURN}",
                 "      step;tool:read",
                 "    d:2",
-                "      step;react:turn",
+                f"      {TURN}",
                 "      step;tool:edit",
                 "    d:3",
-                "      step;react:turn",
+                f"      {TURN}",
                 "      step;tool:edit",
                 "    d:4",
-                "      step;react:turn",
+                f"      {TURN}",
                 "      step;tool:edit",
                 "    d:5",
-                "      step;react:turn",
+                f"      {TURN}",
                 "    step;tool:run_suite",
                 COMMITTED,
                 "step;tool:run_suite",
@@ -232,7 +236,7 @@ def test_a_single_key_binding_is_not_swallowed_by_the_command_line(store):
                 "d:0",
                 "  state:work",
                 "    d",
-                "      step;react:turn  (x6)",
+                f"      {TURN}  (x6)",
                 "      step;tool:bash",
                 "      step;tool:read",
                 "      step;tool:edit  (x3)",
@@ -396,7 +400,7 @@ def test_a_FAILED_run_does_not_render_as_an_empty_one(failed_store):
             assert rendered.startswith("failed  ·"), rendered
             # NOT `"[failed]" in ...`: a `Static.update` string is Textual content MARKUP, so the
             # bracketed form is consumed as a style tag and the word never reaches the text. That
-            # is how the first version of this fix passed nothing and looked like a missing string.
+            # is how a check of it passes nothing and looks like a missing string.
             assert "[failed]" not in rendered
 
     asyncio.run(drive())

@@ -45,6 +45,7 @@ from _composition import (
     DONE_KEY,
     FORK_ANSWER,
     LEAF,
+    LEAF_KEY,
     PARK_EVENT,
     SPAWN_KEY,
     TERMINALS,
@@ -71,7 +72,6 @@ from effective.api import GatherBranch, gather, qualified_event_name
 from effective.combinators import Again, Chain, hoisted, respawn
 from effective.domain import Spawned
 from effective.fork import join_fork
-from effective.handlers.base import step_key
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended, _qualified
 from effective.keys import Key, Name, compose_key
 from effective.ops import CompositionRefused
@@ -732,4 +732,4 @@ def test_a_bare_leaf_needs_no_frames():
     algebra is what this test is about: no FRAMES, not no wrapping at all."""
     handler = RecordingHandler(responses={LEAF: "L"})
     assert handler.run(leaf()) == "L"
-    assert [entry.key.stored() for entry in handler.trace] == [step_key(LEAF).stored()]
+    assert [entry.key.stored() for entry in handler.trace] == [LEAF_KEY.stored()]

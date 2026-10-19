@@ -19,9 +19,17 @@ Durable crash-at-every-op / suspend-resume coverage is the pgt suite's job.
 from contextlib import contextmanager
 
 import pytest
+from _steps import placed_step
 
 import effective.monty
-from effective.code import EXECUTE_TOOL, ActionCall, CodeOutcome, run_code
+from effective.code import (
+    EXECUTE_TOOL,
+    ActionCall,
+    CodeOutcome,
+    _action_key,
+    _segment_key,
+    run_code,
+)
 from effective.domain import CallTool
 from effective.govern import BudgetRefused, Exceeded
 from effective.handlers.durable import DurableHandler
@@ -30,6 +38,17 @@ from effective.layers import op_layer
 from effective.monty import CodeEngineError, MontyEngine, execute_tool
 from effective.ops import Minted, Step
 from effective.permission import Refused
+
+
+def _segment(name: str, seg: int, frames: str = "") -> str:
+    """The recorded key of segment `seg` of the code run `name`, under `frames`."""
+    return placed_step(_segment_key(name, False, seg), "tool", frames)
+
+
+def _action(name: str, j: int, tool: str, frames: str = "") -> str:
+    """The recorded key of the `j`-th action, a call of `tool`, of the code run `name`."""
+    return placed_step(_action_key(name, False, j, tool), "tool", frames)
+
 
 # ---------------------------------------------------------------- engine unit
 
@@ -299,9 +318,9 @@ def test_run_code_threads_state_through_deterministic_op_keys():
 
     keys = [e.key.stored() for e in handler.trace]
     assert keys == [
-        "step;code:seg,0,audit",
-        "step;code:action,0,audit;tool:send_email",
-        "step;code:seg,1,audit",
+        _segment("audit", 0),
+        _action("audit", 0, "send_email"),
+        _segment("audit", 1),
     ]
     # the action op is an ordinary CallTool on the real tool name (cascade-visible)
     action_step = handler.trace[1].op
@@ -359,9 +378,7 @@ def test_run_code_stops_at_a_budget_refusal():
     handler = RecordingHandler(responses={"code:seg,0,audit": paused}, op_layers=[over_budget])
     with pytest.raises(BudgetRefused):
         handler.run(_wf)
-    assert [e.key.stored() for e in handler.trace][
-        -1
-    ] == "step;code:action,0,audit;tool:send_email"
+    assert [e.key.stored() for e in handler.trace][-1] == _action("audit", 0, "send_email")
 
 
 def test_a_pinned_run_is_SCOPED_and_an_improvised_one_is_not():
@@ -387,8 +404,8 @@ def test_a_pinned_run_is_SCOPED_and_an_improvised_one_is_not():
     handler = RecordingHandler(responses={"code:seg,0,p": done, "code:seg,0,i": done})
     handler.run(wf)
     assert [e.key.stored() for e in handler.trace] == [
-        "skill:math,activate;step;code:seg,0,p",  # the pack is IN the key
-        "step;code:seg,0,i",  # improvised: no frame, nothing to join to
+        _segment("p", 0, "skill:math,activate;"),  # the pack is IN the key
+        _segment("i", 0),  # improvised: no frame, nothing to join to
     ]
     # ...and no op carries provenance as an argument any more
     for entry in handler.trace:
@@ -488,7 +505,7 @@ def test_run_code_end_to_end_action_runs_exactly_once():
         {
             "args": ["approver@example.com", "summary of sales"],
             "kwargs": {},
-            "idempotency_key": "idempotency:report-task;step;code:action,0,report;tool:send_email",
+            "idempotency_key": _action("report", 0, "send_email", "idempotency:report-task;"),
         }
     ]
 

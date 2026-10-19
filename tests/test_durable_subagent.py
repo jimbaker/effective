@@ -13,6 +13,7 @@ cost lands on the parent meter directly (no telemetry-peek needed).
 """
 
 import pytest
+from _steps import placed_step
 
 from effective import call_tool
 from effective.compose import spawn_subagent
@@ -27,6 +28,7 @@ from effective.react import (
     ToolRequest,
     ToolResult,
     Trajectory,
+    react_key,
     run_agent,
 )
 
@@ -65,6 +67,11 @@ def program():
     return run_agent("solve", decide=parent_decide(), act=parent_act)
 
 
+def child_turn(depth: int) -> str:
+    """The placed key of the child's ReAct turn at `depth`, under the parent's first turn."""
+    return placed_step(react_key("turn"), "llm", f"d:0;sub:child;d:{depth};")
+
+
 def test_durable_subagent_resumes_the_child_after_a_parent_crash():
     # --- record the full run ---
     rec_ctx = RecordingCtx()
@@ -76,11 +83,7 @@ def test_durable_subagent_resumes_the_child_after_a_parent_crash():
 
     assert rec.answer == "child said 42"
     # the child's steps are checkpointed under namespaced keys in the PARENT's ctx
-    expected = {
-        "d:0;sub:child;d:0;step;react:turn",
-        "d:0;sub:child;d:0;step;tool:double",
-        "d:0;sub:child;d:1;step;react:turn",
-    }
+    expected = {child_turn(0), "d:0;sub:child;d:0;step;tool:double", child_turn(1)}
     assert expected <= {k.stored() for k in rec_ctx.log}
     # inline => the child's cost lands on the parent meter (no telemetry-peek needed)
     assert rec_interp.meter.cost == 0.002
@@ -91,7 +94,7 @@ def test_durable_subagent_resumes_the_child_after_a_parent_crash():
     # is True for EVERY key — the filter would drop nothing, the child would replay whole, and
     # the assertion below would fail with an empty `ran` rather than a wrong one. The silent
     # half of the opaque-`Key` trade, landing where a test can see it.
-    crashed_at = Key.parse("d:0;sub:child;d:1;step;react:turn")
+    crashed_at = Key.parse(child_turn(1))
     partial = {k: v for k, v in rec_ctx.log.items() if k != crashed_at}
 
     def exploding_double(args):
@@ -106,6 +109,6 @@ def test_durable_subagent_resumes_the_child_after_a_parent_crash():
 
     assert resumed.answer == "child said 42"
     # only the un-checkpointed child step re-ran; the turn + tool before the crash replayed
-    assert [k.stored() for k in resume_ctx.ran] == ["d:0;sub:child;d:1;step;react:turn"]
+    assert [k.stored() for k in resume_ctx.ran] == [child_turn(1)]
     # the resume paid for exactly one turn (the tail), not the whole child
     assert resume_interp.meter.cost == 0.001

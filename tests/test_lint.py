@@ -1408,7 +1408,48 @@ def test_a_composed_idempotency_key_is_flagged_wherever_it_appears():
     assert len(check_key_composition_source(src, "x.py")) == 1
 
 
+NAME_SLOTS = [
+    'ask_llm(f"hop{i}", messages, str)',
+    'ask_llm(name=f"hop{i}", messages=messages, schema=str)',
+    'call_tool(f"t{i}", {}, str)',
+    'call_tool(tool=f"t{i}", args={}, schema=str)',
+    'judge(f"j{i}", template, Output)',
+    'select(f"s{i}", template, candidates)',
+    'step(f"s{i}", op)',
+    'ctx.step(f"s{i}", op)',
+    'Step(name=f"s{i}", op=op)',
+    'await_event(f"ev:{i}", dict)',
+    'await_until(f"ev:{i}", dict, deadline=deadline)',
+    'AwaitEvent(name=f"ev:{i}", schema=dict)',
+    'event_name(f"ev:{i}")',
+    'qualified_event_name(branch, name=f"ev:{i}")',
+    'app.emit_event(f"ev:{i}", {})',
+    'name = f"t{i}"\ncall_tool(name, {}, str)',
+]
+
+
+@pytest.mark.parametrize("src", NAME_SLOTS)
+def test_a_name_built_by_formatting_is_flagged_in_every_name_slot(src):
+    from effective.lint import check_key_composition_source
+
+    (v,) = check_key_composition_source(src + "\n", "x.py")
+    assert v.rule == "key-composition"
+
+
 # --- the negatives ------------------------------------------------------------------------
+
+
+def test_an_emitters_payload_is_not_a_name():
+    from effective.lint import check_key_composition_source
+
+    assert check_key_composition_source('app.emit_event("ev", f"p{i}")\n', "x.py") == []
+
+
+def test_a_name_passed_through_is_not_built_here():
+    from effective.lint import check_key_composition_source
+
+    src = "call_tool(tool, {}, str)\nawait_event(name, dict)\napp.emit_event(name, {})\n"
+    assert check_key_composition_source(src, "x.py") == []
 
 
 def test_a_composed_key_in_the_slot_is_the_point_and_passes():
@@ -2342,3 +2383,28 @@ def test_a_directory_walk_skips_a_virtual_environment(tmp_path):
     (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
     (venv / "lib" / "site-packages" / "installed.py").write_text("")
     assert _expanded([tmp_path]) == [tmp_path / "ours.py"]
+
+
+# --- tag ownership ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "order", [("src/effective/a.py", "src/agent/b.py"), ("src/agent/b.py", "src/effective/a.py")]
+)
+def test_a_tag_minted_in_two_packages_names_both_whatever_the_order(order):
+    from effective.lint import registry_of
+
+    minted = 'compose_key(t"own:{Name(x)}")\n'
+    _, problems = registry_of(dict.fromkeys(order, minted))
+    (v,) = problems
+    assert (v.rule, v.text) == ("tag-in-two-packages", "own")
+    assert "src/agent" in v.message
+    assert "src/effective" in v.message
+
+
+def test_a_tag_minted_in_two_modules_of_its_package_is_owned():
+    from effective.lint import registry_of
+
+    minted = 'compose_key(t"own:{Name(x)}")\n'
+    _, problems = registry_of({"src/effective/a.py": minted, "src/effective/b/c.py": minted})
+    assert problems == []

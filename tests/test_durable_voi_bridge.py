@@ -9,6 +9,7 @@ trip parity, where `test_measured_fork.py` drives `measured_drive` against itsel
 
 import pytest
 from _authority import ruled
+from _steps import placed_step
 
 from effective.api import step
 from effective.bridge_sqlite import export_measured_prefix, park_name
@@ -21,6 +22,14 @@ from effective.handlers.durable import DurableHandler
 from effective.keys import Key
 
 COST = 0.001
+
+ASK0 = placed_step("ask0", "llm")
+ASK1 = placed_step("ask1", "llm")
+ASK2 = placed_step("ask2", "llm")
+ASK_A = placed_step("a", "llm")
+ASK_B = placed_step("b", "llm")
+ASK_C = placed_step("c", "llm")
+TOOL_T = placed_step("t", "tool")
 
 
 def _flat_llm(_op):
@@ -51,9 +60,9 @@ def _five_asks():
 
 
 def _ask_tool_ask():
-    a = yield from _ask("ask:a")
-    yield from _tool("tool:t")
-    b = yield from _ask("ask:b")
+    a = yield from _ask("a")
+    yield from _tool("t")
+    b = yield from _ask("b")
     return [a, b]
 
 
@@ -76,11 +85,11 @@ def _env_domain():
 
 
 def _ask_envtool_asks():
-    a = yield from _ask("ask:a")
-    yield from step("tool:t", CallTool(name="t", result_schema=dict))  # returns the envelope shape
-    b = yield from _ask("ask:b")
-    c = yield from _ask("ask:c")
-    yield from _ask("ask:d")
+    a = yield from _ask("a")
+    yield from step("t", CallTool(name="t", result_schema=dict))  # returns the envelope shape
+    b = yield from _ask("b")
+    c = yield from _ask("c")
+    yield from _ask("d")
     return [a, b, c]
 
 
@@ -117,8 +126,8 @@ def test_P3a_askllm_only_trip0_parity(app):
 
     entries, grants = export_measured_prefix(app.conn, tid, "r")
     assert [e.key.stored() for e in entries] == [
-        "step:ask0",
-        "step:ask1",
+        ASK0,
+        ASK1,
     ]  # 2 committed before the trip
     assert grants == {}  # no grant delivered yet
 
@@ -126,21 +135,21 @@ def test_P3a_askllm_only_trip0_parity(app):
     assert (
         tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
     )
-    assert [e.key.stored() for e in tail.trace] == ["step:ask0", "step:ask1"]
+    assert [e.key.stored() for e in tail.trace] == [ASK0, ASK1]
     assert tail.usage.cost == pytest.approx(0.002)
 
 
 def test_P3b_calltool_interleave_parity_the_F2_regression(app):
-    tid = _spawn(app, "r", _ask_tool_ask, limit=0.0005)  # crosses at ask:b (after the tool)
+    tid = _spawn(app, "r", _ask_tool_ask, limit=0.0005)  # crosses at `b` (after the tool)
     assert _run_state(app, tid) == "waiting"
 
     entries, _ = export_measured_prefix(app.conn, tid, "r")
-    # the durable run ran the TOOL after the ceiling crossing, then parked before ask:b
-    assert [e.key.stored() for e in entries] == ["step;ask:a", "step;tool:t"]
+    # the durable run ran the TOOL after the ceiling crossing, then parked before `b`
+    assert [e.key.stored() for e in entries] == [ASK_A, TOOL_T]
 
     tail = _fork(_ask_tool_ask, "r", 0.0005, entries, {})
-    # the fork matches: it too runs (replays) the tool, parks before ask:b
-    assert [e.key.stored() for e in tail.trace] == ["step;ask:a", "step;tool:t"]
+    # the fork matches: it too runs (replays) the tool, parks before `b`
+    assert [e.key.stored() for e in tail.trace] == [ASK_A, TOOL_T]
     assert (
         tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
     )
@@ -154,9 +163,9 @@ def test_P3c_trip_n_ge_1_needs_the_grant_export(app):
 
     entries, grants = export_measured_prefix(app.conn, tid, "r")
     assert [e.key.stored() for e in entries] == [
-        "step:ask0",
-        "step:ask1",
-        "step:ask2",
+        ASK0,
+        ASK1,
+        ASK2,
     ]  # ask2 committed after the grant
     assert grants == {Key.parse("budget-grant:r,0"): Grant(add_dollars=0.001)}
     assert park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,1"
@@ -181,28 +190,28 @@ def test_L1_envelope_shaped_tool_result_is_not_mis_decoded(app):
     assert _run_state(app, tid) == "waiting"
 
     entries, grants = export_measured_prefix(app.conn, tid, "r")
-    # durable ran the tool AFTER ask:a (folding 0 usage), then asks b, c under the ceiling, and
-    # parked before ask:d at 0.003 — the tool never advanced the meter.
+    # durable ran the tool AFTER `a` (folding 0 usage), then asks b, c under the ceiling, and
+    # parked before `d` at 0.003: the tool never advanced the meter.
     assert [e.key.stored() for e in entries] == [
-        "step;ask:a",
-        "step;tool:t",
-        "step;ask:b",
-        "step;ask:c",
+        ASK_A,
+        TOOL_T,
+        ASK_B,
+        ASK_C,
     ]
 
     tail = _fork(_ask_envtool_asks, "r", 0.003, entries, grants, domain=_env_domain)
     # NOT truncated to 2 steps (phantom usage would have tripped early):
     assert [e.key.stored() for e in tail.trace] == [
-        "step;ask:a",
-        "step;tool:t",
-        "step;ask:b",
-        "step;ask:c",
+        ASK_A,
+        TOOL_T,
+        ASK_B,
+        ASK_C,
     ]
     assert (
         tail.tripped_at.stored() == park_name(app.conn, tid, clock=app.clock) == "budget-grant:r,0"
     )
     assert tail.usage.cost == pytest.approx(0.003)  # NOT 0.006 — no phantom tool usage
 
-    tool_entry = next(e for e in tail.trace if e.key.stored() == "step;tool:t")
+    tool_entry = next(e for e in tail.trace if e.key.stored() == TOOL_T)
     assert tool_entry.result == ENVELOPE_TOOL_RESULT  # the FULL dict, not truncated
     assert tool_entry.usage.cost == 0.0  # the tool folds zero — envelope-ness is by op class

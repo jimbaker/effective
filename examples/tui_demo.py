@@ -28,10 +28,11 @@ import argparse
 from pathlib import Path
 
 from effective.api import append_ledger, await_event, call_tool, gather, scoped
+from effective.combinators import depth_frame, state_frame
 from effective.cost import MeteredInterpreter, Usage
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.handlers.durable import DurableHandler
-from effective.keys import Index, Name, Run, compose_key
+from effective.keys import Index, Run, compose_key
 from effective.ops import LedgerRow
 
 STATES = ("test", "draft", "review")
@@ -52,7 +53,7 @@ def machine_wf(run_id: str):
     """
     for visit, state in enumerate(STATES):
         yield from scoped(
-            compose_key(t"d:{Index(visit)}"),
+            depth_frame(visit),
             lambda s=state, v=visit: _state(s, v),
         )
     yield from append_ledger(
@@ -67,7 +68,7 @@ def machine_wf(run_id: str):
 
 
 def _state(name: str, visit: int):
-    return (yield from scoped(compose_key(t"state:{Name(name)}"), lambda: _steps(name, visit)))
+    return (yield from scoped(state_frame(name), lambda: _steps(name, visit)))
 
 
 def _steps(name: str, visit: int):

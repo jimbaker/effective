@@ -16,6 +16,7 @@ import _funnel as funnel
 import _mcts as mcts
 import pytest
 from _keymap import including
+from _steps import placed_step
 
 from effective.graphview import (
     Edge,
@@ -29,8 +30,11 @@ from effective.graphview import (
     restrict,
 )
 from effective.handlers.recording import RecordingHandler, Suspended
+from effective.keys import Index, compose_key, scope_prefix
 
 pytestmark = pytest.mark.spine
+
+A, B, C, X = (placed_step(name, "llm") for name in "abcx")
 
 
 def _tape(program, answers, reply: str) -> list[str]:
@@ -55,7 +59,12 @@ def agent_loop(iterations: int = 100) -> list[str]:
     `fold_cycles` cannot collapse it."""
     tape: list[str] = []
     for n in range(iterations):
-        tape += [f"rec:{n};step:think", f"rec:{n};step:search", f"rec:{n};ledger;iteration:m{n}"]
+        frame = scope_prefix(compose_key(t"rec:{Index(n)}"))
+        tape += [
+            placed_step("think", "llm", frame),
+            placed_step("search", "tool", frame),
+            f"rec:{n};ledger;iteration:m{n}",
+        ]
     return tape
 
 
@@ -140,9 +149,9 @@ def test_the_hundred_node_graph_becomes_three_nodes_and_keeps_its_backedge():
 
 
 def test_a_constant_column_is_not_an_axis():
-    """The guard that a first version lacked: two constant columns are trivially mutually
-    determining, so without it a one-row group collapses every column it has and the run's own
-    names vanish. A single-line cart must project onto itself.
+    """Two constant columns are trivially mutually determining, so without the varies-check a
+    one-row group collapses every column it has and the run's own names vanish. A single-line
+    cart must project onto itself.
 
     Reddens when: the varies-check is removed from either the seed or the closure.
 
@@ -184,8 +193,7 @@ def test_restrict_contracts_edges_rather_than_deleting_them():
 
     Asserted on the UNPROJECTED graph, and that is the point: after `project` the cart's last
     reservation already sits next to the order row, so the pair a naive filter would break is not
-    even adjacent there. A first version asserted that pair and stayed green under its own named
-    mutation — the test picked the one edge contraction was not needed for.
+    even adjacent there, and an assertion on it would stay green under the named mutation.
 
     Reddens when: edges are kept only where BOTH endpoints survive."""
     graph = from_keys(cart.ORDER_ID, cart_tape())
@@ -216,14 +224,10 @@ def test_a_contracted_edge_carries_the_flow_along_its_path():
 
     Reddens when: the contraction carries the FIRST hop's count instead of the minimum, which
     over-reports whenever the hidden region narrows."""
-    graph = from_keys("r", ["step:a", "step:b", "step:c"])
-    graph = RunGraph(
-        run_id="r",
-        nodes=graph.nodes,
-        edges=(Edge("step:a", "step:b", 9), Edge("step:b", "step:c", 4)),
-    )
-    (edge,) = restrict(graph, lambda node: node.key != "step:b").edges
-    assert (edge.src, edge.dst, edge.count) == ("step:a", "step:c", 4)
+    graph = from_keys("r", [A, B, C])
+    graph = RunGraph(run_id="r", nodes=graph.nodes, edges=(Edge(A, B, 9), Edge(B, C, 4)))
+    (edge,) = restrict(graph, lambda node: node.key != B).edges
+    assert (edge.src, edge.dst, edge.count) == (A, C, 4)
 
 
 def test_selection_and_projection_compose_in_either_order():
@@ -261,14 +265,11 @@ def test_restrict_never_invents_an_edge_the_run_did_not_take():
     Reddens when: the walk recurses past a kept destination instead of ending there."""
     graph = RunGraph(
         run_id="r",
-        nodes=tuple(Node(key=k, kind="step") for k in ("step:a", "step:b", "step:c", "step:x")),
-        edges=(Edge("step:a", "step:b"), Edge("step:b", "step:c"), Edge("step:c", "step:x")),
+        nodes=tuple(Node(key=k, kind="step") for k in (A, B, C, X)),
+        edges=(Edge(A, B), Edge(B, C), Edge(C, X)),
     )
-    kept = restrict(graph, lambda node: node.key != "step:x")
-    assert {(e.src, e.dst) for e in kept.edges} == {
-        ("step:a", "step:b"),
-        ("step:b", "step:c"),
-    }
+    kept = restrict(graph, lambda node: node.key != X)
+    assert {(e.src, e.dst) for e in kept.edges} == {(A, B), (B, C)}
 
 
 # --- the search tree ---------------------------------------------------------------------------

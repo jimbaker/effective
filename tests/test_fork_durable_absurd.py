@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 import pytest
 from _durable import DSN, absurd, pg_ready
+from _steps import placed_step
 from test_fork_sweep import new_message_id
 
 from effective.api import append_ledger, ask_llm, await_event, sleep_until
@@ -239,5 +240,7 @@ def test_a_repeated_tail_step_checkpoints_under_a_string_name_not_a_Key_repr(con
             t"AND status = 'committed' ORDER BY checkpoint_name"
         ).fetchall()
     ]
-    assert "step:probe#2" in names, f"the repeated tail step is not string-named: {names}"
+    assert placed_step("probe", "llm", occurrence=2) in names, (
+        f"the repeated tail step is not string-named: {names}"
+    )
     assert not any("Key(" in n for n in names), f"a Key repr reached a checkpoint name: {names}"

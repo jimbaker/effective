@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from _steps import placed_step
 
 from effective import RecordingHandler
 from effective.api import Effect
@@ -14,6 +15,7 @@ from effective.interrupts import (
     Quiet,
     Redirect,
     Signal,
+    interrupt_key,
     signal_of,
     tool_interrupt,
 )
@@ -25,6 +27,7 @@ from effective.react import (
     ToolRequest,
     ToolResult,
     Trajectory,
+    react_key,
     run_turns,
 )
 
@@ -45,26 +48,22 @@ def test_the_wire_answer_reads_as_one_signal(answer: Interrupted, signal: Signal
     assert signal_of(answer) == signal
 
 
-POLL_KEYS = {
-    (0, "pre"): "d:0;tool:interrupt,pre",
-    (0, "post"): "d:0;tool:interrupt,post",
-    (0, "act"): "d:0;tool:interrupt,act",
-    (1, "pre"): "d:1;tool:interrupt,pre",
-    (1, "post"): "d:1;tool:interrupt,post",
-    (1, "act"): "d:1;tool:interrupt,act",
-}
-"""The canned key of each poll a two-turn run makes, by depth and phase."""
-
-POLL_NAMES = {
-    "pre": "tool:interrupt,pre",
-    "post": "tool:interrupt,post",
-    "act": "tool:interrupt,act",
-}
-"""The authored name of each phase's poll, which an escape it reports carries."""
+def poll_key(depth: int, phase: Phase) -> str:
+    """The canned key of the poll a run makes at `depth` and `phase`."""
+    return interrupt_key(phase).prefixed(f"d:{depth};").stored()
 
 
-def poll_key(depth: int, phase: str) -> str:
-    return POLL_KEYS[depth, phase]
+def poll_name(phase: Phase) -> str:
+    """The authored name of a phase's poll, which an escape it reports carries."""
+    return interrupt_key(phase).stored()
+
+
+def poll_step(phase: Phase) -> str:
+    """The recorded key of the first turn's poll at `phase`."""
+    return placed_step(interrupt_key(phase), "tool", "d:0;")
+
+
+TURN = placed_step(react_key("turn"), "llm", "d:0;")
 
 
 def quiet_polls(*depths: int) -> dict[str, Interrupted]:
@@ -88,32 +87,22 @@ def keys(handler: RecordingHandler) -> list[str]:
 
 def test_a_poll_records_only_the_phases_it_subscribes_to():
     _, between = run({"d:0;react:turn": ANSWER, **quiet_polls(0)}, phases={"pre", "post"})
-    assert keys(between) == [
-        "d:0;step;tool:interrupt,pre",
-        "d:0;step;react:turn",
-        "d:0;step;tool:interrupt,post",
-    ]
+    assert keys(between) == [poll_step("pre"), TURN, poll_step("post")]
     _, every = run(
         {"d:0;react:turn": ACT, "d:0;tool:ls": ToolResult(content="a b"), "d:1;react:turn": ANSWER}
         | quiet_polls(0, 1)
     )
-    assert "d:0;step;tool:interrupt,act" in keys(every)
+    assert poll_step("act") in keys(every)
 
 
 ESCAPES = {
-    "pre": (["d:0;step;tool:interrupt,pre"], [("user", "go"), ("user", ESCAPED)]),
+    "pre": ([poll_step("pre")], [("user", "go"), ("user", ESCAPED)]),
     "post": (
-        ["d:0;step;tool:interrupt,pre", "d:0;step;react:turn", "d:0;step;tool:interrupt,post"],
+        [poll_step("pre"), TURN, poll_step("post")],
         [("user", "go"), ("assistant", "look"), ("user", ESCAPED)],
     ),
     "act": (
-        [
-            "d:0;step;tool:interrupt,pre",
-            "d:0;step;react:turn",
-            "d:0;step;tool:interrupt,post",
-            "d:0;step;tool:ls",
-            "d:0;step;tool:interrupt,act",
-        ],
+        [poll_step("pre"), TURN, poll_step("post"), "d:0;step;tool:ls", poll_step("act")],
         [
             ("user", "go"),
             ("assistant", "look\nAction: ls({})"),
@@ -127,7 +116,7 @@ back. After `post` the chosen action is dropped with its thought kept; after `ac
 
 
 @pytest.mark.parametrize("phase", ["pre", "post", "act"])
-def test_an_escape_ends_the_run_at_the_phase_it_arrives(phase: str):
+def test_an_escape_ends_the_run_at_the_phase_it_arrives(phase: Phase):
     responses = {"d:0;react:turn": ACT, "d:0;tool:ls": ToolResult(content="a b"), **quiet_polls(0)}
     responses[poll_key(0, phase)] = Interrupted(escape=True)
     ran, handler = run(responses)
@@ -139,7 +128,7 @@ def test_an_escape_ends_the_run_at_the_phase_it_arrives(phase: str):
     assert isinstance(ending, Escaped)
     assert (ending.origin, ending.name, ending.partial) == (
         "escape",
-        POLL_NAMES[phase],
+        poll_name(phase),
         dropped,
     )
 
@@ -168,7 +157,7 @@ def test_a_redirect_after_the_action_follows_its_observation():
         "d:0;tool:ls": ToolResult(content="a b"),
         "d:1;react:turn": ANSWER,
         **quiet_polls(0, 1),
-        "d:0;tool:interrupt,act": Interrupted(redirect="only txt files"),
+        poll_key(0, "act"): Interrupted(redirect="only txt files"),
     }
     ran, _ = run(responses)
     ending = ran.trajectory

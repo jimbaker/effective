@@ -15,13 +15,14 @@ import random
 import pytest
 
 from effective.domain import CallTool
+from effective.handlers.base import step_key
 from effective.handlers.durable import _Reforwards
 from effective.keys import Key
 from effective.ops import Step
 
 pytestmark = pytest.mark.property
 
-KEYS = [Key.parse("step:a"), Key.parse("step:b"), Key.parse("step:c")]
+KEYS = [step_key(name, "tool") for name in ("a", "b", "c")]
 FORWARD = None
 
 

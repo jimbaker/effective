@@ -37,7 +37,7 @@ from effective.govern import (
 )
 from effective.keys import Index, Key, Name, Run, compose_key
 from effective.keys.grammar import parse
-from effective.ops import Step, WorkflowOp
+from effective.ops import Step, WorkflowOp, step_name_text
 from effective.search import SearchTree, Stats, beam, mcts, uct
 
 DEPTH = 3
@@ -234,9 +234,14 @@ COST = 0.001
 candidate of the frontier it expands."""
 
 
+def scoring(node: str) -> Key:
+    """The name of the ask that scores `node`."""
+    return compose_key(t"score:{Name(node or 'root')}")
+
+
 def asked_score(node: str) -> Effect[float]:
     """Scoring as a metered ask, which is what a budget refuses; `score` is a free tool."""
-    return (yield from ask_llm(f"score:{node or 'root'}", node, float))
+    return (yield from ask_llm(scoring(node), node, float))
 
 
 def spending() -> MeteredInterpreter:
@@ -272,7 +277,7 @@ def ceiling(asks: int) -> PolicyFor:
     )
 
 
-def refuses(step: str) -> PolicyFor:
+def refuses(step: str | Key) -> PolicyFor:
     """A gate that refuses one named op, wherever the scheduler runs it.
 
     A ceiling cannot aim at one branch of a level: the meter folds at the gather barrier, so a
@@ -283,7 +288,9 @@ def refuses(step: str) -> PolicyFor:
         match op:
             case Step(name=name) if name == step:
                 return refuse(
-                    f"{name} refused", policy="budget", exceeded=Exceeded(spent=COST, ceiling=COST)
+                    f"{step_name_text(name)} refused",
+                    policy="budget",
+                    exceeded=Exceeded(spent=COST, ceiling=COST),
                 )
             case Step(op=CallTool(name="children", args={"node": str(node)})) if (
                 step == f"expand:{node}"
@@ -297,13 +304,13 @@ def refuses(step: str) -> PolicyFor:
     return lambda _run_id: policy
 
 
-def denies(step: str) -> PolicyFor:
+def denies(step: str | Key) -> PolicyFor:
     """A gate that refuses one named op for a reason that is not the budget's."""
 
     def policy(op: WorkflowOp, state: GateState) -> Verdict:
         match op:
             case Step(name=name) if name == step:
-                return refuse(f"{name} denied", policy="deny")
+                return refuse(f"{step_name_text(name)} denied", policy="deny")
             case _:
                 return Proceed()
 
@@ -316,10 +323,10 @@ costs one per candidate it expands. A level is refused whole, because the meter 
 folds at the gather barrier."""
 
 REFUSALS = {
-    "one candidate of a level": ("score:ab", 1),
+    "one candidate of a level": (scoring("ab"), 1),
     "one expansion of a level": ("expand:a", 1),
-    "a candidate of the last level": ("score:aab", 2),
-    "a candidate of the first": ("score:a", 0),
+    "a candidate of the last level": (scoring("aab"), 2),
+    "a candidate of the first": (scoring("a"), 0),
 }
 """A refused op, and the levels the search keeps. The levels score `a b`, then `ba bb aa ab`, then
 `baa bab aaa aab`, so each row names one op of a level whose other branches go through."""
@@ -424,7 +431,7 @@ def test_a_refusal_scoring_the_roots_is_raised_on(backend, spelling):
 def test_a_refusal_that_is_not_the_budgets_is_raised_on(backend, spelling):
     """The stop is the budget's alone. A gate that denies a candidate for its own reason ends the
     search, because a search that answered here would hide every other refusal a level meets."""
-    snap = run_shape(backend, gated(denies("score:ab")), spelling).snap
+    snap = run_shape(backend, gated(denies(scoring("ab"))), spelling).snap
 
     assert snap.state == "failed", snap
     assert backend.failure_kind(snap) == "Refused"
@@ -440,7 +447,7 @@ def test_a_gate_that_refuses_nothing_changes_nothing(backend, spelling):
     assert snap.result == beam_by_hand(score_of)
 
 
-GATES = {"a named op": refuses("score:ab"), "a ceiling": ceiling(5)}
+GATES = {"a named op": refuses(scoring("ab")), "a ceiling": ceiling(5)}
 """The two gates a crash has to survive. The ceiling is the one that reads the meter, so it is
 also the row that says a replay re-derives the spend rather than carrying it."""
 

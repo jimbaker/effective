@@ -38,7 +38,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from effective import Effect, Refused, ask_llm, step
+from effective import Effect, Refused, ask_llm, call_tool
 from effective.cost import CostBudget, MeteredInterpreter
 from effective.domain import CallTool
 from effective.govern import routable
@@ -133,23 +133,15 @@ def debug_loop(
 
     def propose(parents, reflection: Reflection) -> Effect[list[tuple[Edit, ...]]]:
         best = max(parents, key=lambda s: (s.measures[TESTS], s.measures[QUALITY]))
-        content: str = yield from step(
-            "tool:read_file",
-            CallTool(name="read_file", result_schema=str, args={"path": path}),
-        )
+        content: str = yield from call_tool("read_file", {"path": path}, str)
         edit: Edit | None = yield from ask_llm(
-            "react:edit", _edit_request(path, content, reflection), Edit
+            "edit", _edit_request(path, content, reflection), Edit
         )
         if edit is None:  # the Gated channel could not produce a safe edit
             return []
         try:
-            applied: ApplyResult = yield from step(
-                "tool:apply_edit",
-                CallTool(
-                    name="apply_edit",
-                    result_schema=ApplyResult,
-                    args={"path": edit.path, "old": edit.old, "new": edit.new},
-                ),
+            applied: ApplyResult = yield from call_tool(
+                "apply_edit", {"path": edit.path, "old": edit.old, "new": edit.new}, ApplyResult
             )
         except Refused as refusal:  # a denied apply yields no candidate this round
             routable(refusal)
@@ -159,13 +151,8 @@ def debug_loop(
         return [(*best.candidate, edit)]
 
     def score(cand: tuple[Edit, ...]) -> Effect[Measurement]:
-        tr: TestReport = yield from step(
-            "tool:run_tests", CallTool(name="run_tests", result_schema=TestReport, args={})
-        )
-        qr: QualityReport = yield from step(
-            "tool:quality",
-            CallTool(name="check_quality", result_schema=QualityReport, args={}),
-        )
+        tr: TestReport = yield from call_tool("run_tests", {}, TestReport)
+        qr: QualityReport = yield from call_tool("check_quality", {}, QualityReport)
         asi = " | ".join(x for x in (tr.summary, qr.notes) if x)
         return Measurement(measures={TESTS: float(tr.passed), QUALITY: qr.score}, asi=asi)
 

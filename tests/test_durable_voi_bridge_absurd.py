@@ -13,6 +13,7 @@ import psycopg
 import pytest
 from _authority import ruled
 from _durable import DSN, absurd, pg_ready
+from _steps import placed_step
 
 from effective.api import append_ledger, scoped, step
 from effective.bridge_absurd import export_measured_prefix, park_name
@@ -29,6 +30,14 @@ from effective.ops import LedgerRow
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="needs Postgres/Absurd (just pgt-up)")
 
 COST = 0.001
+
+ASK0 = placed_step("ask0", "llm")
+ASK1 = placed_step("ask1", "llm")
+ASK2 = placed_step("ask2", "llm")
+ASK_A = placed_step("a", "llm")
+ASK_B = placed_step("b", "llm")
+ASK_C = placed_step("c", "llm")
+TOOL_T = placed_step("t", "tool")
 
 
 def _flat_llm(_op):
@@ -55,9 +64,9 @@ def _five_asks():
 
 
 def _ask_tool_ask():
-    a = yield from _ask("ask:a")
-    yield from _tool("tool:t")
-    b = yield from _ask("ask:b")
+    a = yield from _ask("a")
+    yield from _tool("t")
+    b = yield from _ask("b")
     return [a, b]
 
 
@@ -79,11 +88,11 @@ def _env_domain():
 
 
 def _ask_envtool_asks():
-    a = yield from _ask("ask:a")
-    yield from step("tool:t", CallTool(name="t", result_schema=dict))
-    b = yield from _ask("ask:b")
-    c = yield from _ask("ask:c")
-    yield from _ask("ask:d")
+    a = yield from _ask("a")
+    yield from step("t", CallTool(name="t", result_schema=dict))
+    b = yield from _ask("b")
+    c = yield from _ask("c")
+    yield from _ask("d")
     return [a, b, c]
 
 
@@ -100,9 +109,9 @@ def conn():
 
 
 def _spawn(app, program, run_id, limit, *, domain=_domain):
-    name = f"voi-{run_id}"
+    task_name = f"voi-{run_id}"
 
-    @app.register_task(name, default_max_attempts=3)
+    @app.register_task(task_name, default_max_attempts=3)
     def task(params, ctx):
         rid = params["run_id"]
         ledger = PostgresLedger(DSN, workflow_run_id=rid)
@@ -117,7 +126,7 @@ def _spawn(app, program, run_id, limit, *, domain=_domain):
         finally:
             ledger.close()
 
-    return app.spawn(name, marked({"run_id": run_id}))
+    return app.spawn(task_name, marked({"run_id": run_id}))
 
 
 def _run_until_park(app, conn, tid, expected):
@@ -144,28 +153,28 @@ def test_P3a_askllm_only_trip0_parity(app, conn):
     _run_until_park(app, conn, tid, f"budget-grant:{rid},0")
 
     entries, grants = export_measured_prefix(conn, tid, rid)
-    assert [e.key.stored() for e in entries] == ["step:ask0", "step:ask1"]
+    assert [e.key.stored() for e in entries] == [ASK0, ASK1]
     assert grants == {}
 
     tail = _fork(_five_asks, rid, 0.0015, entries, grants)
     assert tail.tripped_at == Key.parse(f"budget-grant:{rid},0")
-    assert [e.key.stored() for e in tail.trace] == ["step:ask0", "step:ask1"]
+    assert [e.key.stored() for e in tail.trace] == [ASK0, ASK1]
     assert tail.usage.cost == pytest.approx(0.002)
 
 
 def test_P3b_calltool_interleave_parity(app, conn):
     rid = f"b{uuid.uuid4().hex[:8]}"
-    tid = _spawn(app, _ask_tool_ask, rid, limit=0.0005)  # crosses at ask:b, after the tool
+    tid = _spawn(app, _ask_tool_ask, rid, limit=0.0005)  # crosses at `b`, after the tool
     _run_until_park(app, conn, tid, f"budget-grant:{rid},0")
 
     entries, _ = export_measured_prefix(conn, tid, rid)
     assert [e.key.stored() for e in entries] == [
-        "step;ask:a",
-        "step;tool:t",
+        ASK_A,
+        TOOL_T,
     ]  # the tool ran before the park
 
     tail = _fork(_ask_tool_ask, rid, 0.0005, entries, {})
-    assert [e.key.stored() for e in tail.trace] == ["step;ask:a", "step;tool:t"]
+    assert [e.key.stored() for e in tail.trace] == [ASK_A, TOOL_T]
     assert tail.tripped_at == Key.parse(f"budget-grant:{rid},0")
 
 
@@ -177,7 +186,7 @@ def test_P3c_trip_n_ge_1_needs_the_grant_export(app, conn):
     _run_until_park(app, conn, tid, f"budget-grant:{rid},1")  # runs ask2, re-parks at :1
 
     entries, grants = export_measured_prefix(conn, tid, rid)
-    assert [e.key.stored() for e in entries] == ["step:ask0", "step:ask1", "step:ask2"]
+    assert [e.key.stored() for e in entries] == [ASK0, ASK1, ASK2]
     assert grants == {compose_key(t"budget-grant:{Segment(rid)},0"): Grant(add_dollars=0.001)}
 
     # WITH the delivered grant, the fork re-derives the SAME park (:1, spend 0.003)
@@ -202,23 +211,23 @@ def test_L1_envelope_shaped_tool_result_is_not_mis_decoded(app, conn):
 
     entries, grants = export_measured_prefix(conn, tid, rid)
     assert [e.key.stored() for e in entries] == [
-        "step;ask:a",
-        "step;tool:t",
-        "step;ask:b",
-        "step;ask:c",
+        ASK_A,
+        TOOL_T,
+        ASK_B,
+        ASK_C,
     ]
 
     tail = _fork(_ask_envtool_asks, rid, 0.003, entries, grants, domain=_env_domain)
     assert [e.key.stored() for e in tail.trace] == [
-        "step;ask:a",
-        "step;tool:t",
-        "step;ask:b",
-        "step;ask:c",
+        ASK_A,
+        TOOL_T,
+        ASK_B,
+        ASK_C,
     ]
     assert tail.tripped_at == Key.parse(f"budget-grant:{rid},0")
     assert tail.usage.cost == pytest.approx(0.003)  # NOT 0.006
 
-    tool_entry = next(e for e in tail.trace if e.key.stored() == "step;tool:t")
+    tool_entry = next(e for e in tail.trace if e.key.stored() == TOOL_T)
     assert tool_entry.result == ENVELOPE_TOOL_RESULT  # full dict, not truncated
     assert tool_entry.usage.cost == 0.0
 
@@ -233,7 +242,7 @@ def test_multirefill_within_one_ask_survives_real_suspend_resume(app, conn):
     tid = _spawn(app, _two_asks, rid, limit=0.0005)  # ask0 runs (meter 0.001); ask1 trips
     _run_until_park(app, conn, tid, f"budget-grant:{rid},0")
     assert [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == [
-        "step:ask0"
+        ASK0
     ]  # ask1 parked
 
     # two insufficient refills (0.0002 each): the park advances :0 -> :1 -> :2 across real
@@ -241,20 +250,20 @@ def test_multirefill_within_one_ask_survives_real_suspend_resume(app, conn):
     for k in (0, 1):
         app.emit_event(budget_grant_name(rid, k), ruled({"add_dollars": 0.0002}))
         _run_until_park(app, conn, tid, f"budget-grant:{rid},{k + 1}")
-        assert [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == ["step:ask0"]
+        assert [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == [ASK0]
 
     # the 3rd grant lifts the ceiling above the meter; ask1 finally clears and commits.
     app.emit_event(budget_grant_name(rid, 2), ruled({"add_dollars": 0.0002}))
     for _ in range(24):
         app.work_batch()
         if [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == [
-            "step:ask0",
-            "step:ask1",
+            ASK0,
+            ASK1,
         ]:
             break
     assert [e.key.stored() for e in export_measured_prefix(conn, tid, rid)[0]] == [
-        "step:ask0",
-        "step:ask1",
+        ASK0,
+        ASK1,
     ]
 
 
@@ -266,7 +275,7 @@ def _scoped_ledger_then_asks():
         yield from append_ledger(
             LedgerRow(event_id=compose_key(t"noted:{Segment('x')}"), kind="noted")
         )
-        return (yield from _ask("ask:inner"))
+        return (yield from _ask("inner"))
 
     yield from scoped(compose_key(t"rec:{0}"), body)
     yield from _ask("ask1")
@@ -283,4 +292,4 @@ def test_a_scoped_ledger_checkpoint_is_not_exported_as_a_step(app, conn):
     _run_until_park(app, conn, tid, f"budget-grant:{rid},0")
 
     entries, _ = export_measured_prefix(conn, tid, rid)
-    assert [e.key.stored() for e in entries] == ["step:ask0", "rec:0;step;ask:inner", "step:ask1"]
+    assert [e.key.stored() for e in entries] == [ASK0, placed_step("inner", "llm", "rec:0;"), ASK1]

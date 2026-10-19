@@ -8,11 +8,13 @@ prompt. Infra-free: the measured trip runs on the in-process driver, since the d
 needs Postgres; the DEPLOYED park needs a checkpoint→trace bridge.
 """
 
+from functools import partial
 from typing import Any
 
 import pytest
+from _steps import placed_step
 
-from effective.api import step
+from effective.api import await_event, scoped, step
 from effective.budget import Grant, MeasuredBudget
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
@@ -22,10 +24,12 @@ from effective.fork import (
     MeasuredTail,
     Parked,
     enforce_measured,
+    live_drive,
     measured_drive,
 )
 from effective.govern import BudgetRefused
-from effective.keys import Key, Segment, compose_key
+from effective.keys import Index, Key, Segment, compose_key
+from effective.ops import Addressing
 from effective.voi import measured_prompt, should_grant
 
 STEP = 0.001  # dollars per refinement step (the surrogate's per-call cost)
@@ -37,8 +41,9 @@ def _refine(rounds: int):
     # threaded so replay re-derives it and the grader can score "how much refinement".
     answer = 0
     for i in range(rounds):
-        answer = yield from step(
-            f"refine:{i}", AskLLM(messages=[{"answer": answer}], response_schema=int)
+        refine = AskLLM(messages=[{"answer": answer}], response_schema=int)
+        answer = yield from scoped(
+            compose_key(t"refine:{Index(i)}"), partial(step, "refine", refine)
         )
     return answer
 
@@ -69,9 +74,7 @@ def test_base_run_parks_at_the_measured_ceiling():
         f"budget-grant:{RUN},0"
     )  # the production grant name (trip_n=0)
     assert [e.key.stored() for e in base.trace] == [
-        "step;refine:0",
-        "step;refine:1",
-        "step;refine:2",
+        placed_step("refine", "llm", f"refine:{i};") for i in range(3)
     ]
     assert base.result is None  # parked, not completed
     assert base.usage.cost == pytest.approx(3 * STEP)  # spend at the ceiling
@@ -95,6 +98,70 @@ def test_fork_replays_the_prefix_free_the_dollars_payoff():
     # the dollars free-prefix proof: total meter includes the prefix, live spend does NOT
     assert tail.usage.cost == pytest.approx(4 * STEP)  # prefix (3) + probe (1)
     assert tail.live_usage.cost == pytest.approx(STEP)  # the probe re-paid ONLY its one step
+
+
+def _scoped_program():
+    answer = 0
+    for i in range(10):
+        refine = AskLLM(messages=[{"answer": answer}], response_schema=int)
+        answer = yield from scoped(
+            compose_key(t"round:{Index(i)}"), partial(step, "refine", refine)
+        )
+    return answer
+
+
+def test_a_run_parked_inside_a_scope_has_no_result():
+    base = measured_drive(_scoped_program, _park_budget(), RefineDomain(), grants={})
+    assert [e.key.stored() for e in base.trace] == [
+        placed_step("refine", "llm", f"round:{i};") for i in range(3)
+    ]
+    assert base.result is None
+
+
+def test_a_fork_replays_a_prefix_placed_inside_scopes():
+    prefix = measured_drive(_scoped_program, _park_budget(), RefineDomain(), grants={}).trace
+    trip = compose_key(t"budget-grant:{Segment(RUN)},0")
+    tail = measured_drive(
+        _scoped_program,
+        _park_budget(),
+        RefineDomain(),
+        {trip: Grant(add_dollars=STEP)},
+        recorded=prefix,
+    )
+    assert tail.trace[-1].result == 4
+    assert tail.live_usage.cost == pytest.approx(STEP)
+
+
+def _awaiting_in_a_scope(addressing: Addressing):
+    def body():
+        return (yield from await_event(compose_key(t"done:c1"), str, addressing=addressing))
+
+    return lambda: (yield from scoped(compose_key(t"o"), body))
+
+
+def test_a_fork_reports_an_absolute_await_in_a_scope_where_the_engine_parks_it():
+    """An absolute name takes no frames, so the scope `o` reaches neither the engine's park nor
+    the fork's."""
+    program = _awaiting_in_a_scope(Addressing.ABSOLUTE)
+    parked = measured_drive(program, _park_budget(), RefineDomain(), grants={})
+    assert parked.tripped_at is not None
+    assert parked.tripped_at.stored() == "done:c1"
+    live = live_drive(program(), None, RefineDomain(), {})
+    assert live.parked_at is not None
+    assert live.parked_at.stored() == "done:c1"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="grants are keyed by an await's own name, and the park is reported under its frames",
+)
+def test_a_fork_answers_a_relative_await_in_a_scope_by_the_name_it_reports():
+    program, budget = _awaiting_in_a_scope(Addressing.RELATIVE), _park_budget()
+    parked = measured_drive(program, budget, RefineDomain(), grants={})
+    assert parked.tripped_at is not None
+    assert parked.tripped_at.stored() == "o;done:c1"
+    answered = measured_drive(program, budget, RefineDomain(), {parked.tripped_at: "yes"})
+    assert answered.result == "yes"
 
 
 def test_measured_grant_prompt_prices_the_marginal_in_dollars():
@@ -181,9 +248,9 @@ def test_a_generous_grant_runs_multiple_steps_before_re_parking():
 
 
 def _mixed():
-    a = yield from step("ask:a", AskLLM(messages=[{"answer": 0}], response_schema=int))
-    yield from step("tool:t", CallTool(name="t", result_schema=str))
-    b = yield from step("ask:b", AskLLM(messages=[{"answer": a}], response_schema=int))
+    a = yield from step("a", AskLLM(messages=[{"answer": 0}], response_schema=int))
+    yield from step("t", CallTool(name="t", result_schema=str))
+    b = yield from step("b", AskLLM(messages=[{"answer": a}], response_schema=int))
     return b
 
 
@@ -196,10 +263,13 @@ def test_trip_fires_only_at_askllm_not_at_a_calltool_step():
     # sibling `::test_L1_envelope_shaped_tool_result_is_not_mis_decoded`. This arm is the fast,
     # infra-free pin of the same fact.
     domain = MeteredInterpreter(llm=lambda op: (1, Usage(cost=STEP)), tools=lambda op: "done")
-    budget = MeasuredBudget(overall=STEP, run_id=RUN, on_exhaust="park")  # crossed after ask:a
+    budget = MeasuredBudget(overall=STEP, run_id=RUN, on_exhaust="park")  # crossed after `a`
     tail = measured_drive(_mixed, budget, domain, grants={})
     # ran the tool, THEN parked
-    assert [e.key.stored() for e in tail.trace] == ["step;ask:a", "step;tool:t"]
+    assert [e.key.stored() for e in tail.trace] == [
+        placed_step("a", "llm"),
+        placed_step("t", "tool"),
+    ]
     assert tail.tripped_at == Key.parse(f"budget-grant:{RUN},0")
 
 

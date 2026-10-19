@@ -20,6 +20,7 @@ import psycopg
 import pytest
 from _conformance import IMMEDIATE_RETRY, private
 from _durable import DSN, pg_ready
+from _steps import placed_step
 
 from effective.api import call_tool
 from effective.cost import MeteredInterpreter, Usage
@@ -28,6 +29,7 @@ from effective.handlers.durable import DurableHandler, spawn_done_name
 from effective.interpreters.tools import make_tool_runner, spawn_tool
 from effective.keys import Key
 from effective.ops import DONE_EVENT_PARAM, Writer
+from effective.spawning import spawn_key
 
 
 def crashing(times: int, seen: list[tuple[int, int | None, bool]]):
@@ -234,7 +236,9 @@ def test_a_worker_death_counts_the_execution_it_killed(tmp_path, death, limit, e
 @pytest.mark.parametrize("death", ENGINES)
 def test_a_worker_death_on_a_childs_last_attempt_answers_its_parent(tmp_path, death):
     """Reddens while a parent waits forever on a child whose worker died on its last attempt."""
-    placement = Writer(task=str(uuid.uuid4()), placement=Key.parse("step;tool:spawn,c"))
+    placement = Writer(
+        task=str(uuid.uuid4()), placement=Key.parse(placed_step(spawn_key("c"), "tool"))
+    )
     done = spawn_done_name(placement).stored()
 
     died = death(tmp_path, 1, {DONE_EVENT_PARAM: done})

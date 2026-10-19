@@ -448,12 +448,11 @@ def test_the_census_approve_minter_agrees_with_production():
     heard of `generation` would agree at 0 and disagree everywhere else. Checking only the default
     is how a pin like this passes while being worthless.
     """
-    from effective.domain import CallTool
     from effective.handlers.base import placed_key
-    from effective.ops import CHAIN_GENERATION, Step
+    from effective.ops import CHAIN_GENERATION
     from effective.permission import approval_name
 
-    op = Step(name="tool:x", op=CallTool(name="x", args={}, result_schema=str))
+    op = next(call_tool("x", {}, str))
     for generation in (0, 1, 7):
         token = CHAIN_GENERATION.set(generation)
         try:

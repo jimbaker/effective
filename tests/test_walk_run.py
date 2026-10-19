@@ -10,16 +10,20 @@ disagree. So the test that matters is the parametrized one: drive the same probe
 interpreter and assert they read the same.
 """
 
+from dataclasses import dataclass
+
 import pytest
 
-from effective.api import gather, step
+from effective.api import await_event, call_tool, gather, step
+from effective.combinators import Chain, Done, Turn, respawn
 from effective.domain import CallTool
 from effective.handlers.base import walk_run
-from effective.handlers.recording import RecordingHandler
+from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
-from effective.keys import Segment, compose_key
-from effective.layers import layer_run_state
-from effective.ops import CHAIN_DEPTH, CHAIN_GENERATION
+from effective.keys import Key, Segment, compose_key
+from effective.layers import layer_run_state, run_scope
+from effective.ops import CHAIN_DEPTH, CHAIN_GENERATION, AwaitEvent, current_generation
+from effective.permission import human
 
 CELL = compose_key(t"probe:{Segment('cell')}")
 
@@ -53,20 +57,22 @@ def test_the_run_scope_half_accumulates_across_ops():
     assert seen == [2]
 
 
-def test_the_task_run_half_resets_chain_state():
-    """Reddens if `walk_run` drops `enter_task_run()`.
+def test_the_task_run_half_holds_chain_state_for_the_run():
+    """Reddens if `walk_run` drops `chain_held`. A `descend` grant name reads the generation.
 
-    The two halves fail differently and a helper carrying both must be pinned on both: this one
-    is per-run CONTROL state, which a value left set by an earlier run in the same context would
-    corrupt — `ops.CHAIN_GENERATION` is read when composing a `descend` grant name.
-
-    Both cells, and they reset to DIFFERENT values (`0` vs `None`), which is exactly the sort of
-    thing a test asserting only one of them would let drift."""
-    CHAIN_DEPTH.set(9)
-    CHAIN_GENERATION.set(7)
-    with walk_run():
-        assert CHAIN_DEPTH.get() == 0
-        assert CHAIN_GENERATION.get() is None
+    | where        | `(CHAIN_DEPTH, CHAIN_GENERATION)` |
+    |--------------|-----------------------------------|
+    | in the run   | `(0, None)`, outside any chain    |
+    | after it     | the caller's `(9, 7)`             |
+    """
+    depth, generation = CHAIN_DEPTH.set(9), CHAIN_GENERATION.set(7)
+    try:
+        with walk_run():
+            assert (CHAIN_DEPTH.get(), CHAIN_GENERATION.get()) == (0, None)
+        assert (CHAIN_DEPTH.get(), CHAIN_GENERATION.get()) == (9, 7)
+    finally:
+        CHAIN_GENERATION.reset(generation)
+        CHAIN_DEPTH.reset(depth)
 
 
 def test_the_ambient_does_not_survive_the_block():
@@ -123,3 +129,48 @@ def test_a_gather_branch_shares_the_run_but_gets_its_own_scope():
     RecordingHandler({"gather:0,0;leaf": 1, "gather:0,1;leaf": 2}).run(wf)
     assert seen == [1, 1], "each branch counts in its OWN scope, so neither sees the other's 1"
     assert chain == [(1, 3), (1, 3)], "a branch INHERITS the run's chain state; it must not reset"
+
+
+GO = compose_key(t"go:{Segment('x')}")
+
+
+def _parks_in_generation_one(seen: list[int]):
+    """A chain at generation 1 whose step parks, then reads its generation once resumed."""
+
+    def chain_step(state: None, turn: Turn):
+        yield from await_event(GO, dict)
+        seen.append(current_generation())
+        return Done(None)
+
+    def program():
+        chain = Chain(task="w", state=None, run_id="r", generation=1)
+        return (yield from respawn(chain_step, chain))
+
+    return program
+
+
+@dataclass
+class _Approval:
+    decision: str
+
+
+def test_a_run_parked_in_a_chain_hands_back_the_chain_state_it_found():
+    """The parked generator stays referenced and its step never finishes, so the run's exit is
+    what restores the caller's chain state. An approval composed after it names no generation."""
+    parked = RecordingHandler().run(_parks_in_generation_one([]))
+    assert isinstance(parked, Suspended)
+    assert (CHAIN_DEPTH.get(), CHAIN_GENERATION.get()) == (0, None)
+    with run_scope():
+        charge = next(call_tool("charge_card", {"amount": 5}, dict))
+        parked_on = next(human(_Approval)(charge))
+        assert isinstance(parked_on, AwaitEvent)
+        assert parked_on.name == Key.parse("approve;step;tool:charge_card")
+
+
+def test_a_resumed_park_continues_in_the_generation_it_parked_in():
+    seen: list[int] = []
+    parked = RecordingHandler().run(_parks_in_generation_one(seen))
+    assert isinstance(parked, Suspended)
+    assert parked.resume({}) is None
+    assert seen == [1]
+    assert (CHAIN_DEPTH.get(), CHAIN_GENERATION.get()) == (0, None)

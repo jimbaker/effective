@@ -15,6 +15,7 @@ alignment cases, and separating them would put a fixture and its only assertion 
 from uuid import UUID
 
 import pytest
+from _steps import placed_step
 
 from effective.checkpoints import Checkpoint, from_trace, keys, read_sqlite_task
 from effective.handlers.base import TraceEntry
@@ -129,7 +130,7 @@ def test_distance_is_symmetric():
 
 def test_a_trace_reads_as_the_same_shape():
     trace = [
-        TraceEntry(Key.parse("tool:fetch"), Step(name="tool:fetch", op=None), "e"),  # ty: ignore[invalid-argument-type]
+        TraceEntry(Key.parse("tool:fetch"), Step(name="fetch", op=None), "e"),  # ty: ignore[invalid-argument-type]
         TraceEntry(Key.parse("extract"), Step(name="extract", op=None), "r"),  # ty: ignore[invalid-argument-type]
     ]
     assert keys(from_trace(trace)) == ("tool:fetch", "extract")
@@ -304,5 +305,6 @@ def test_fork_seed_over_a_task_scoped_read_takes_the_intended_lineage(tmp_path, 
     from effective.fork import fork_seed
 
     db, ids = _two_lineages_in_one_store(tmp_path, sqlite_app)
-    seed = fork_seed(read_sqlite_task(db, ids["r-two"]), through="step:extract")
-    assert seed[Key.parse("step:extract")]["result"] == {"from": 22}
+    extract = placed_step("extract", "llm")
+    seed = fork_seed(read_sqlite_task(db, ids["r-two"]), through=extract)
+    assert seed[Key.parse(extract)]["result"] == {"from": 22}

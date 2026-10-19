@@ -7,7 +7,7 @@ and contract, and `measured_drive` re-decides the same way at the op.
 
 Two reads:
   - `checkpoints`, ordered by `rowid` (commit order — there is no `recorded_at` column), filtered
-    to Step rows, occurrence suffixes split off by the grammar, each with its raw state.
+    to Step rows, each under its numbered name with its raw state.
   - delivered `budget-grant:{run_id},{k}` rows from `events` → the `grants` map, without which a
     run past its first grant re-derives the wrong trip. Scoped to the run by PARSING the name, not
     by a `task_id` column — the same shape as the Absurd twin, on the same reasoning: the run
@@ -23,11 +23,11 @@ from collections.abc import Callable
 from uuid import UUID
 
 from effective.budget import BUDGET_GRANT_LIKE, Grant, names_a_budget_grant
-from effective.checkpoints import is_step_checkpoint, positional_key
+from effective.checkpoints import dense_key, is_step_checkpoint
 from effective.cost import refuse_an_unread_format
 from effective.engines.sqlite import read_sqlite_params
 from effective.fork import Bridged
-from effective.keys import Key
+from effective.keys import FramePosition, Key
 from effective.parked import read_sqlite_parked_conn
 from effective.ruling import answer_of
 from effective.sql import bind
@@ -44,7 +44,7 @@ def export_measured_prefix(
     class, and a content sniff here would disagree with it."""
     refuse_an_unread_format(read_sqlite_params(conn, UUID(str(task_id))))
     entries: list[Bridged] = []
-    seen: dict[Key, int] = {}
+    seen = FramePosition()
     rows = conn.execute(
         *bind(t"SELECT name, state FROM checkpoints WHERE task_id={task_id} ORDER BY rowid")
     ).fetchall()
@@ -56,11 +56,10 @@ def export_measured_prefix(
         # re-enters the typed world here, through the one named door for that (a cast accepted
         # until the writer side closes; see `Key.parse`).
         #
-        # `split_occurrence` reads the `#k` suffix off the PARSE, so the strip and the render
-        # cannot drift. `#0`, `#1` (which has no wire form) and `#02` are not occurrences: they
-        # stay in the name, `Key.parse` refuses them, and a counting bug surfaces as a refusal
-        # rather than being admitted as a Step.
-        key = positional_key(name, seen)  # name#2 → name, refusing a gap
+        # `#0`, `#1` (which has no wire form) and `#02` are not occurrences: `Key.parse`
+        # refuses them, so a counting bug surfaces as a refusal rather than being admitted as a
+        # Step.
+        key = dense_key(name, seen)  # refusing a gap
         entries.append(Bridged(key=key, state=raw))
 
     grants: dict[Key, Grant] = {}

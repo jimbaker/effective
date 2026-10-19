@@ -95,17 +95,10 @@ def _dop() -> CallTool[str]:
     return CallTool(name="t", result_schema=str)
 
 
-def test_op_key_injective_across_arms() -> None:
-    """A ``Step`` name in a substrate namespace is WRAPPED, so it cannot alias. No denylist.
-
-    Every key begins with its arm, a Step's included, so an author's `ledger;x` composes
-    `step;ledger;x` and the regions are disjoint **by construction**. The property pinned is
-    DISJOINTNESS rather than refusal: a denylist is bounded by what it enumerates, and
-    disjointness holds for names nobody thought to enumerate.
-    """
+def _substrate_names() -> list[str]:
     # `.stored()`, not `str()`: a `Key` is opaque, so `str()` yields the REPR and a `Step` named
     # `Key(_value='ledger:X')` would be testing nothing.
-    substrate_names = [
+    return [
         op_key(AppendLedgerRow(row=LedgerRow(event_id=Key.parse("x")))).stored(),  # ledger;x
         op_key(AwaitEvent(name=Key.parse("e"), schema=str)).stored(),  # event;e
         "sleep:0",  # the positional sleep namespace (op_key(SleepUntil) itself raises, below)
@@ -113,16 +106,25 @@ def test_op_key_injective_across_arms() -> None:
         "gather:2",  # the positional gather namespace (op_key(Gather) itself raises, below)
         "monitor:0",  # likewise positional
     ]
-    for name in substrate_names:
-        composed = op_key(Step(name=name, op=_dop())).stored()
-        assert composed != name, f"a Step named {name!r} composed the substrate's own key"
-        assert composed.startswith("step"), composed
-        # and the substrate's name survives INSIDE, so the author's identity is not mangled
-        assert name in composed, composed
 
-    # An author name in no substrate namespace goes through the same arm, which is the point:
-    # there is no second path and therefore no second rule to keep in sync.
-    assert op_key(Step(name="tool:act", op=_dop())).stored() == "step;tool:act"
+
+def test_op_key_injective_across_arms() -> None:
+    """A ``Step``'s key begins with its arm, so it is disjoint from every substrate key.
+
+    The regions are disjoint **by construction**: a denylist is bounded by what it enumerates,
+    and an arm term holds for names nobody thought to enumerate."""
+    composed = op_key(Step(name="act", op=_dop())).stored()
+    assert composed.startswith("step"), composed
+    assert composed not in _substrate_names()
+
+
+@pytest.mark.parametrize("name", _substrate_names())
+def test_a_step_named_in_a_substrate_namespace_is_refused(name: str) -> None:
+    """A Step's name is one atom, so a substrate key's text cannot name one."""
+    from effective.ops import CompositionRefused
+
+    with pytest.raises(CompositionRefused):
+        op_key(Step(name=name, op=_dop()))
 
 
 def test_op_key_of_a_gather_raises_no_content_key() -> None:
@@ -216,7 +218,7 @@ def test_every_shipping_compose_key_template_still_composes():
     from effective.ops import AppendLedgerRow, AwaitEvent, Step, StoreArtifact
 
     ops = [
-        Step(name="tool:x", op=CallTool(name="x", args={}, result_schema=dict)),
+        Step(name="x", op=CallTool(name="x", args={}, result_schema=dict)),
         AwaitEvent(Key.parse("review:m1"), dict),
         AppendLedgerRow(LedgerRow(event_id=Key.parse("reviewed:m1"))),
         StoreArtifact(value={"a": 1}, content_type="application/json"),
@@ -230,9 +232,9 @@ def test_every_shipping_compose_key_template_still_composes():
 # grant, a gate's park, a fork's identity). Those names ARE the authorization, so an alias there
 # delivers an answer to the wrong question.
 #
-# Nothing FENCES it. A Step's key is `step:{name}` or `step;{name}`, so an author writing
-# `approve;ledger;reviewed:m1` gets `step;approve;ledger;reviewed:m1`, which begins with `step`,
-# and no substrate key does. The regions are disjoint because of their SHAPE, not because a tuple
+# Nothing FENCES it. A Step's key begins with the `step` arm, and no substrate key does, so an
+# author's `approve;ledger;reviewed:m1` is refused as a Step name rather than read as the
+# approval's key. The regions are disjoint because of their SHAPE, not because a tuple
 # enumerated them, which is the separation-logic claim this repo makes in prose holding in the
 # code. A list of forbidden names is bounded by what it enumerates; an arm term is bounded by
 # nothing.
@@ -247,47 +249,49 @@ def test_every_shipping_compose_key_template_still_composes():
         "hyp:cf-a;reviewed:m1",  # a fork child's lineage-scoped ledger id
     ],
 )
-def test_a_step_in_an_authority_namespace_is_wrapped_and_cannot_alias(name):
-    """The successor to the denylist pin: the name is ACCEPTED and made disjoint."""
+def test_a_step_in_an_authority_namespace_is_refused(name):
+    """The successor to the denylist pin: the name is refused because it is not one atom."""
     from effective.domain import CallTool
     from effective.handlers.base import op_key
-    from effective.ops import Step
+    from effective.ops import CompositionRefused, Step
 
-    op = Step(name=name, op=CallTool(name="x", args={}, result_schema=dict))
-    composed = op_key(op).stored()
-    assert composed != name, "an author's Step composed the substrate's own authority key"
-    assert composed == f"step;{name}", composed
-    # The authority key itself is what the substrate mints; nothing an author writes reaches it.
-    assert not composed.startswith(name)
+    with pytest.raises(CompositionRefused):
+        op_key(Step(name=name, op=CallTool(name="x", args={}, result_schema=dict)))
 
 
 def test_a_step_name_that_is_not_a_KEY_is_still_refused():
-    """A substrate-looking name that raises, for a reason unrelated to any denylist.
-
-    `govern:spend:r1:0` carries separators, so `step_key` reads it as a KEY, and it is not one:
-    a term holds one `:`. The refusal is the GRAMMAR's, not a reserved-name check, and it fires
-    identically for `mytool:a:b:c` in no substrate namespace at all."""
+    """A name imitating a substrate namespace is refused as `mytool:a:b:c` is, so no reserved-name
+    check is involved."""
     from effective.domain import CallTool
     from effective.handlers.base import op_key
     from effective.ops import Step
 
     for name in ("govern:spend:r1:0", "mytool:a:b:c"):
         op = Step(name=name, op=CallTool(name="x", args={}, result_schema=dict))
-        with pytest.raises(ValueError, match="carries a separator, so it is read as a KEY"):
+        with pytest.raises(ValueError, match=re.escape(name)):
             op_key(op)
 
 
-def test_author_namespaces_still_compose():
-    """The fence must not cost the author anything — every real step-name prefix still works."""
+def test_author_names_still_compose():
+    """The arm costs the author nothing: every atom an author names a step with composes."""
     from effective.domain import CallTool
     from effective.handlers.base import op_key
     from effective.ops import Step
 
-    for name in ["tool:x", "act:1", "react:edit", "skill:s,activate", "extract:m1", "code:run"]:
+    for name in ["x", "act", "edit", "extract", "run"]:
         op = Step(name=name, op=CallTool(name="x", args={}, result_schema=dict))
-        # The ARM, not the bare name: every author prefix composes, none is refused, and the key
-        # says which arm it is — which is what makes the fence unnecessary rather than lenient.
-        assert op_key(op).stored() == f"step;{name}"
+        assert op_key(op) == step_key(name, "tool")
+
+
+def test_a_structured_author_name_is_refused():
+    """A Step's name is one atom: an author's structure goes in a scope around the step."""
+    from effective.domain import CallTool
+    from effective.handlers.base import op_key
+    from effective.ops import CompositionRefused, Step
+
+    for name in ["tool:x", "act:1", "react:edit", "skill:s,activate", "extract:m1", "code:run"]:
+        with pytest.raises(CompositionRefused):
+            op_key(Step(name=name, op=CallTool(name="x", args={}, result_schema=dict)))
 
 
 def test_the_reserved_authority_set_is_DERIVED_from_the_declarations_both_ways():
@@ -442,7 +446,7 @@ def test_a_hash_inside_a_VALUE_is_unwritable_which_is_what_the_suffix_rests_on()
 
     The occurrence is a suffix in the grammar, and the scheme rests on this: an atom charset that
     admits no `#` is why an author cannot spell an occurrence, and therefore why
-    `step_key("tool:a").occurrence(2)` has exactly one producer. A `;occ:2` term spelling lacks
+    `step_key("a", "tool").occurrence(2)` has exactly one producer. A `;occ:2` term spelling lacks
     the property, since `occ` would be an ordinary tag (the collision is pinned in the next test).
 
     **What re-opens it:** admitting `#` to `grammar.NAME`. Then a value can carry one, and
@@ -457,20 +461,24 @@ def test_a_hash_inside_a_VALUE_is_unwritable_which_is_what_the_suffix_rests_on()
 
 
 def test_the_occurrence_has_exactly_one_producer_which_the_term_spelling_did_not():
-    """A term spelling of the occurrence puts it IN the language as an ordinary tag, so two
-    producers mint one key, the engine's dup rule and an author's own structured step name:
-
-        step_key("tool:a").occurrence(2)  ->  step;tool:a;occ:2
-        step_key("tool:a;occ:2")          ->  step;tool:a;occ:2     COLLIDE
+    """A term spelling of the occurrence would put it IN the language as an ordinary tag, so two
+    producers would mint one key: the engine's dup rule, and an author's step named `a;occ:2`.
 
     The collision is a silent stale read: the second occurrence's thunk never runs and the author
-    step's committed value is returned in its place. Under the suffix the author's name is just a
-    name."""
-    engine = step_key("tool:a").occurrence(2)
-    author = step_key("tool:a;occ:2")
-    assert engine.stored() == "step;tool:a#2"
-    assert author.stored() == "step;tool:a;occ:2"
-    assert engine != author
+    step's committed value is returned in its place. The suffix is outside every atom, so the
+    engine's count cannot be spelled as a term."""
+    engine = step_key("a", "tool").occurrence(2)
+    assert engine.unnumbered() == step_key("a", "tool")
+    assert engine.stored().endswith("#2")
+    assert ";occ:" not in engine.stored()
+
+
+def test_an_author_cannot_spell_the_occurrence_as_a_term():
+    """`a;occ:2` is not one atom, so it cannot name a step and collide with the engine's count."""
+    from effective.ops import CompositionRefused
+
+    with pytest.raises(CompositionRefused):
+        step_key("a;occ:2", "tool")
 
 
 def test_round_trip_every_registered_shape_composes_and_decodes():
@@ -673,26 +681,20 @@ def test_a_format_spec_or_conversion_is_refused():
 def test_only_a_real_nesting_can_produce_a_framed_key():
     """Three execution structures must not compose one key.
 
-    Unfenced, `scoped(t"talk:{'a;b'}")`, a real `scoped(a, scoped(b))`, and
-    `step("talk:a;b;tool:x")` all produce `talk:a;b;tool:x`, and `ReplayHandler` binds one
-    workflow's trace to another with no mismatch. The key has exactly ONE producer, which is what
+    Unfenced, `scoped(t"talk:{'a;b'}")`, a real `scoped(a, scoped(b))`, and a step named
+    `talk:a;b;tool:x` all produce `talk:a;b;tool:x`, and `ReplayHandler` binds one workflow's
+    trace to another with no mismatch. The key has exactly ONE producer, which is what
     injectivity means.
 
-    `;` is an ordinary term separator that the composer does not refuse. Two of the three routes
-    are separated STRUCTURALLY, by where the arm sits:
-
-        real nesting      talk:a;b;step;tool:x     frame, frame, arm, name
-        forged step name  step;talk:a;b;tool:x     arm, then whatever the author called it
-
-    So an author may write `step("talk:a;b;tool:x")` and it cannot alias a nesting, because the arm
-    is in front of it. The third route is a refusal: `'a;b'` is a bare `str` in a coordinate,
-    refused by TYPE rather than by a check that has to know what a frame is."""
-    from effective.api import scoped, step
-    from effective.domain import CallTool
+    `;` is an ordinary term separator that the composer does not refuse. The real nesting composes
+    frame, frame, arm, name: `talk:a;b;step;tool:x`. The forged atom is refused by TYPE: `'a;b'` is
+    a bare `str` in a coordinate, refused rather than checked by a rule that has to know what a
+    frame is. The forged step name is refused as a Step name (the pin below)."""
+    from effective.api import call_tool, scoped
     from effective.handlers.recording import RecordingHandler
 
     def leaf():
-        return (yield from step("tool:x", CallTool(name="t", args={}, result_schema=object)))
+        return (yield from call_tool("x", {}, object))
 
     def forged_atom():
         return (yield from scoped(compose_key(t"talk:{'a;b'}"), leaf))
@@ -704,26 +706,29 @@ def test_only_a_real_nesting_can_produce_a_framed_key():
             )
         )
 
-    def forged_step_name():
-        return (
-            yield from step("talk:a;b;tool:x", CallTool(name="t", args={}, result_schema=object))
-        )
-
     handler = RecordingHandler(responses={"tool:x": 1})
     handler.run(real_nesting)
     assert [e.key.stored() for e in handler.trace] == ["talk:a;b;step;tool:x"]
-
-    # The forged STEP NAME is legal and mints a DIFFERENT key: the arm leads it, so it cannot be
-    # read as a nesting. Distinctness is the property.
-    forged = RecordingHandler(responses={"talk:a;b;tool:x": 1})
-    forged.run(forged_step_name)
-    assert [e.key.stored() for e in forged.trace] == ["step;talk:a;b;tool:x"]
-    assert forged.trace[0].key.stored() != handler.trace[0].key.stored()
 
     # The forged ATOM is refused, by TYPE: a bare `str` may carry a separator, so it cannot
     # fill a coordinate. No frame-specific rule is involved or needed.
     with pytest.raises(ValueError, match="which may contain a separator"):
         RecordingHandler(responses={"tool:x": 1}).run(forged_atom)
+
+
+def test_a_forged_frame_in_a_step_name_is_refused():
+    """A Step's name is one atom, so `talk:a;b;tool:x` cannot name one and alias a nesting."""
+    from effective.api import step
+    from effective.handlers.recording import RecordingHandler
+    from effective.ops import CompositionRefused
+
+    def forged_step_name():
+        return (
+            yield from step("talk:a;b;tool:x", CallTool(name="t", args={}, result_schema=object))
+        )
+
+    with pytest.raises(CompositionRefused):
+        RecordingHandler(responses={"talk:a;b;tool:x": 1}).run(forged_step_name)
 
 
 def test_the_frame_delimiter_is_refused_at_every_forging_position():
@@ -828,11 +833,9 @@ def test_an_author_cannot_forge_a_frame_on_the_await_axis():
 
     from effective.ops import event_name
 
-    # The two axes answer DIFFERENTLY. A Step is addressed by its op KEY and the arm wraps that,
-    # so `step;b;c` cannot be read as a nesting and needs no fence. An await is addressed by its
-    # EVENT NAME, which no arm touches, so nothing structural sits between an author's `b;c` and a
-    # real `scoped(b, scoped(c))`: the fence stays until the address gets an arm of its own.
-    assert op_key(Step(name="b;c", op=_dop())).stored() == "step;b;c"
+    # An await is addressed by its EVENT NAME, which no arm touches, so nothing structural sits
+    # between an author's `b;c` and a real `scoped(b, scoped(c))`: the fence stays until the
+    # address gets an arm of its own.
     with pytest.raises(ValueError, match="frame delimiter"):
         event_name("b;c")
 
@@ -844,6 +847,14 @@ def test_an_author_cannot_forge_a_frame_on_the_await_axis():
     _PrefixedCtx(sink, outer).await_event(Key.parse("b;c"))
     _PrefixedCtx(_PrefixedCtx(sink, outer), inner).await_event(Key.parse("c"))
     assert sink.seen[0] == sink.seen[1], "unreachable from a workflow, still ambiguous here"
+
+
+def test_a_step_named_with_the_frame_delimiter_is_refused():
+    """The Step axis: a name is one atom, so `b;c` cannot name a Step and read as a nesting."""
+    from effective.ops import CompositionRefused
+
+    with pytest.raises(CompositionRefused):
+        op_key(Step(name="b;c", op=_dop()))
 
 
 def test_a_mime_type_is_a_PATH_inside_one_coordinate_not_a_terminal_exemption():
@@ -918,11 +929,13 @@ def test_an_author_may_not_park_on_a_substrate_authority_name():
 
     for reserved in RESERVED_AUTHORITY_TAGS:
         with pytest.raises(ValueError, match="reserved authority namespace"):
+            # lint: key-composition: the refused name is spelled from each reserved tag in turn
             event_name(f"{reserved}:mine")
         # BOTH spellings, which is what makes this a TAG rather than a prefix: a tuple holding
         # `"approve:"` goes stale the moment an arm mints `approve;…`, and a fence that holds only
         # via a separate `;` refusal is one edit from not holding.
         with pytest.raises(ValueError, match="reserved authority namespace"):
+            # lint: key-composition: the refused name is spelled from each reserved tag in turn
             event_name(f"{reserved};mine")
 
     # an author's own subject is untouched
@@ -1306,15 +1319,14 @@ def test_two_sleeps_in_one_frame_are_two_identities():
     sleeps proves both were traversed."""
     from datetime import UTC, datetime
 
-    from effective.api import sleep_until, step
-    from effective.domain import CallTool
+    from effective.api import call_tool, sleep_until
     from effective.handlers.recording import RecordingHandler
 
     wake = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 
     def wf():
         yield from sleep_until(wake)
-        yield from step("tool:a", CallTool(name="a", args={}, result_schema=dict))
+        yield from call_tool("a", {}, dict)
         yield from sleep_until(wake)
         return None
 
@@ -1728,7 +1740,6 @@ def test_a_gather_frame_and_a_mime_path_decode_with_no_special_case():
 
 
 _DOORS = [
-    ("step_key", step_key, "tool:charge-card#2", "tool:charge-card", "step;tool:charge-card"),
     (
         "code/_segment_key",
         lambda n: _segment_key(n, True, 0),
@@ -1759,8 +1770,8 @@ def test_NO_AUTHOR_DOOR_lets_a_name_carry_an_occurrence(door, mint, forged, plai
     `_DOORS` refuses it itself. A door that admitted one would mint a key byte-identical to the
     engine's own second occurrence, and replay would serve that occurrence's value to another op:
 
-        step_key("tool:charge-card#2")              ->  step;tool:charge-card#2
-        step_key("tool:charge-card").occurrence(2)  ->  step;tool:charge-card#2
+        _segment_key("act:t0#2", True, 0)              ->  code;seg:0;act:t0#2
+        _segment_key("act:t0", True, 0).occurrence(2)  ->  code;seg:0;act:t0#2
 
     The invariant is over the family: a door added to `_DOORS` is held to it as well.
     """
@@ -1786,9 +1797,36 @@ def test_op_keys_event_arm_takes_a_key_and_will_not_parse_author_text(text):
     assert op_key(AwaitEvent(name=event_name(review), schema=str)).stored() == "event;review:m1"
 
 
+def test_a_step_name_cannot_carry_an_occurrence():
+    """A step's name is one atom, and `#` is in no atom, so the step door refuses the suffix."""
+    with pytest.raises(ValueError, match="#"):
+        step_key("charge-card#2", "tool")
+
+
+def test_a_structured_step_name_is_refused_with_or_without_an_occurrence():
+    """The step door takes one atom, so a structured name never reaches the occurrence check."""
+    from effective.ops import CompositionRefused
+
+    for name in ("tool:charge-card#2", "tool:charge-card"):
+        with pytest.raises(CompositionRefused):
+            step_key(name, "tool")
+
+
+def test_a_minters_key_carrying_an_occurrence_is_refused_as_a_step_name():
+    """Only the runtime numbers a step: a numbered key would carry its suffix into the placed key,
+    past the count the walk keeps."""
+    from effective.ops import NumberedStepName
+    from effective.react import react_key
+
+    with pytest.raises(NumberedStepName):
+        step_key(react_key("turn").occurrence(2), "llm")
+
+
 def test_the_runtime_still_mints_the_occurrence_the_doors_refuse():
     """The refusal is at the author's door, so the grammar still carries the suffix."""
-    assert step_key("tool:charge-card").occurrence(2).stored() == "step;tool:charge-card#2"
+    numbered = step_key("charge-card", "tool").occurrence(2)
+    assert numbered.is_occurrence_of(step_key("charge-card", "tool"))
+    assert numbered.stored().endswith("#2")
 
 
 def test_the_COMPOSER_cannot_mint_a_key_its_own_PARSER_refuses():
@@ -1890,6 +1928,12 @@ def test_separated_does_not_treat_a_HOLE_tag_as_a_discriminator():
 _ARMS = [
     ("Key + op arm", lambda: Key.parse("event;review:m1"), "op ARM"),
     ("parsed authority Key", lambda: Key.parse("depth-grant:r1,0#2"), "carries no scope"),
+    (
+        "parsed authority Key under a frame",
+        lambda: Key.parse("rec:0;depth-grant:r1,0"),
+        "no scope",
+    ),
+    ("framed Key", lambda: Key.parse("foo:0;bar:x"), "holds frames"),
     ("composed authority Key", lambda: _depth_grant(), None),
     ("ordinary Key", lambda: Key.parse("review:m1"), None),
     ("str + op arm", lambda: "event;review:m1", "op ARM"),
@@ -1930,7 +1974,18 @@ def test_event_name_decides_every_arm_of_its_table(arm, build, refusal):
             event_name(build())
 
 
-ARMS_IN_THE_TABLE = 8
+def test_an_absolute_await_takes_another_tasks_framed_address():
+    """A framed key is a wire address: another task's, awaited as written."""
+    from effective.api import await_event
+    from effective.ops import Addressing, AwaitEvent
+
+    address = Key.parse("foo:0;bar:x")
+    awaited = next(await_event(address, dict, Addressing.ABSOLUTE))
+    assert isinstance(awaited, AwaitEvent)
+    assert awaited.name == address
+
+
+ARMS_IN_THE_TABLE = 9
 """How many `case` arms `event_name`'s match has — pinned so adding one forces a row above.
 
 Rows outnumber arms: the structured-text arm refuses three rows (`str + frame delimiter`,

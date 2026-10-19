@@ -18,12 +18,13 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime, timedelta, tzinfo
+from functools import partial
 from typing import Any
 
 import pytest
 from _clock import HeldClock
 
-from effective.api import call_tool, quorum, race
+from effective.api import call_tool, quorum, race, scoped
 from effective.choice import (
     Choice,
     Chosen,
@@ -39,6 +40,7 @@ from effective.govern import Refused
 from effective.handlers import base
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
+from effective.keys import Index, compose_key
 from effective.ops import CompositionRefused, Step
 
 DEADLINE = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
@@ -124,7 +126,7 @@ def _forever(name: str):
 
     def branch():
         for n in range(LONG):
-            yield from call_tool(f"{name}{n}", {}, str)
+            yield from scoped(compose_key(t"loop:{Index(n)}"), partial(call_tool, name, {}, str))
         return "ran out"
 
     return branch
@@ -388,7 +390,7 @@ def test_a_deadline_bounds_one_wake_and_the_barrier_waits_unbounded(monkeypatch)
 
     def loser():
         for n in range(LONG):
-            yield from call_tool(f"b{n}", {}, str)
+            yield from scoped(compose_key(t"loop:{Index(n)}"), partial(call_tool, "b", {}, str))
         return "ran out"
 
     def program():

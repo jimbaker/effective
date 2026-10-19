@@ -41,9 +41,19 @@ from effective.handlers.durable import (
     wake_race_at_time,
     wake_race_on_event,
 )
+from effective.interrupts import interrupt_key
 from effective.keys import Key, Segment, compose_key
 from effective.keys.registry import KeyMap
-from effective.ops import AppendLedgerRow, AwaitEvent, LedgerRow, Step, StoreArtifact
+from effective.ops import (
+    AppendLedgerRow,
+    AwaitEvent,
+    CompositionRefused,
+    LedgerRow,
+    Step,
+    StoreArtifact,
+    step_name_text,
+)
+from effective.spawning import spawn_key
 
 pytestmark = pytest.mark.adversarial
 
@@ -60,9 +70,7 @@ def _dop() -> CallTool[str]:
 ROWS: list[tuple[str, object, str]] = [
     # --- §3a the arm terms ---------------------------------------------------------------
     # A bare author name is one ATOM, so it lands in a coordinate — where `NAME` admits `_`.
-    ("step/atom", lambda: step_key("assess_request"), "step:assess_request"),
-    # A name that carries structure is a KEY, and a key extends the sequence: that is what `;` is.
-    ("step/structured", lambda: step_key("tool:charge-card"), "step;tool:charge-card"),
+    ("step/atom", lambda: step_key("assess_request", "llm"), "step;llm:assess_request"),
     (
         "event",
         lambda: op_key(AwaitEvent(name=Key.parse("review:m1"), schema=str)),
@@ -125,13 +133,10 @@ ROWS: list[tuple[str, object, str]] = [
     ),
     # --- §3c the author namespaces ----------------------------------------------------------
     ("tool", lambda: compose_key(t"tool:{Segment('charge-card')}"), "tool:charge-card"),
-    # Arity plus a literal discriminator separates the substrate's reserved tools from an author's.
-    ("tool/spawn", lambda: compose_key(t"tool:spawn,{Segment('c1')}"), "tool:spawn,c1"),
-    (
-        "tool/interrupt",
-        lambda: compose_key(t"tool:interrupt,{Segment('pre')}"),
-        "tool:interrupt,pre",
-    ),
+    # A reserved tool's step is named by its minter's key, so its tag separates it from an
+    # author's tool of the same name.
+    ("spawn", lambda: spawn_key("c1"), "spawn:c1"),
+    ("interrupt", lambda: interrupt_key("pre"), "interrupt:pre"),
     # `run_code`: the discriminator LEADS and the identity TRAILS, because a splice must be last.
     ("code/seg-atom", lambda: _segment_key("audit", False, 0), "code:seg,0,audit"),
     ("code/seg-structured", lambda: _segment_key("act:t0", True, 0), "code;seg:0;act:t0"),
@@ -267,8 +272,8 @@ def test_a_step_name_and_its_key_are_not_the_same_string() -> None:
     It survives a rename of the arm — unlike every row above, deliberately. The table pins the
     BYTES and this pins the STRUCTURE, and a suite needs both: bytes catch a silent rendering
     change, structure says why the bytes are what they are."""
-    for name in ("assess_request", "tool:charge-card", "ledger;x"):
-        assert op_key(Step(name=name, op=_dop())).stored() != name
+    for name in ("assess_request", Key.parse("tool:charge-card"), Key.parse("ledger;x")):
+        assert op_key(Step(name=name, op=_dop())).stored() != step_name_text(name)
 
 
 # --- reachability: well-formed is not the same as MINTABLE ---------------------------------
@@ -360,13 +365,12 @@ def test_an_UNDECLARED_splice_is_refused_rather_than_admitted() -> None:
     assert compose_key(t"wrap;{inner:domain=any}").stored() == "wrap;review:m1"
 
 
-def test_a_STEP_splice_admits_a_name_that_looks_like_an_arm() -> None:
-    """The over-refusal guard. A step's payload is the name its AUTHOR chose, and the arm is
-    what makes any name safe: `step;ledger:x` is disjoint from `ledger:x`
-    by construction, so no author name needs fencing. Declaring `domain=address` instead refuses
-    `step_key("ledger;x")`, which is a legal name."""
-    assert step_key("ledger;x").stored() == "step;ledger;x"
-    assert step_key("event;q").stored() == "step;event;q"
+@pytest.mark.parametrize("name", ["tool:charge-card", "ledger;x", "event;q"])
+def test_a_STEP_refuses_a_name_written_as_structured_text(name: str) -> None:
+    """A step's name is one atom or a minter's `Key`. Text carrying a separator is structure the
+    author spelled, which no minter vouches for, so it is refused rather than parsed."""
+    with pytest.raises(CompositionRefused):
+        step_key(name, "tool")
 
 
 def test_the_registry_refuses_to_EXPLAIN_a_key_no_producer_mints() -> None:

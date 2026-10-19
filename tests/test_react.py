@@ -11,6 +11,7 @@ Red-green: written before `effective.react` exists (it was `agent.react` then).
 """
 
 import pytest
+from _steps import placed_step
 
 from effective import (
     RecordingHandler,
@@ -22,13 +23,16 @@ from effective import (
 from effective.api import Effect
 from effective.domain import AskLLM, CallTool
 from effective.interrupts import Phase, Quiet, Redirect, Signal
+from effective.keys import Key
 from effective.react import (
     AssistantTurn,
+    ReactStep,
     ToolRequest,
     ToolResult,
     Trajectory,
     TrajectorySummary,
     _assistant,
+    react_key,
     run_agent,
     summary_message,
     tool_key,
@@ -36,6 +40,11 @@ from effective.react import (
 from effective.tape import TurnKind, transcript_violations, turn_kind
 
 QUESTION = "when was acme founded?"
+
+
+def turn_at(i: int, kind: ReactStep = "turn") -> str:
+    """The stored key of the loop's own model call in turn `i`."""
+    return placed_step(react_key(kind), "llm", f"d:{i};")
 
 
 def responses_two_step() -> dict:
@@ -54,11 +63,11 @@ def responses_two_step() -> dict:
 
 
 TWO_STEP_TRACE = [
-    "d:0;step;react:turn",
+    turn_at(0),
     "d:0;step;tool:search",
-    "d:1;step;react:turn",
+    turn_at(1),
     "d:1;step;tool:lookup",
-    "d:2;step;react:turn",
+    turn_at(2),
 ]
 
 
@@ -116,7 +125,9 @@ def test_replay_detects_a_changed_agent_control_flow():
 
     def altered():
         # op 0 matches the first turn's name, then we call a *different* tool than recorded
-        yield from ask_llm("react:turn", [{"role": "user", "content": QUESTION}], AssistantTurn)
+        yield from ask_llm(
+            react_key("turn"), [{"role": "user", "content": QUESTION}], AssistantTurn
+        )
         yield from call_tool("other", {}, ToolResult)  # recorded op 1 was tool:search
         return Trajectory(answer="x", steps=[], stop_reason="finish")
 
@@ -135,11 +146,11 @@ def test_max_iters_forces_a_synthesized_final_answer():
     assert traj.stop_reason == "max_iters"
     assert traj.answer == "best effort from the context"
     assert [e.key.stored() for e in h.trace] == [
-        "d:0;step;react:turn",
+        turn_at(0),
         "d:0;step;tool:search",
-        "d:1;step;react:turn",
+        turn_at(1),
         "d:1;step;tool:lookup",
-        "d:2;step;react:final",
+        turn_at(2, "final"),
     ]
 
 
@@ -184,12 +195,12 @@ def test_compaction_inserts_one_recorded_summary_op():
     assert traj.stop_reason == "finish"
     assert len(traj.steps) == 3  # search, lookup, finish — compaction adds no Step
     assert [e.key.stored() for e in h.trace] == [
-        "d:0;step;react:turn",
+        turn_at(0),
         "d:0;step;tool:search",
-        "d:1;step;react:turn",
+        turn_at(1),
         "d:1;step;tool:lookup",
-        "d:2;step;react:compact",  # the reification — a recorded summarize op
-        "d:2;step;react:turn",
+        turn_at(2, "compact"),  # the reification: a recorded summarize op
+        turn_at(2),
     ]
 
 
@@ -251,7 +262,7 @@ def test_the_transcript_carries_the_ACTION_not_only_the_thought():
     `Tool result:`: it cannot tell WHICH tool produced it, or that it has already run one. The
     observed failure is the obvious one: it calls the same tool again, forever.
 
-    **Measured on a live provider**, gpt-5-nano over the code-agent fixture, six runs
+    **Measured on a live provider**, gpt-5-nano over the `add` bug fixture, six runs
     per arm: thought-only passed **1/6**, thought+action passed **6/6** (Fisher exact two-sided
     p = 0.015). The control's transcript showed `list_dir` called six times against a correct and
     present observation.
@@ -341,20 +352,24 @@ def test_the_walk_survives_the_round_trip_through_replay():
 def test_the_walk_scores_only_ReAct_turns_and_not_the_other_askllms():
     """A real tape carries `AskLLM`s that are NOT turns, and scoring them invents violations.
 
-    Two kinds, both on a live coding tape: an emitter (`write:3` — a metered call that produces
+    Two kinds, both on a live coding tape: an emitter (`write_3`, a metered call that produces
     file contents, with its own prompt and no sight of the prior tool call) and the summarizer
     (`react:compact`). The second is why this is not a substring test: its key CONTAINS `react:`.
 
     Measured on a live sidecar: unscoped, 5 of 24 runs clean; scoped, 24 of 24. The check that
     counts is the committed function pointed at a tape with an emitter in it."""
-    assert turn_kind("d:0;step;react:turn") is TurnKind.REACT
-    assert turn_kind("step;react:final") is TurnKind.REACT
+    assert turn_kind(turn_at(0)) is TurnKind.REACT
+    assert turn_kind(placed_step(react_key("final"), "llm")) is TurnKind.REACT
     assert (
-        turn_kind("d:1;state:draft;d:2;step;react:turn") is TurnKind.REACT
+        turn_kind(placed_step(react_key("turn"), "llm", "d:1;state:draft;d:2;")) is TurnKind.REACT
     )  # frames do not matter
-    assert turn_kind("d:3;step;react:compact") is TurnKind.COMPACTION  # the summariser, not a turn
-    assert turn_kind("step;write:3") is TurnKind.OTHER
+    assert turn_kind(turn_at(3, "compact")) is TurnKind.COMPACTION  # the summarizer, not a turn
+    assert turn_kind(placed_step("write_3", "llm")) is TurnKind.OTHER
     assert turn_kind("d:1;step;tool:read_file") is TurnKind.OTHER
+
+
+def test_a_tool_step_named_like_a_turn_is_not_a_turn():
+    assert turn_kind(placed_step(Key.parse("llm;react:turn"), "tool")) is TurnKind.OTHER
 
 
 def test_an_emitter_between_a_tool_and_the_next_turn_is_not_a_violation():
@@ -364,7 +379,7 @@ def test_an_emitter_between_a_tool_and_the_next_turn_is_not_a_violation():
 
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("go")], response_schema=dict),
             AssistantTurn(thought="looked", tool=ToolRequest(name="list_dir", args={})),
         ),
@@ -375,11 +390,11 @@ def test_an_emitter_between_a_tool_and_the_next_turn_is_not_a_violation():
         ),
         # the emitter: its prompt is its own, and it has never seen `list_dir`
         _Entry(
-            "step;write:0",
+            placed_step("write_0", "llm"),
             AskLLM(messages=[_user_msg("write it")], response_schema=dict),
         ),
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(
                 messages=[
                     _user_msg("go"),
@@ -420,14 +435,14 @@ def test_a_compaction_that_drops_the_summary_is_a_violation():
     and this tape is that turn without it."""
     summary = TrajectorySummary(facts=["acme has id=7"], tried=[], open_questions=[])
     tape = [
-        _Entry("d:0;step;react:turn", AskLLM(messages=[_user_msg("go")], response_schema=dict)),
+        _Entry(turn_at(0), AskLLM(messages=[_user_msg("go")], response_schema=dict)),
         _Entry(
-            "d:1;step;react:compact",
+            turn_at(1, "compact"),
             AskLLM(messages=[_user_msg("summarize")], response_schema=dict),
             summary,
         ),
         # the splice never happened: the prefix is gone and the summary is not there either
-        _Entry("d:1;step;react:turn", AskLLM(messages=[_user_msg("go")], response_schema=dict)),
+        _Entry(turn_at(1), AskLLM(messages=[_user_msg("go")], response_schema=dict)),
     ]
     verdict = transcript_violations(tape)
     assert verdict.witnessed == 2
@@ -451,7 +466,7 @@ def test_the_boundary_exempts_a_prefix_the_splice_really_dropped():
     spliced = str(summary_message(summary)["content"])
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("go")], response_schema=dict),
             AssistantTurn(
                 thought="search first", tool=ToolRequest(name="search", args={"q": "acme"})
@@ -463,13 +478,13 @@ def test_the_boundary_exempts_a_prefix_the_splice_really_dropped():
             ToolResult(content="found id=7"),
         ),
         _Entry(
-            "d:1;step;react:compact",
+            turn_at(1, "compact"),
             AskLLM(messages=[_user_msg("summarize")], response_schema=dict),
             summary,
         ),
         # the splice dropped both the action and its observation; only the summary carries them
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(messages=[_user_msg("go"), _user_msg(spliced)], response_schema=dict),
         ),
     ]
@@ -486,7 +501,7 @@ def test_without_the_boundary_that_same_tape_would_report_two_false_violations()
     spliced = str(summary_message(summary)["content"])
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("go")], response_schema=dict),
             AssistantTurn(
                 thought="search first", tool=ToolRequest(name="search", args={"q": "acme"})
@@ -498,12 +513,12 @@ def test_without_the_boundary_that_same_tape_would_report_two_false_violations()
             ToolResult(content="found id=7"),
         ),
         _Entry(
-            "d:9;step;react:turn",
+            turn_at(9),
             AskLLM(messages=[_user_msg("summarize")], response_schema=dict),
             summary,
         ),
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(messages=[_user_msg("go"), _user_msg(spliced)], response_schema=dict),
         ),
     ]
@@ -532,7 +547,7 @@ def test_loop_injected_args_are_not_the_models_action():
     This tape makes them differ, which is the only way to state the difference as a test."""
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("go")], response_schema=dict),
             # the model asked for a bare `list_dir()` — no arguments at all
             AssistantTurn(thought="look around", tool=ToolRequest(name="list_dir", args={})),
@@ -548,7 +563,7 @@ def test_loop_injected_args_are_not_the_models_action():
             ToolResult(content="mod.py"),
         ),
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(
                 messages=[
                     _user_msg("go"),
@@ -585,7 +600,7 @@ def test_a_turn_that_only_MENTIONS_the_tool_has_not_seen_the_action():
     that arises without an adversary."""
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("use read_file on mod.py")], response_schema=dict),
             AssistantTurn(
                 thought="read it", tool=ToolRequest(name="read_file", args={"path": "mod.py"})
@@ -599,7 +614,7 @@ def test_a_turn_that_only_MENTIONS_the_tool_has_not_seen_the_action():
         # The next turn never saw an `Action:` line — only the goal it started from, plus the
         # observation. The goal happens to name the tool and the path.
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(
                 messages=[
                     _user_msg("use read_file on mod.py"),
@@ -616,8 +631,7 @@ def test_a_turn_that_only_MENTIONS_the_tool_has_not_seen_the_action():
 
 
 def test_a_correct_turn_with_a_non_ascii_argument_is_clean():
-    """Too strong, on the same line of code — and this one reddens `just tape-check` against a
-    working agent.
+    """Too strong, on the same line of code: a working agent's tape fails it.
 
     `_assistant` renders arguments with `json.dumps`, which escapes non-ASCII (`café` becomes
     `caf\\u00e9`). The walk then asks whether `str(value)` — the unescaped `café` — appears in that
@@ -631,7 +645,7 @@ def test_a_correct_turn_with_a_non_ascii_argument_is_clean():
     acted = AssistantTurn(thought="search", tool=ToolRequest(name="probe", args={"q": "café"}))
     tape = [
         _Entry(
-            "d:0;step;react:turn",
+            turn_at(0),
             AskLLM(messages=[_user_msg("handle café encoding")], response_schema=dict),
             acted,
         ),
@@ -641,7 +655,7 @@ def test_a_correct_turn_with_a_non_ascii_argument_is_clean():
             ToolResult(content="found"),
         ),
         _Entry(
-            "d:1;step;react:turn",
+            turn_at(1),
             AskLLM(
                 messages=[
                     _user_msg("handle café encoding"),

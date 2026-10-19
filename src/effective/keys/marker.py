@@ -433,14 +433,14 @@ a grant, a gate's park, a fork's identity.
 
 An event delivered by one of these answers a substrate question, and Absurd delivers by name
 first-emit-wins across the queue, so an author's await landing on one consumes it. A `Step` needs
-no such fence: its key opens with its own arm, so `step;approve:x` cannot be `approve:x` and the
-two regions are disjoint by construction. An await keeps the fence because it is addressed by its
-EVENT NAME, which no arm touches; see
+no such fence: its key opens with its own arm, so a step named `approve` keys `step;llm:approve`,
+which no `approve:` key can be, and the two regions are disjoint by construction. An await keeps
+the fence because it is addressed by its EVENT NAME, which no arm touches; see
 `tests/test_op_key_injectivity.py::test_an_author_may_not_park_on_a_substrate_authority_name`.
 
 Matched as a parsed leading TAG, not as a `"approve:"`-style prefix, so there is no spelling to go
-stale. The arm tags are not here at all: an author's `ledger;x` composes `step;ledger;x` and is
-disjoint by construction rather than by enumeration."""
+stale. The arm tags are not here at all: an author's step `ledger` composes `step;llm:ledger` and
+is disjoint by construction rather than by enumeration."""
 
 QUALIFYING_TAGS = ("fork", "hyp")
 """The reserved tags declared `Scope.QUALIFIED`: each frames the name after it and names no park.
@@ -451,15 +451,15 @@ def carries_structure(name: str) -> bool:
     """Does an author-supplied name denote a TERM SEQUENCE (`True`), or one atom (`False`)?
 
     Every wrapper of an author's name has to answer this, and both ask here so the two cannot
-    answer differently. A wrapper supplies the tag, so a bare atom becomes a COORDINATE of it
-    while a structured name splices in as its own terms::
+    answer differently. A wrapper supplies the tag, so a bare atom becomes a COORDINATE of it,
+    while a structured name splices in as its own terms or is refused::
 
         carries_structure("extract_ticket")    -> False
-        step_key(...)                          -> step:extract_ticket
+        step_key(..., "llm")                   -> step;llm:extract_ticket
         _segment_key(..., seg=0)               -> code:seg,0,extract_ticket
 
         carries_structure("tool:charge-card")  -> True
-        step_key(...)                          -> step;tool:charge-card
+        step_key(..., "llm")                   -> refused: FormattedStepName
         _segment_key(..., seg=0)               -> code;seg:0;tool:charge-card
 
     The test is for a separator, not for "does it parse". A bare lower-kebab name parses perfectly
@@ -469,7 +469,7 @@ def carries_structure(name: str) -> bool:
 
     `/` is deliberately not in the set, because a path is structure inside ONE coordinate rather
     than a sequence of terms. So a name carrying one takes the single-atom path, where `Segment`
-    then refuses it: `step_key("message/rfc822")` raises rather than composing."""
+    then refuses it: `step_key("message/rfc822", "tool")` raises rather than composing."""
     return any(separator in name for separator in (TAG_SEPARATOR, TERM_SEPARATOR, ARITY_SEPARATOR))
 
 
@@ -482,7 +482,7 @@ def authored_key(name: str) -> Key:
         authored_key("tool:charge-card#2")   ->  refused: an occurrence is not the author's
 
     A checkpoint name out of a store legitimately carries `#N`, because the engine put it there.
-    An author may not. `step_key("tool:charge-card").occurrence(2)` composes
+    An author may not. `step_key("charge-card", "tool").occurrence(2)` composes
     `step;tool:charge-card#2`, so an author writing that suffix by hand would name the engine's
     second ask and be served a value committed for a different op, with nothing to signal it.
 

@@ -15,10 +15,12 @@ the op:
 All of them require identity to be **injective within a run**: two distinct
 op-occurrences must not share a key, or the second silently reuses the first's
 checkpoint or approval. That holds because **every arm opens with its own tag, a
-``Step``'s included** — ``step`` / ``event`` / ``ledger`` / ``artifact`` / ``sleep`` /
-``gather`` / ``race`` — so the regions are disjoint by SHAPE. An author may write any
-name at all: ``step_key("ledger;x")`` is ``step;ledger;x``, which no ``AppendLedgerRow``
-can be. Nothing here rejects a name for the namespace it lands in, and nothing needs to.
+``Step``'s included** (``step``, ``event``, ``ledger``, ``artifact``, ``sleep``,
+``gather``, ``race``), so the regions are disjoint by SHAPE. A step's name sits under
+its op's kind as well: ``ask_llm("x")`` is ``step;llm:x``, which no ``AppendLedgerRow``
+and no ``call_tool("x")`` can be. Nothing here rejects a name for the namespace it lands in,
+and nothing needs to; a name holding structure is refused for its
+structure.
 
 The tagged arms are composed through ``compose_key`` (``effective.keys``), the **single
 op-key producer** — the durable handler (``handlers/absurd``) names its ``ctx.step``
@@ -51,10 +53,10 @@ from typing import (
 from pydantic import BaseModel
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
-from effective.api import Effect
+from effective.api import Effect, direct_tool_key
 from effective.choice import Choice, Ending, Raised, Refusal, Stopped, Unchosen, Won, decide
 from effective.cost import RecordedFormat, Usage
-from effective.domain import SPAWN_TOOL, AskLLM, CallTool, DomainOp, Judge
+from effective.domain import SPAWN_TOOL, AskLLM, CallTool, DomainOp, Judge, OpKind, op_kind
 from effective.govern import Refused, all_refusals
 from effective.keys import (
     FramePosition,
@@ -64,20 +66,23 @@ from effective.keys import (
     Scope,
     Segment,
     Subject,
-    authored_key,
     carries_structure,
     compose_key,
     scope_prefix,
 )
 from effective.keys.frame import split_frames
-from effective.keys.grammar import PATH_SEPARATOR, TERM_SEPARATOR, KeySyntaxError
+from effective.keys.grammar import PATH_SEPARATOR, KeySyntaxError
 from effective.layers import _metering, current_op_name, op_name_scope, run_scope
 from effective.ops import (
     AppendLedgerRow,
     AwaitEvent,
+    ChainPosition,
+    FormattedStepName,
     Gather,
+    MalformedStepName,
     Minted,
     Named,
+    NumberedStepName,
     Race,
     RaceUndecided,
     ReadLedgerRow,
@@ -88,9 +93,10 @@ from effective.ops import (
     StoreArtifact,
     Unretryable,
     WorkflowOp,
-    enter_task_run,
+    chain_held,
     futile_leaf,
     leaves,
+    step_name_text,
 )
 
 
@@ -100,9 +106,10 @@ def walk_run() -> Iterator[None]:
 
     | establishes        | so that                                                          |
     |--------------------|------------------------------------------------------------------|
-    | `enter_task_run()` | the chain state a `descend` grant name reads starts at this task |
-    | `run_scope()`      | `layers.layer_run_state` hands out one dict for the whole run    |
-    | no meter           | a gate reads no spend, and a nested run none of its host's       |
+    | `chain_held(ChainPosition())` | the chain state a `descend` grant name reads starts at this |
+    |                               | task, and the caller's returns after it                     |
+    | `run_scope()`                 | `layers.layer_run_state` hands out one dict for the run     |
+    | no meter                      | a gate reads no spend, and a nested run none of its host's  |
 
     The ambient is per run, and a drive loop recurses per frame: a gather branch and a scoped body
     are frames of the same run, so they do not enter it again.
@@ -118,8 +125,7 @@ def walk_run() -> Iterator[None]:
 def _walk_run(spend: Callable[[], Usage] | None) -> Iterator[None]:
     """`walk_run` for a handler that meters: `spend` reads its own replay-derived meter, and the
     gates of the run read it. A durable handler's run entry is its caller."""
-    enter_task_run()
-    with run_scope(), _metering(spend):
+    with chain_held(ChainPosition()), run_scope(), _metering(spend):
         yield
 
 
@@ -373,51 +379,71 @@ class TraceEntry:
     error: BaseException | None = None  # set when the op was refused/raised, not resolved
 
 
-def step_key(name: str) -> Key:
-    """A `Step`'s key: the `step` arm term, wrapping the author's own identity.
+def kinded_name(name: str | Key, kind: OpKind) -> Key:
+    """A step's name under its op's kind: `tool:search` for an atom, `llm;react:turn` for a
+    minter's key.
 
-    **Every key begins with an arm term, a Step's included.** Wrapping keeps author names out of
-    substrate namespaces without a denylist: `step;approve:x` is not `approve:x`, so the regions
-    are disjoint **by construction** rather than by a tuple somebody has to keep complete. A
-    denylist is bounded by what it enumerates; an arm term is bounded by nothing.
+    Each kind is a literal tag in its own template, so the key registry reads each shape; an
+    interpolated `{kind}` would be a hole no decode can name. A tool's atom is `direct_tool_key`'s
+    to mint."""
+    match name:
+        case Key():
+            match kind:
+                case "llm":
+                    return compose_key(t"llm;{name:domain=any}")
+                case "judge":
+                    return compose_key(t"judge;{name:domain=any}")
+                case "tool":
+                    return compose_key(t"tool;{name:domain=any}")
+                case unreachable:
+                    assert_never(unreachable)
+        case str():
+            match kind:
+                case "llm":
+                    return compose_key(t"llm:{Name(name)}")
+                case "judge":
+                    return compose_key(t"judge:{Name(name)}")
+                case "tool":
+                    return direct_tool_key(name)
+                case unreachable:
+                    assert_never(unreachable)
+        case unreachable:
+            assert_never(unreachable)
 
-    Two shapes, chosen by whether the author's name carries structure:
 
-        step("extract_ticket")       ->  step:extract_ticket       one atom, a coordinate
-        step("tool:charge-card")     ->  step;tool:charge-card     a key, spliced as terms
+def step_key(name: str | Key, kind: OpKind) -> Key:
+    """A `Step`'s key: the `step` arm term, wrapping the step's name. `kind` is `op_kind` of the
+    step's op.
 
-    The split is `keys.carries_structure`, shared with `code.run_code` — the other wrapper of an
-    author's name — so the two cannot answer it differently. Underscores stay legal exactly
-    because a bare name lands in a COORDINATE, where `NAME` admits them.
+    =============================  ========================  ============================
+    the step                       its name                  the key
+    =============================  ========================  ============================
+    `ask_llm("extract", ...)`      an atom                   `step;llm:extract`
+    `call_tool("search", ...)`     an atom                   `step;tool:search`
+    a ReAct turn                   `react_key("turn")`       `step;llm;react:turn`
+    `ask_llm("tool:search", ...)`  text holding structure    refused: `FormattedStepName`
+    a numbered minter's key        `key.occurrence(2)`       refused: `NumberedStepName`
+    =============================  ========================  ============================
 
-    No prefix check and no frame-delimiter check are needed here: the wrapping makes the first
-    unnecessary, and `;` means the name is structured, so a structured name has to parse and
-    `step("talk:a/b/tool:x")` is refused by the grammar rather than by a special case."""
-    if not name:
-        raise ValueError("a Step's name is its identity, and the empty name addresses nothing")
-    if not carries_structure(name):
-        try:
-            return compose_key(t"step:{Name(name)}")
-        except (ValueError, KeySyntaxError) as exc:
-            raise ValueError(
-                f"Step name {name!r} is not one well-formed atom, so it cannot be a coordinate "
-                f"of the `step` arm: {exc}. Give the step a name in an author namespace instead "
-                f"(`tool:{name}`), which composes as `step;tool:{name}`."
-            ) from exc
+    The kind keeps two kinds of op apart under one name, and the arm keeps every step name out of
+    the substrate's namespaces. Text cannot carry structure injectively, and an occurrence is the
+    runtime's to number."""
+    match name:
+        case Key() if name.structure().occurrence is not None:
+            raise NumberedStepName(name.stored())
+        case Key():
+            pass
+        case str() if carries_structure(name):
+            raise FormattedStepName(name)
+        case str():
+            pass
+        case unreachable:
+            assert_never(unreachable)
     try:
-        # `domain=any`, and it has to be: a step's payload is the name its AUTHOR chose, and the
-        # arm is what makes any name safe. `step;ledger:x` is disjoint from `ledger:x` by
-        # construction, so no name needs fencing here. Declaring `address` instead refuses
-        # `step_key("ledger;x")` — a legal author name — and `test_op_key_injective_across_arms`
-        # is the guard that says so.
-        return compose_key(t"step;{authored_key(name):domain=any}")
-    except KeySyntaxError as exc:
-        raise ValueError(
-            f"Step name {name!r} carries a separator, so it is read as a KEY — and it is not one: "
-            f"{exc}. A term is `tag:arg,arg`, and a nested name is its own term after "
-            f"{TERM_SEPARATOR!r} — so `a:b:c` is two separators in one term: write `a:b;c` if `c` "
-            f"is a nested name, or `a:b,c` if it is a second coordinate."
-        ) from exc
+        kinded = kinded_name(name, kind)
+    except (ValueError, KeySyntaxError) as exc:
+        raise MalformedStepName(step_name_text(name), str(exc)) from exc
+    return compose_key(t"step;{kinded:domain=any}")
 
 
 def _await_key(name: Key) -> Key:
@@ -448,7 +474,7 @@ def op_key(op: WorkflowOp) -> Key:
     ``placing`` assigns the coordinate.
 
     **Injectivity across arms is structural, and there is no denylist.** ``step_key`` wraps the
-    author's name, so ``step;ledger:X`` is not ``ledger:X`` and the two regions are disjoint **by
+    author's name, so ``step;llm:X`` is not ``ledger:X`` and the two regions are disjoint **by
     construction** rather than by an enumerated set somebody keeps complete. The lookup that would
     make a collision reachable is still there (``RecordingHandler.responses``); it is safe for a
     reason nobody has to maintain.
@@ -461,8 +487,8 @@ def op_key(op: WorkflowOp) -> Key:
     than parsed: parsing would take ``depth-grant:r1,0,depth=1#2`` from an author, and that
     suffix is ``Key.occurrence``'s, minted by ``placing`` for a repeated ask."""
     match op:
-        case Step(name=name):
-            return step_key(name)
+        case Step(name=name, op=inner):
+            return step_key(name, op_kind(inner))
         case AwaitEvent(name=name):
             return _await_key(name)
         case AppendLedgerRow(row=row):

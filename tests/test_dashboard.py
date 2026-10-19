@@ -35,7 +35,7 @@ from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.graphlayout import elkjs
 from effective.graphlayout import elkjs as elk_engine
 from effective.handlers.durable import DurableHandler
-from effective.keys import Index, Key, Run, compose_key
+from effective.keys import Index, Key, Name, Run, compose_key
 from effective.layers import compose_domain
 from effective.ops import LedgerRow
 from effective.parked import read_sqlite_parked_conn
@@ -58,7 +58,7 @@ def _await_wf(event: str | Key):
             yield from call_tool("a", {}, int)
             # one ledger op too, so the graph has more than a single box to lay out
             yield from append_ledger(
-                LedgerRow(event_id=Key.parse(f"{run_id}:submitted"), kind="submitted")
+                LedgerRow(event_id=compose_key(t"submitted:{Run(run_id)}"), kind="submitted")
             )
             return (yield from await_event(event, dict))
 
@@ -218,7 +218,9 @@ def _clean_gather_wf(run_id: str):
     def branch(tool: str, kind: str):
         def thunk():
             value = yield from call_tool(tool, {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:{kind}"), kind=kind))
+            yield from append_ledger(
+                LedgerRow(event_id=compose_key(t"row:{Name(kind)},{Run(run_id)}"), kind=kind)
+            )
             return value
 
         return thunk
@@ -270,7 +272,7 @@ def test_the_run_page_is_silent_when_the_two_bookkeepers_agree(engine, client):
             "SELECT event_id FROM ledger WHERE workflow_run_id=?", ("r2",)
         )
     )
-    assert rows == ["r2:ka", "r2:kb"]
+    assert rows == [compose_key(t"row:{Name(kind)},{Run('r2')}").stored() for kind in ("ka", "kb")]
 
     page = client.get(f"/tasks/{task_id}")
     assert page.status_code == 200

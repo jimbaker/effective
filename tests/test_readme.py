@@ -12,6 +12,7 @@ import runpy
 from pathlib import Path
 
 import pytest
+from _steps import called_name, placed_step
 
 ROOT = Path(__file__).parent.parent
 PAGES = [
@@ -86,13 +87,16 @@ def test_the_toy_loop_alternates_reason_and_act(monkeypatch: pytest.MonkeyPatch)
     assert "observation='sent a door code for 13:00 to 14:00'" in printed[2]
 
 
+THERMOSTAT = called_name("thermostat")
+
+
 def test_the_audit_layer_sees_each_op_before_and_after(monkeypatch: pytest.MonkeyPatch):
     printed = run("hooks_as_layers.py", monkeypatch).splitlines()
     assert printed == [
         "before a call: setpoint",
         "after a call:  setpoint -> {'celsius': 22}",
-        "before a call: tool:thermostat",
-        "after a call:  tool:thermostat -> set to 22.0°C",
+        f"before a call: {THERMOSTAT}",
+        f"after a call:  {THERMOSTAT} -> set to 22.0°C",
         "before a call: AppendLedgerRow",
         "after a call:  AppendLedgerRow -> "
         "{'event_id': 'setpoint:r1', 'kind': 'setpoint', 'celsius': 22.0}",
@@ -106,7 +110,8 @@ def test_the_ported_module_answers_replays_and_refuses_a_stray_citation(
     printed = run("port_dspy_module.py", monkeypatch).splitlines()
     assert printed == [
         "forward:   GenerateAnswer(reasoning='passage 1 names the essay', "
-        "answer='The Nature of the Firm', citation=1) via step;tool:search step:respond",
+        "answer='The Nature of the Firm', citation=1) via step;tool:search "
+        + placed_step("respond", "llm"),
         "replay:    True with no search and no model",
         "guardrail: Repair(reason='cite a passage by its number')",
     ]

@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from _authority import ruled
 from _conformance import Fault, FaultPosition, at_every_op
+from _steps import placed_step
 
 from effective.api import Effect, qualified_event_name, scoped
 from effective.budget import Grant, depth_grant_name
@@ -26,6 +27,7 @@ from effective.react import (
     ToolRequest,
     ToolResult,
     Trajectory,
+    react_key,
     run_agent,
     unwrap,
 )
@@ -71,7 +73,9 @@ def test_run_agent_past_the_recursion_limit_on_the_recorder_and_replay():
 def test_zero_turns_is_one_final_turn():
     handler = RecordingHandler(Answers())
     trajectory = walk(handler, 0)
-    assert [e.key.stored() for e in handler.trace] == ["d:0;step;react:final"]
+    assert [e.key.stored() for e in handler.trace] == [
+        placed_step(react_key("final"), "llm", "d:0;")
+    ]
     assert (len(trajectory.steps), trajectory.stop_reason) == (1, "max_iters")
 
 

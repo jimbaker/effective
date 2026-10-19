@@ -15,7 +15,7 @@ from _conformance import CountingDomain, Fault, at_every_op
 
 from effective.api import append_ledger, call_tool, gather, race, scoped
 from effective.choice import Chosen, Won
-from effective.keys import Key, compose_key
+from effective.keys import Key, Run, compose_key
 from effective.layers import current_placement, op_layer, retry
 from effective.ops import LedgerRow
 from effective.permission import Allow, Deny, Refused, cascade, rules
@@ -40,7 +40,7 @@ def _deny_the_first_ask():
 
 def _retried(run_id: str):
     a = yield from call_tool("a", {}, int)
-    yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:e1"), kind="k1"))
+    yield from append_ledger(LedgerRow(event_id=compose_key(t"e1:{Run(run_id)}"), kind="k1"))
     return [a, (yield from call_tool("b", {}, int))]
 
 

@@ -1,47 +1,30 @@
 """What per-occurrence identity does each WALK surface for two awaits of one name?
 
-The conformance table any candidate await-occurrence coordinate has to pass, and the reason the
-coordinate is more than an engine fix. `depth-grant:` is declared `Scope.SETTLEMENT`: one answer
-settles one op-occurrence, and the substrate cannot keep that promise unless every interpreter
-agrees on *which* occurrence is asking.
+Two asks on one name are two positions, so every walk records them at two keys. The name they
+WAIT on is a different question: a plain event is a fact, and one emitted answer settles every ask
+of it. A namespace that declares `Scope.SETTLEMENT` (`depth-grant:`) promises one answer per ask,
+so its wait name carries the occurrence too, and every interpreter has to agree on which
+occurrence is asking.
 
-It is **one walk of six** once the fork drivers are counted:
+The key each walk records, for a plain name:
 
 ===========================  =========================================  ==========
-walk                         per-await identity                         distinct
+walk                         per-await key                              distinct
 ===========================  =========================================  ==========
-recording                    ``['event;q', 'event;q']``                 1 of 2
-replay                       none of its own — matches POSITIONALLY     --
+recording                    ``['event;q', 'event;q#2']``               2 of 2
+replay                       the recorder's, re-derived and compared    --
 SQLite durable               ``[]`` (no await checkpoint at all)        0 of 0
-Absurd durable               ``['$awaitEvent:q', '$awaitEvent:q#2']``   **2 of 2**
-``fork.live_drive``          ``['event;q', 'event;q']``                 1 of 2
-``fork.measured_drive``      ``['event;q', 'event;q']``                 1 of 2
+Absurd durable               ``['$awaitEvent:q', '$awaitEvent:q#2']``   2 of 2
+``fork.live_drive``          ``['event;q', 'event;q#2']``               2 of 2
+``fork.measured_drive``      ``['event;q', 'event;q#2']``               2 of 2
 ===========================  =========================================  ==========
 
-Only Absurd has it, and it has it by accident of storage: the SDK checkpoints an await's
-delivered payload under ``$awaitEvent:{name}``, so its general duplicate-*checkpoint-name* rule
-yields ``#2`` for the second asker. Nobody decided awaits need occurrences. SQLite's
-``await_event`` (``sqlite.py:293``) peeks the events table and raises ``_Suspend``, checkpointing
-nothing, while its ``step()`` (``:270``) *does* apply ``name.occurrence(count)``, so the port
-took the shared dup-name rule where it needed it and skipped it where it did not.
+The two fork drivers answer an await through `sandbox.inspect_only`, one seam both go through,
+which looks the wait name up in `grants`; for a plain name one grant answers both asks.
 
-**The two fork drivers are the rows a smaller count misses.** ``fork._replay_scoped`` carries a
-``FramePosition`` (``fork.py:233``, ``placing`` at ``:245``), as does ``replay_prefix``
-(``:209``). The two that carry none are ``live_drive`` (``:303``) and ``_MeasuredRun.drive``
-(``:560``), and **both resolve await names**, through ``sandbox.inspect_only`` (``:113``),
-which looks up the BARE op name. So a candidate that passes the four-row table can still
-compose an unqualified name in a fork tail and miss its grant.
-
-That shared lookup is also the good news: ``inspect_only`` is one seam both fork drivers go
-through, the same "one transition, many drivers" shape as ``enforce_measured`` and
-``permission.decide``.
-
-**The table above is the state for a name that declares NO reach**, and it stays true: the
-coordinate is applied only where a namespace declared `Scope.SETTLEMENT`, so a plain `event;q`
-is untouched by design. The five tests below the divider are the same six
-walks asked the same question about a `depth-grant:` name, and it reads 2 distinct of 2
-everywhere. Keeping both is the point: one pins that the mechanism fires, the other
-pins that it does not fire anywhere it was not asked to.
+The tests below the divider ask the same six walks about a `depth-grant:` name, whose wait name
+reads 2 distinct of 2 everywhere. Keeping both halves pins that the settlement coordinate fires
+where it was declared and that a plain wait name is untouched.
 """
 
 import uuid
@@ -70,6 +53,7 @@ from effective.parked import read_sqlite_parked_conn
 pytestmark = pytest.mark.adversarial
 
 NAME = Key.parse("q")
+ASKED = Key.parse("event;q")
 ANSWER = {"n": 1}
 
 GRANT = depth_grant_name("r1", depth=1, generation=0)
@@ -94,28 +78,19 @@ def _two_awaits():
     return [a, b]
 
 
-def test_the_recorder_serves_one_canned_answer_to_both_asks():
-    """The recorder has no store to read a coordinate off, so it would have to COUNT — and its
-    canned-answer lookup has no occurrence in it (`recording.py:706-709`: frame-qualified name,
-    then bare name, stop). One `responses={"q": ...}` entry silently serves both asks.
-
-    This is why the recorder is the hard case: 113 `responses=` sites across the corpus, and
-    the failure mode of getting it wrong is a fixture that serves the *wrong occurrence* rather
-    than one that errors."""
+def test_the_recorder_records_two_asks_and_serves_one_canned_answer_to_both():
+    """The recorder counts the two positions, and its canned lookup is by wait name, so one
+    `responses={"q": ...}` entry answers both asks."""
     handler = RecordingHandler(responses={"q": ANSWER})
     result = handler.run(_two_awaits)
 
-    keys = [entry.key.stored() for entry in handler.trace]
-    assert keys == ["event;q", "event;q"], keys
-    assert len(set(keys)) == 1, "the recorder distinguishes the two asks — invert this test"
-    assert result == [ANSWER, ANSWER], "one canned entry served both asks"
+    assert [entry.key for entry in handler.trace] == [ASKED, ASKED.occurrence(2)]
+    assert result == [ANSWER, ANSWER]
 
 
-def test_replay_has_no_identity_of_its_own_and_matches_positionally():
-    """Replay carries the ordinal only as trace POSITION and never names it, so it inherits
-    whatever the recorder assigned. It cannot be the walk that fixes this, and it cannot be
-    the walk that breaks it either — but it is the walk that will disagree loudly if the
-    recorder and the durable handler are given different counters."""
+def test_replay_rederives_the_recorders_keys_for_two_asks():
+    """Replay counts as the recorder does and compares each key, so a disagreement between the
+    two counters raises `ReplayMismatch`."""
     recorded = RecordingHandler(responses={"q": ANSWER})
     recorded.run(_two_awaits)
 
@@ -179,18 +154,10 @@ def test_sqlite_writes_no_await_checkpoint_at_all():
         ),
     ],
 )
-def test_both_fork_drivers_alias_the_two_asks(drive):
-    """The two walks a four-row table misses: neither carries a `FramePosition`, and both
-    answer an await from `sandbox.inspect_only`, which looks the BARE name up in `grants`
-    (`sandbox.py:113`). One grant entry answers both asks, in a driver whose whole job is to
-    explore a counterfactual accurately.
-
-    Parametrized over both because they are the same defect at one shared seam; a fix applied
-    at `inspect_only` reaches both, and a fix applied in either driver alone would not."""
-    keys = [entry.key.stored() for entry in drive()]
-
-    assert keys == ["event;q", "event;q"], keys
-    assert len(set(keys)) == 1, "a fork driver distinguishes the two asks — invert this test"
+def test_both_fork_drivers_record_two_asks_answered_by_one_grant(drive):
+    """Each driver counts the two positions, and one grant entry for the wait name answers
+    both."""
+    assert [entry.key for entry in drive()] == [ASKED, ASKED.occurrence(2)]
 
 
 @pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
@@ -198,7 +165,7 @@ def test_absurd_is_the_ONE_walk_that_already_has_the_coordinate():
     """And it has it for its own reasons, which is why "bring the others to parity" understates
     the work. Absurd checkpoints the delivered payload under `$awaitEvent:{name}`, so two asks
     on one name become two checkpoint rows and the SDK's duplicate-name rule disambiguates them
-    exactly as it disambiguates two `step("tool:a")` calls. The coordinate falls out of storing
+    exactly as it disambiguates two calls of one tool. The coordinate falls out of storing
     the payload, not out of anyone deciding awaits need occurrences.
 
     **It is per-task, so it does not reach the cross-generation case** — `c_default` is keyed
@@ -249,8 +216,7 @@ def _two_settlement_awaits():
 
 
 def _grants() -> dict[Key, Any]:
-    """One answer per OCCURRENCE. Two entries, not one, is the whole behavioural change: before
-    the coordinate a single entry served both asks, which is the aliasing in miniature."""
+    """One answer per occurrence: a settlement name's second ask waits on its own name."""
     return {GRANT: GRANT_ANSWER, GRANT.occurrence(2): GRANT_ANSWER}
 
 
@@ -361,10 +327,9 @@ def test_an_emitter_composes_the_second_asks_registration_rather_than_writing_it
     ],
 )
 def test_both_fork_drivers_carry_the_occurrence_into_their_grant_lookup(drive):
-    """The two walks that had no `FramePosition` at all. Both resolve an await through
-    `sandbox.inspect_only`, which looks the name up in `grants` — so the occurrence has to be on
-    the op BEFORE that lookup, and a driver that skipped it would compose an unqualified name and
-    silently take the first occurrence's grant into a counterfactual."""
+    """Both drivers resolve an await through `sandbox.inspect_only`, which looks the name up in
+    `grants`, so the occurrence is on the op before that lookup: a driver that skipped it would
+    take the first occurrence's grant into a counterfactual."""
     keys = [entry.key.stored() for entry in drive()]
 
     assert keys == [f"event;{GRANT.stored()}", f"event;{GRANT.occurrence(2).stored()}"], keys

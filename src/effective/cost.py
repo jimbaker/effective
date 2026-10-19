@@ -49,9 +49,9 @@ type Dollars = float
 class RecordedFormat(StrEnum):
     """The version of a run's recorded format, marked at spawn in its params.
 
-    | version | a model call's step records | an authority answer | enables                      |
-    |---------|-----------------------------|---------------------|------------------------------|
-    | `V1`    | `{result, usage}`           | a ruling            | the meter on replay, a spend |
+    | version | a step's key names    | a model call's step records | an authority answer |
+    |---------|-----------------------|-----------------------------|---------------------|
+    | `V1`    | its op's kind         | `{result, usage}`           | a ruling            |
     """
 
     V1 = "v1"

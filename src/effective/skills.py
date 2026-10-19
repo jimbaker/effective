@@ -124,6 +124,19 @@ interpreter implements it by delegating to ``SkillRegistry.disclose`` (the
 registry is deployment infrastructure, exactly like the model caller)."""
 
 
+def activation_key(name: str) -> Key:
+    """The name of the step that activates skill `name`."""
+    # Two VARIANTS of one namespace, separated by the literal at index 1 (`activate` here,
+    # `refresh` below). `name` is INTERIOR, since a static follows it, so it sits at a counted
+    # offset.
+    return compose_key(t"{SKILL}:{Name(name)},activate")
+
+
+def refresh_key(name: str, n: int) -> Key:
+    """The name of the step that refreshes skill `name` for the `n`-th time."""
+    return compose_key(t"{SKILL}:{Name(name)},refresh,{Index(n)}")
+
+
 def activate_skill(name: str) -> Effect[Pin]:
     """Activation as a recorded, namespaced step: ``skill:{name},activate``.
 
@@ -134,12 +147,9 @@ def activate_skill(name: str) -> Effect[Pin]:
     (The in-memory ``RecordingHandler`` cans responses by name and would hand
     back the same value — don't lean on that divergence.) A deliberate,
     *named* re-read is ``refresh_skill``."""
-    # Two VARIANTS of one namespace, separated by the literal at index 1 (`activate` here,
-    # `refresh` below). `name` is INTERIOR — a static follows it — so it is `Segment`-typed and
-    # sits at a counted offset.
-    key = compose_key(t"{SKILL}:{Name(name)},activate")
+    key = activation_key(name)
     pin = yield from step(
-        key.stored(),
+        key,
         CallTool(name=DISCLOSE_TOOL, args={"skill": name, "event": "activate"}, result_schema=Pin),
     )
     return pin.model_copy(update={"key": key})
@@ -150,9 +160,9 @@ def refresh_skill(name: str, n: int) -> Effect[Pin]:
     ``skill:{name},refresh,{n}``, so its checkpoint key can never collide with
     the activation's or an earlier refresh's (injectivity). ``n`` is the
     workflow's own ordinal (explicitly threaded state, not handler state)."""
-    key = compose_key(t"{SKILL}:{Name(name)},refresh,{Index(n)}")
+    key = refresh_key(name, n)
     pin = yield from step(
-        key.stored(),
+        key,
         CallTool(
             name=DISCLOSE_TOOL, args={"skill": name, "event": "refresh", "n": n}, result_schema=Pin
         ),

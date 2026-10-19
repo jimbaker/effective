@@ -35,9 +35,9 @@ def including(*paths: str | Path) -> KeyMap:
 def by_op(graph: RunGraph) -> dict[str, int]:
     """`{op: executions}` over a folded graph, summing across the frames it kept.
 
-    A folded label carries its surviving frames (`gather:*,*;talk:*;step:audit`), and a sweep over
-    generated widths cannot spell one: whether a `gather:` wraps the drill is a property of the
-    case. `bare_name` is the op under whatever frames, so this is `regroup` with that as the
+    A folded label carries its surviving frames (`gather:*,*;talk:*;` before the op), and a sweep
+    over generated widths cannot spell one: whether a `gather:` wraps the drill is a property of
+    the case. `bare_name` is the op under whatever frames, so this is `regroup` with that as the
     quotient, which is the same arithmetic `fold_cycles` uses one level up."""
     folded = regroup(graph, bare_name, dropped=("frames",))
     return {node.key: node.count for node in folded.nodes}

@@ -49,6 +49,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from _keymap import including
+from _steps import placed_step
 
 from effective.api import (
     Effect,
@@ -63,9 +64,9 @@ from effective.api import (
 )
 from effective.combinators import hoisted, recurse, route
 from effective.domain import CallTool
-from effective.graphview import bare_name, fold_cycles, from_keys
+from effective.graphview import RunGraph, bare_name, fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
-from effective.keys import Index, Run, compose_key
+from effective.keys import Index, Name, Run, compose_key
 from effective.keys.grammar import KeySyntaxError, ParsedKey, parse
 from effective.skills import Pin
 
@@ -164,10 +165,13 @@ def _fanout(batch: list[str], pins, run_id: str) -> Effect[list[Scored]]:
     def scorer(label: str):
         def handler(chunk: tuple[str, str]) -> Effect[str]:
             talk, evidence = chunk
-            return ask_llm(
-                f"score:{label}",
-                f"Tier {_ident(talk)} on the {label} rubric ({pin.body}): {evidence}",
-                str,
+            return scoped(
+                compose_key(t"rubric:{Name(label)}"),
+                lambda: ask_llm(
+                    "score",
+                    f"Tier {_ident(talk)} on the {label} rubric ({pin.body}): {evidence}",
+                    str,
+                ),
             )
 
         return handler
@@ -264,7 +268,7 @@ def triage(run_id: str) -> Effect[Triage]:
 
 # --- the scripted run: the answers, and the spine that drives them -------------
 
-_FRAME_TAGS = ("gather", "talk", "rank", "rec", "fold")
+_FRAME_TAGS = ("gather", "talk", "rubric", "rank", "rec", "fold")
 """The frames this run's combinators mint. A frame is placed BY the handler, so a fixture
 that wants to know where it is reads them back rather than writing them down."""
 
@@ -332,7 +336,7 @@ class Answers(Mapping[str, object]):
         """The names answerable WITHOUT a lane frame — so iterating and then indexing agrees,
         and `dict(...)` round-trips.
 
-        A lane's ops (`enrich`, `classify`, `audit`, `score:{track}`) are deliberately absent:
+        A lane's ops (`enrich`, `classify`, `audit`, `score`) are deliberately absent:
         each needs a `talk:` frame to say which lane is asking, so there is no bare key that
         answers them and enumerating one would hand a caller a `KeyError`."""
         return iter(("tool:inbox", "skill:rubric,activate", "chunk", "merge"))
@@ -352,10 +356,10 @@ class Answers(Mapping[str, object]):
         idents = [row.split("=")[0] for row in rows]
         return " > ".join(sorted(idents, key=lambda ident: self._rank[ident]))
 
-    def _in_lane(self, submission: Submission, name: str) -> object:
+    def _in_lane(self, submission: Submission, name: str, rubric: str | None) -> object:
         """What a lane's op returns. The rubric arm is conditional on the TRACK: only the
-        rubric `classify` chose is ever asked, so answering `score:{other}` would be
-        answering an op this run cannot reach."""
+        rubric `classify` chose is ever asked, so answering `score` under another rubric
+        would be answering an op this run cannot reach."""
         match name:
             case "enrich":
                 return submission.evidence
@@ -363,7 +367,7 @@ class Answers(Mapping[str, object]):
                 return submission.track
             case "audit":
                 return submission.audit
-            case _ if name == f"score:{submission.track}":
+            case "score" if rubric == submission.track:
                 return submission.tier
         raise KeyError(name)
 
@@ -381,8 +385,30 @@ class Answers(Mapping[str, object]):
             case "merge":
                 return self._ordered(self._population())
         if (submission := self._by_ident.get(frames.get("talk", ""))) is not None:
-            return self._in_lane(submission, name)
+            return self._in_lane(submission, name, frames.get("rubric"))
         raise KeyError(key)
+
+
+LANES = "gather:*,*;talk:*;"
+"""The frames a folded lane op keeps: the fold widens the gather and talk coordinates to `*`."""
+
+
+def in_lanes(name: str) -> str:
+    """The folded label of the lane op `ask_llm(name)`."""
+    return LANES + placed_step(name, "llm")
+
+
+def scored_by_rubric(program: RunGraph) -> dict[str, int]:
+    """`{rubric: talks scored on it}` over a folded program, read from each `score` node's
+    `rubric:` frame."""
+    score = placed_step("score", "llm")
+    return {
+        frame.removeprefix("rubric:"): node.count
+        for node in program.nodes
+        if bare_name(node.key) == score
+        for frame in node.frames
+        if frame.startswith("rubric:")
+    }
 
 
 def scripted_run() -> Triage:
@@ -416,11 +442,9 @@ def scripted_run() -> Triage:
     tape = [entry.key.stored() for entry in handler.trace]
     program = fold_cycles(from_keys("cfp-2026", tape), keymap=including("tests/_funnel.py"))
     counts = {node.key: node.count for node in program.nodes}
-    assert counts["gather:*,*;talk:*;step:enrich"] == len(SUBMISSIONS)
-    assert counts["gather:*,*;talk:*;step:audit"] == len(SUBMISSIONS)
-    assert sum(
-        n.count for n in program.nodes if bare_name(n.key).startswith("step;score:")
-    ) == len(SUBMISSIONS)
+    assert counts[in_lanes("enrich")] == len(SUBMISSIONS)
+    assert counts[in_lanes("audit")] == len(SUBMISSIONS)
+    assert sum(scored_by_rubric(program).values()) == len(SUBMISSIONS)
     assert counts["gather:*,*;talk:*;event;review:cfp-2026"] == sum(
         s.audit.startswith("flag") for s in SUBMISSIONS
     )

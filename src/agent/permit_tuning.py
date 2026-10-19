@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from pydantic_core import to_json
 
 from agent.bench_sweep import bench_sweep
-from effective.api import Effect, step
+from effective.api import Effect, call_tool
 from effective.domain import CallTool
 from effective.improve import Measurement, Scored
 from effective.keys import Key
@@ -81,15 +81,8 @@ def tune_permits(
     — the safety/friction menu. Use ``safest`` to pick the operator's default."""
 
     def evaluate(policy: PermitPolicy) -> Effect[Measurement]:
-        m = yield from step(
-            "permit:score",
-            CallTool(
-                name="score_policy",
-                result_schema=Measurement,
-                args={"policy": policy.model_dump(mode="json")},
-            ),
-        )
-        return m
+        args = {"policy": policy.model_dump(mode="json")}
+        return (yield from call_tool("score_policy", args, Measurement))
 
     return bench_sweep(candidates, evaluate, objectives=PERMIT_OBJECTIVES)
 

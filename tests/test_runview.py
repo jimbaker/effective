@@ -12,12 +12,14 @@ recorded instances of a writer and a reader disagreeing about a shape neither ow
 from uuid import UUID
 
 import pytest
+from _steps import placed_step
 
 from effective.cards.spec import Action
 from effective.graphview import from_keys
-from effective.keys import Index
+from effective.keys import Index, Key
 from effective.parked import ParkedTask
 from effective.runview import ANSWER_CMD, RunView, file_summary, run_view, to_markdown
+from effective.spawning import spawn_key
 
 MACHINE_TAPE = [
     "d:0;state:test;step;tool:run_suite",
@@ -42,12 +44,24 @@ def test_a_spawn_is_found_INSIDE_a_frame_where_a_prefix_match_would_miss_it():
     graph = from_keys(
         "r",
         [
-            "gather:0,0;step;tool:spawn,child-a",
-            "gather:0,1;step;tool:spawn,child-b",
+            placed_step(spawn_key("child-a"), "tool", "gather:0,0;"),
+            placed_step(spawn_key("child-b"), "tool", "gather:0,1;"),
             "step;tool:read_file",
         ],
     )
     assert run_view(graph).children == ("child-a", "child-b")
+
+
+def test_a_spawn_is_read_only_from_a_tool_step_named_by_the_spawn_minter():
+    """A model step's name, or a scope, that holds `tool;spawn:` spawns nothing."""
+    graph = from_keys(
+        "r",
+        [
+            placed_step(Key.parse("tool;spawn:evil"), "llm"),
+            placed_step("x", "llm", "tool;spawn:evil;"),
+        ],
+    )
+    assert run_view(graph).children == ()
 
 
 def test_a_run_with_no_spawns_and_no_ledger_still_shapes():

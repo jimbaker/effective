@@ -31,8 +31,9 @@ import _funnel as funnel
 import pytest
 from _funnel import Submission, Triage
 from _keymap import by_op, including
+from _steps import placed_step
 
-from effective.graphview import bare_name, fold_cycles, from_keys
+from effective.graphview import fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayHandler
 from effective.keys import Key
@@ -162,9 +163,9 @@ def check_fanout_width(run: Outcome) -> None:
 
     Reddens when: the fan-out is built over a truncated batch."""
     n = len(run.submissions)
-    assert run.counts["gather:*,*;talk:*;step:enrich"] == n
-    assert run.counts["gather:*,*;talk:*;step:classify"] == n
-    assert run.counts["gather:*,*;talk:*;step:audit"] == n
+    assert run.counts[funnel.in_lanes("enrich")] == n
+    assert run.counts[funnel.in_lanes("classify")] == n
+    assert run.counts[funnel.in_lanes("audit")] == n
 
 
 def check_route_totality(run: Outcome) -> None:
@@ -172,13 +173,7 @@ def check_route_totality(run: Outcome) -> None:
     TOTAL over what the classifier produced, and nothing was scored twice or not at all.
 
     Reddens when: the classifier answers one fixed label, or a lane reads a sibling's track."""
-    # `bare_name` rather than a prefix on the node key: the question is which op ran, and the
-    # frames the fold keeps sit in front of it.
-    scored = {
-        bare_name(node.key).removeprefix("step;score:"): node.count
-        for node in run.program.nodes
-        if bare_name(node.key).startswith("step;score:")
-    }
+    scored = funnel.scored_by_rubric(run.program)
     expected: dict[str, int] = {}
     for submission in run.submissions:
         expected[submission.track] = expected.get(submission.track, 0) + 1
@@ -250,9 +245,10 @@ def check_tree_fold_shape(run: Outcome) -> None:
     # so the label carries a different prefix at each generated width.
 
     ops = by_op(run.program)
-    assert ops["step:shortlist"] == leaves  # one leaf per chunk
-    assert ops.get("step:merge", 0) == merges_for(leaves)
-    assert run.counts["rank;step:chunk"] == 1  # the decompose commits BEFORE the fan-out
+    assert ops[placed_step("shortlist", "llm")] == leaves  # one leaf per chunk
+    assert ops.get(placed_step("merge", "llm"), 0) == merges_for(leaves)
+    # the decompose commits BEFORE the fan-out
+    assert run.counts[placed_step("chunk", "tool", "rank;")] == 1
 
 
 def check_replays(run: Outcome) -> None:

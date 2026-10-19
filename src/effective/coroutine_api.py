@@ -15,7 +15,7 @@ from typing import Any, cast
 
 from effective.cancel import served
 from effective.domain import AskLLM, CallTool
-from effective.keys import Key, Name, compose_key
+from effective.keys import Key
 from effective.ops import (
     AppendLedgerRow,
     AwaitEvent,
@@ -47,16 +47,7 @@ def ask_llm[T](name: str, messages: Any, schema: type[T]) -> _Effect[T]:
 
 
 def call_tool[T](name: str, args: dict[str, Any], schema: type[T]) -> _Effect[T]:
-    return _Effect(
-        # Composed, not f-stringed, and inlined rather than delegated to `api.direct_tool_key`:
-        # `build_key_registry` scans `compose_key` call sites and nothing else, so a surface that
-        # called the minter would mint the same bytes and be invisible to the source map.
-        # The name rides INSIDE the hole, as author path text.
-        Step(
-            name=compose_key(t"tool:{Name(name)}").stored(),
-            op=CallTool(name=name, args=args, result_schema=schema),
-        )
-    )
+    return _Effect(Step(name=name, op=CallTool(name=name, args=args, result_schema=schema)))
 
 
 def await_event[T](name: str | Key, schema: type[T]) -> _Effect[T]:

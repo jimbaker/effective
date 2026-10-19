@@ -29,7 +29,7 @@ from effective.budget import MeasuredBudget
 from effective.cost import Usage
 from effective.domain import AskLLM, CallTool
 from effective.fork import measured_drive
-from effective.handlers.base import artifact_id
+from effective.handlers.base import artifact_id, step_key
 from effective.keys import Key, Subject, compose_key
 from effective.ops import AppendLedgerRow, AwaitEvent, StoreArtifact
 
@@ -220,7 +220,7 @@ def test_a_prefix_sleep_diverges_between_fork_at_and_measured_drive():
     assert tail.result == "reviewed"
 
     # measured_drive, given the Step-only prefix, refuses the same run:
-    prefix = [Driven(key=Key.parse("step:first"), result="a1", usage=Usage())]
+    prefix = [Driven(key=step_key("first", "llm"), result="a1", usage=Usage())]
     with pytest.raises(ForkedSleep):
         measured_drive(prog, _budget(), dom, {}, recorded=prefix)
 

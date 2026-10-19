@@ -17,11 +17,13 @@ a talk changes no expectation here.
 import _funnel as funnel
 import pytest
 from _keymap import including
+from _steps import placed_step
 
 from effective.api import GatherBranch, qualified_event_name
-from effective.graphview import bare_name, fold_cycles, from_keys
+from effective.graphview import fold_cycles, from_keys
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.keys import Run, Segment, compose_key
+from effective.skills import activation_key
 
 # Journey role: one realistic path end to end, over the deepest composition the suite drives.
 pytestmark = pytest.mark.journey
@@ -88,33 +90,31 @@ def test_the_tape_folds_back_into_the_program_and_replays():
     n = len(funnel.SUBMISSIONS)
 
     assert counts["step;tool:inbox"] == 1  # the profile, once
-    assert counts["step;skill:rubric,activate"] == 1  # rule 4: ONE disclosure above the fan-out
-    assert counts["gather:*,*;talk:*;step:enrich"] == n  # one lane per talk...
-    assert counts["gather:*,*;talk:*;step:classify"] == n
-    assert counts["gather:*,*;talk:*;step:audit"] == n
+    assert (
+        counts[placed_step(activation_key("rubric"), "tool")] == 1
+    )  # rule 4: ONE disclosure above the fan-out
+    assert counts[funnel.in_lanes("enrich")] == n  # one lane per talk...
+    assert counts[funnel.in_lanes("classify")] == n
+    assert counts[funnel.in_lanes("audit")] == n
     assert counts["gather:*,*;talk:*;event;review:cfp-2026"] == len(
         _material()
     )  # park iff escalation
-    assert counts["rank;step:chunk"] == 1  # the decompose commits before the fan-out
+    assert (
+        counts[placed_step("chunk", "tool", "rank;")] == 1
+    )  # the decompose commits before the fan-out
     assert _program(tape).executions == len(tape)  # fewer nodes, never fewer facts
 
     assert ReplayHandler(handler.trace).run(lambda: funnel.triage("cfp-2026")) == result
 
 
 def test_the_route_splits_the_lanes_across_the_rubrics_it_chose():
-    """The classifier's label is in the tape (`score:{label}`), so replay re-dispatches
-    identically — the routed path is data, not control state.
+    """The classifier's label is in the tape (the `rubric:{label}` frame), so replay
+    re-dispatches identically: the routed path is data, not control state.
 
-    Asserted as a fold: one `score:{track}` node per track actually used, each counting the
-    talks that chose it. That is the dispatch being TOTAL over what the classifier produced."""
+    Asserted as a fold: one `score` node per track actually used, each counting the talks that
+    chose it. That is the dispatch being TOTAL over what the classifier produced."""
     _, _, tape = _run()
-    # `bare_name` rather than a prefix: the question is which op ran, and the fold keeps the
-    # lane frames in front of it.
-    scored = {
-        bare_name(node.key).removeprefix("step;score:"): node.count
-        for node in _program(tape).nodes
-        if bare_name(node.key).startswith("step;score:")
-    }
+    scored = funnel.scored_by_rubric(_program(tape))
     expected: dict[str, int] = {}
     for submission in funnel.SUBMISSIONS:
         expected[submission.track] = expected.get(submission.track, 0) + 1

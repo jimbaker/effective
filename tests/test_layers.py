@@ -224,7 +224,7 @@ class _FlakyDomain:
 
 
 def _one_shot():
-    turn = yield from ask_llm("ask:0", [], AssistantTurn)
+    turn = yield from ask_llm("ask", [], AssistantTurn)
     return turn
 
 

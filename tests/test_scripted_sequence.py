@@ -6,18 +6,20 @@ recorded answers without the script."""
 
 import pytest
 from _scripted import Scripted, Sequenced
+from _steps import placed_step
 
 from effective import Effect, ask_llm, scoped
 from effective.contexts import RecordingCtx, ReplayCtx
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
 from effective.keys import compose_key
+from effective.react import react_key
 
 
 def asked_twice() -> Effect[list[str]]:
     def body() -> Effect[list[str]]:
-        first = yield from ask_llm("react:turn", [], str)
-        second = yield from ask_llm("react:turn", [], str)
+        first = yield from ask_llm(react_key("turn"), [], str)
+        second = yield from ask_llm(react_key("turn"), [], str)
         return [first, second]
 
     return (yield from scoped(compose_key(t"sub:child"), body))
@@ -51,8 +53,7 @@ def test_the_durable_handler_numbers_the_repeat_and_replays_both_without_the_scr
     assert DurableHandler(ctx, domain).run(asked_twice) == ["bad", "good"]
     assert domain.answers == []
     assert [key.stored() for key in ctx.log] == [
-        "sub:child;step;react:turn",
-        "sub:child;step;react:turn#2",
+        placed_step(react_key("turn"), "llm", "sub:child;", n) for n in (1, 2)
     ]
     replayed = DurableHandler(ReplayCtx(ctx.log), Scripted([])).run(asked_twice)
     assert replayed == ["bad", "good"]

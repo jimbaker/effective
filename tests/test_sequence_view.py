@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _steps import placed_step
 
 from effective.graphview import PARKED, from_keys, to_sequence
 from effective.keys import Key
@@ -15,13 +16,19 @@ if str(_ROOT) not in sys.path:
 
 from scripts.lint_mermaid import check_block  # noqa: E402
 
+
+def _asked(name: str, frames: str = "") -> str:
+    """The placed key of the model call `name` under `frames`."""
+    return placed_step(name, "llm", frames)
+
+
 FAN = [
     "step;tool:runbook",
     "gather:0,2;step;tool:errors",
     "gather:0,0;step;tool:deploys",
     "gather:0,1;step;tool:traces",
-    "d:0;step:narrow",
-    "d:1;step:narrow",
+    _asked("narrow", "d:0;"),
+    _asked("narrow", "d:1;"),
 ]
 
 
@@ -63,8 +70,8 @@ def test_another_interleaving_changes_no_participants_message_list():
 def test_a_scope_frame_stays_in_the_label_on_its_branch():
     said = _said(to_sequence(from_keys("r", FAN)))
     assert said["run"][1:] == [
-        "run->>world: d:0#59;step:narrow",
-        "run->>world: d:1#59;step:narrow",
+        f"run->>world: {_asked('narrow', frames).replace(';', '#59;')}"
+        for frames in ("d:0;", "d:1;")
     ]
 
 
@@ -114,14 +121,14 @@ def test_an_await_in_a_branch_is_drawn_on_that_branch(awaited):
 
 
 def test_an_await_whose_name_spells_a_branch_frame_stays_where_it_ran():
-    keys = ["step:before", "event;notice;gather:9,8;done", "step:after"]
+    keys = [_asked("before"), "event;notice;gather:9,8;done", _asked("after")]
     diagram = to_sequence(from_keys("r", keys))
     assert "participant b1" not in diagram
     assert "  Note over run: awaits event#59;notice#59;gather:9,8#59;done" in diagram
 
 
 def test_an_await_under_a_scope_and_a_branch_is_drawn_on_that_branch():
-    keys = ["d:0;gather:0,0;step:a", "event;d:0;gather:0,0;e"]
+    keys = [_asked("a", "d:0;gather:0,0;"), "event;d:0;gather:0,0;e"]
     said = _said(to_sequence(from_keys("r", keys)))
     assert len(said["b1"]) == 3
 
@@ -134,10 +141,11 @@ def test_a_parked_await_in_a_branch_is_drawn_on_that_branch():
 
 
 def test_branches_whose_coordinates_tie_are_ordered_by_name():
-    keys = ["task:b;gather:0,0;step:x", "task:a;gather:0,0;step:y"]
+    keys = [_asked("x", "task:b;gather:0,0;"), _asked("y", "task:a;gather:0,0;")]
     assert "participant b1 as task:a / gather:0,0" in to_sequence(from_keys("r", keys))
 
 
+# Arbitrary key text: what is under test is the escaping of each character.
 @pytest.mark.parametrize(
     ("key", "label"),
     [

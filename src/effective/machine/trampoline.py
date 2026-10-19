@@ -36,7 +36,7 @@ from pydantic_core import to_jsonable_python
 
 from effective.api import Effect, append_ledger, call_tool, scoped, store_artifact
 from effective.cancel import OpCancelled
-from effective.combinators import Answered, Deeper, Grantor, Level, descend
+from effective.combinators import Answered, Deeper, Grantor, Level, descend, state_frame
 from effective.domain import ToolRefused
 from effective.govern import ChildRefused, all_refusals
 from effective.keys import Index, Key, Name, Run, Segment, compose_key
@@ -542,7 +542,7 @@ def _step[S: StrEnum, V: StrEnum, R: Measured](
     # cancel inside it.
     try:
         visited: _Visited[S, V, R] = yield from scoped(
-            compose_key(t"state:{Name(state.value)}"),
+            state_frame(state.value),
             lambda: _visit(specs[state], ctx, final=level.final),
         )
     except Exception as raised:

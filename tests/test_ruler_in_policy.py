@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 from _authority import ruled
 from _conformance import Fault
+from _steps import placed_step
 
 from effective.api import step
 from effective.domain import CallTool
@@ -109,7 +110,7 @@ def test_a_durable_park_reads_a_payload_as_the_in_process_gate_does(
 
 
 def test_each_answer_keeps_its_ruler_for_the_op_and_the_run():
-    state = GateState(run_id="r", gate="g", op_key="step:charge")
+    state = GateState(run_id="r", gate="g", op_key=placed_step("charge", "tool"))
     state = state.absorb(Resolution(answers={"a": 1, "b": 2}), by=PROPOSER)
     state = state.absorb(Resolution(answers={"a": 3}), by=REVIEWER)
     state = state.absorb(Resolution(answers={"b": 4}))
@@ -123,20 +124,22 @@ def test_each_answer_keeps_its_ruler_for_the_op_and_the_run():
 
 
 def test_an_answer_held_with_no_ruler_reads_as_unruled():
-    carried = GateState(run_id="r", gate="g", op_key="step:x", answers={"p": ("a0",)})
+    carried = GateState(
+        run_id="r", gate="g", op_key=placed_step("x", "tool"), answers={"p": ("a0",)}
+    )
     state = carried.absorb(Resolution(answers={"p": "a1"}), by=REVIEWER)
     assert rulers_for(state, "p") == (None, REVIEWER)
 
 
 def _twice(_run_id: str):
-    for n in (1, 2):
-        yield from step(f"charge-{n}", CallTool(name="charge", args={"n": n}, result_schema=str))
+    yield from step("charge-1", CallTool(name="charge", args={"n": 1}, result_schema=str))
+    yield from step("charge-2", CallTool(name="charge", args={"n": 2}, result_schema=str))
 
 
 def approved_once_for_the_run(op: WorkflowOp, state: GateState) -> Any:
     """Parks the run's first charge for one approval, which the second charge rides on unless
     the proposer gave it."""
-    if not (isinstance(op, Step) and op.name.startswith("charge")):
+    if not (isinstance(op, Step) and isinstance(op.name, str) and op.name.startswith("charge")):
         return Proceed()
     if op.name == "charge-2" and PROPOSER in run_rulers_for(state, POLICY):
         return refuse("the proposer may not approve the run's charges", policy=POLICY)

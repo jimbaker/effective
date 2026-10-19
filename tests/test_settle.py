@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import private
+from _steps import placed_step
 
 from effective.engines import sqlite
 from effective.engines.sqlite import ClaimLost, SqliteApp
@@ -25,7 +26,7 @@ def _settles(params: Any, ctx: Any) -> dict[str, Any]:
     second = ctx.settle(CHOICE, {"winners": [1]})
     branch = _PrefixedCtx(ctx, gather_prefix(0, 1))
     framed = branch.settle(CHOICE, {"winners": [2]})
-    counted = ctx.step(Key.parse("step;after"), lambda: "ran")
+    counted = ctx.step(Key.parse(placed_step("after", "tool")), lambda: "ran")
     return {
         "before": list(before),
         "first": first,
@@ -88,7 +89,7 @@ def test_a_stale_claim_settles_nothing_and_reads_what_is_there(tmp_path, monkeyp
     @stale.register_task("t")
     def stale_task(params: Any, ctx: Any) -> Any:
         assert fresh.work_batch(), "the fresh worker found nothing to reclaim"
-        for name in (Key.parse("step;unsettled"), CHOICE):
+        for name in (Key.parse(placed_step("unsettled", "tool")), CHOICE):
             try:
                 outcomes.append(ctx.settle(name, "stale"))
             except ClaimLost:

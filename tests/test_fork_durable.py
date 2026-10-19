@@ -38,9 +38,10 @@ from effective.handlers.durable import (
     fork_event_name,
     spawn_done_name,
 )
-from effective.keys import Key, Run, Segment, compose_key
+from effective.keys import Key, Segment, compose_key
 from effective.ops import Addressing, LedgerRow, Writer
 from effective.sandbox import WorldMutation
+from effective.spawning import spawn_key
 
 # A ctx that is constructed and never touched (the refusal under test precedes every use of it),
 # so its task id is a placeholder. The id is a `UUID`, so the name says what it is for.
@@ -415,8 +416,8 @@ def test_forking_an_iterative_workflow_seeds_each_occurrence(tmp_path, sqlite_ap
     app.run_until_result(base_id)
     seed = fork_seed(read_sqlite_task(str(db), base_id), through=LEDGER_EXTRACTED.stored())
     # the seed map is keyed by IDENTITY — a `str` lookup would simply miss, silently
-    # Ask the minter: the arm landed at step 8, so a bare author name keys as `step:extract`.
-    assert step_key("extract").occurrence(2) in seed  # the base recorded a distinct 2nd
+    # Ask the minter for the key of the second `extract` model call.
+    assert step_key("extract", "llm").occurrence(2) in seed  # the base recorded a distinct 2nd
 
     @app.register_task("fork")
     def fork_task(params, ctx):
@@ -798,8 +799,8 @@ def _budgeted_wf(_rid: str):
     from effective.api import step
     from effective.domain import AskLLM
 
-    for i in range(3):
-        yield from step(f"ask{i}", AskLLM(messages="m", response_schema=str))
+    for name in ("ask0", "ask1", "ask2"):
+        yield from step(name, AskLLM(messages="m", response_schema=str))
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
     approval = yield from await_event(REVIEW, dict)
     yield from append_ledger(
@@ -986,10 +987,10 @@ def _tail_gather_wf(run_id: str):
     """The decision workflow whose TAIL fans out: prefix + fork point, then two branches that each
     call a tool and append a row."""
 
-    def branch(tool: str, kind: str):
+    def branch(tool: str, kind: str, row: Key):
         def thunk():
             value = yield from call_tool(tool, {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"{kind}:{MID}"), kind=kind))
+            yield from append_ledger(LedgerRow(event_id=row, kind=kind))
             return value
 
         return thunk
@@ -997,24 +998,24 @@ def _tail_gather_wf(run_id: str):
     yield from ask_llm("extract", [], dict)
     yield from append_ledger(LedgerRow(event_id=EXTRACTED, kind="extracted"))
     approval = yield from await_event(REVIEW, dict)
-    results = yield from gather([branch("a", "ka"), branch("b", "kb")])
+    results = yield from gather([branch("a", "ka", KA), branch("b", "kb", KB)])
     return {"decision": approval["decision"], "results": results}
 
 
 def _nested_gather_wf(run_id: str):
     """A gather whose branch is itself a gather: the graph scheme nests depth inside width."""
 
-    def leaf(tool: str, kind: str):
+    def leaf(tool: str, kind: str, row: Key):
         def thunk():
             value = yield from call_tool(tool, {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"{kind}:{MID}"), kind=kind))
+            yield from append_ledger(LedgerRow(event_id=row, kind=kind))
             return value
 
         return thunk
 
     def inner():
         def thunk():
-            return (yield from gather([leaf("a", "ka"), leaf("b", "kb")]))
+            return (yield from gather([leaf("a", "ka", KA), leaf("b", "kb", KB)]))
 
         return thunk
 
@@ -1113,7 +1114,9 @@ def _colliding_tail_gather_wf(run_id: str):
     def branch(tool: str):
         def thunk():
             value = yield from call_tool(tool, {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"done:{MID}"), kind="done"))
+            yield from append_ledger(
+                LedgerRow(event_id=compose_key(t"done:{Segment(MID)}"), kind="done")
+            )
             return value
 
         return thunk
@@ -1478,7 +1481,7 @@ def test_a_transplanted_absolute_await_under_a_rename_is_NOT_refused(tmp_path, s
 
 def _done(child_run_id: str):
     """A grandchild's join name, asked of the minter the handler names done events with."""
-    placement = compose_key(t"tool:spawn,{Run(child_run_id)}")
+    placement = spawn_key(child_run_id)
     return spawn_done_name(Writer(task=str(_UNUSED_TASK), placement=placement))
 
 

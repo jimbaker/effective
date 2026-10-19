@@ -68,8 +68,8 @@ own field "because it is not a template field", and `graphview` folds on it. One
 `ParsedKey`, so `#N#M` cannot be represented and `#1` has no wire form.
 
 The other property a term cannot give: `#` is in NO atom charset, so an author cannot write
-one. As a term, `occ` would be an ordinary tag: `step_key("tool:a;occ:2")` would mint the same
-key as `step_key("tool:a").occurrence(2)`, two producers for one identity, which is the
+one. As a term, `occ` would be an ordinary tag: an author composing `tool:a;occ:2` would mint the
+same key as `compose_key(t"tool:a").occurrence(2)`, two producers for one identity, which is the
 injectivity violation this grammar exists to prevent."""
 
 RECORDED = "recorded"

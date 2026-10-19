@@ -20,6 +20,7 @@ than a matter of reading the spawn args back.
 """
 
 import uuid
+from functools import partial
 from typing import Any
 
 import psycopg
@@ -27,11 +28,12 @@ import pytest
 from _durable import DSN, pg_ready
 from pydantic import BaseModel
 
-from effective.api import call_tool
+from effective.api import call_tool, scoped
 from effective.budget import Budget
 from effective.combinators import Again, Chain, Done, Turn, respawn
 from effective.cost import marked
 from effective.handlers.durable import DurableHandler
+from effective.keys import Index, compose_key
 
 pytestmark = pytest.mark.skipif(not pg_ready(), reason="no Podman test Postgres (just pgt-up)")
 
@@ -119,7 +121,8 @@ def test_a_respawned_generation_stays_on_its_parents_queue(isolated_queue):
     task_name = f"chain{uuid.uuid4().hex[:8]}"
 
     def body(carry: Carry, turn: Turn):
-        yield from call_tool(f"tick{turn.generation}", {}, str)
+        generation = compose_key(t"gen:{Index(turn.generation)}")
+        yield from scoped(generation, partial(call_tool, "tick", {}, str))
         if turn.final:
             return Done({"seen": carry.seen + 1})
         return Again(Carry(seen=carry.seen + 1))

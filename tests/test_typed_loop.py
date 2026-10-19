@@ -404,6 +404,7 @@ def test_an_exhausted_subagent_reads_as_a_fenced_observation():
 
 def test_the_answer_types_the_ending():
     """Checked by `ty`, which reads the `assert_type` calls; the body never runs."""
+
     def run() -> Effect[None]:
         ending = yield from run_agent("x", answer=cited_answer, tools=[SEARCH])
         assert_type(ending, Ending[GenerateAnswer])

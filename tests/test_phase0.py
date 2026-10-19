@@ -22,6 +22,7 @@ from _approval_domain import (
     review_name,
     sample_request,
 )
+from _steps import placed_step
 
 from effective import (
     RecordingHandler,
@@ -65,7 +66,7 @@ _ARTIFACT_KEY = f"artifact:text/plain,sha256-{content_digest(_request().body)}"
 AUTO_TRACE = [
     "step;tool:fetch_request",
     _ARTIFACT_KEY,
-    "step:assess_request",
+    placed_step("assess_request", "llm"),
     f"ledger;{assessed_id(MID).stored()}",
     f"ledger;{committed_id(MID).stored()}",
 ]

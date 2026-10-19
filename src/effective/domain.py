@@ -6,7 +6,7 @@ returns recorded values. They are inert data; they perform no I/O.
 """
 
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Literal, final
+from typing import Annotated, Any, Literal, assert_never, final
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
@@ -109,6 +109,23 @@ class Judge[T](AsksModel):
 type ModelCall[T] = AskLLM[T] | Judge[T]
 type DomainOp[T] = ModelCall[T] | CallTool[T]
 
+type OpKind = Literal["llm", "judge", "tool"]
+"""What a `Step` does, named in its key so a model call and a tool call of one name take two
+keys."""
+
+
+def op_kind(op: DomainOp[Any]) -> OpKind:
+    """The kind a `Step` carrying `op` names in its key."""
+    match op:
+        case AskLLM():
+            return "llm"
+        case Judge():
+            return "judge"
+        case CallTool():
+            return "tool"
+        case unreachable:
+            assert_never(unreachable)
+
 
 # --- the spawn tool's wire protocol: a well-known `CallTool` name + its result schema ----
 # Two callers yield this same `CallTool` (`effective.compose.spawn_subagent_task`, the N=1
@@ -117,6 +134,8 @@ type DomainOp[T] = ModelCall[T] | CallTool[T]
 # their implementations. It lives with `CallTool` because that is exactly what it types.
 
 SPAWN_TOOL = "spawn"
+"""The reserved tool name a spawn calls. Its step is named `spawn:{child}`, so its key is
+`step;tool;spawn:child`, apart from an author's tool step `step;tool:spawn`."""
 
 ASK_TOOL = "ask"
 """The reserved tool name a guard's question reaches the user through, before the run parks."""
@@ -124,8 +143,8 @@ ASK_TOOL = "ask"
 INTERRUPT_TOOL = "interrupt"
 """The reserved tool name of `effective.interrupts.tool_interrupt`'s non-blocking poll.
 
-What keeps it from colliding with an author's tool named `interrupt` is arity: the poll keys
-as `tool:interrupt,{phase}` and an author's tool as `tool:{name}`, as `SPAWN_TOOL` does."""
+Its step is named `interrupt:{phase}` and an author's tool `interrupt` is named `interrupt`, so
+the two keys differ: `step;tool;interrupt:pre` and `step;tool:interrupt`."""
 
 
 class ToolRefused(BaseModel):

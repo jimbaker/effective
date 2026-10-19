@@ -355,7 +355,7 @@ whole step completions are serialized (measured). So a schedule at this seam exp
 boundaries**, and what happens inside an opaque `Step` is out of its reach: serializing there can
 manufacture a deadlock the production path does not have. The recorder also publishes no placement
 to a layer (`layers.py:293`), so two sibling `Step("same", …)` ops are indistinguishable there while
-both durable engines show `gather:0,0;step:same` and `gather:0,1;step:same`. A portable scheduler
+both durable engines show `gather:0,0;step;tool:same` and `gather:0,1;step;tool:same`. A portable scheduler
 needs uniquely labelled fixtures until that asymmetry closes.
 
 The only enabled-set in the repo is in a model rather than in the code: `gather.qnt` picks
@@ -553,16 +553,16 @@ sequenceDiagram
     G->>G: assign g = next_gather() for this thread
     Note over G: branch 1 runs under gather:0,1#59;
     G->>W: (branch body yields) Step(name="leaf")
-    W-->>K: op_key(Step) = step:leaf
-    K-->>G: Key("step:leaf")
+    W-->>K: op_key(Step) = step#59;tool:leaf
+    K-->>G: Key("step#59;tool:leaf")
     G->>K: frames: scope rec:0#59; then gather:0,1#59;
-    K-->>St: "rec:0#59;gather:0,1#59;step:leaf"
+    K-->>St: "rec:0#59;gather:0,1#59;step#59;tool:leaf"
 ```
 
 `op_key` is the single injective producer that **all three handlers share**, which is why a
 recorded key and a durable checkpoint key are the same string by construction rather than by
 agreement. Every arm opens with its own tag (`step`, `event`, `ledger`, `artifact`, `sleep`,
-`gather`, `race`), each a member of the closed `ARM_TAGS`, so `step;ledger:X` and `ledger:X` are
+`gather`, `race`), each a member of the closed `ARM_TAGS`, so `step;tool:X` and `ledger:X` are
 disjoint regions **structurally**. There is no denylist: a denylist is bounded by what it
 enumerates, and a tag is bounded by nothing.
 
@@ -1195,7 +1195,7 @@ its fence reddens immediately.
 $\mathsf{serialize}$ is a parsed grammar with a t-string processor in front of it, so
 (A-serialize) rests on no escape discipline and no reserved-tag denylist. The discharge is
 structural: **nothing is escaped, delimiter-bearing values are refused**, and the disjointness of
-`step;ledger:X` from `ledger:X` is structural rather than enumerated.
+`step;tool:X` from `ledger:X` is structural rather than enumerated.
 
 **(A-canon).** `canonical_form` maps a value to bytes by recursively sorting sets:
 

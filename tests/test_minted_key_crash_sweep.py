@@ -15,6 +15,7 @@ from effective.choice import Chosen, Won
 from effective.domain import CallTool
 from effective.handlers.durable import idempotency_key_for
 from effective.keys import Key, compose_key
+from effective.keys.frame import STEP_ARM
 from effective.layers import TransientError, op_layer, retry
 from effective.ops import Minted, Step, Writer
 
@@ -147,11 +148,17 @@ def _run(backend, shape, fault):
     backend.register(f"minted-{run_id}", factory, domain, fault, layers())
     task_id = backend.spawn(f"minted-{run_id}", run_id)
     snapshot = backend.run_until_result(task_id)
-    steps = {k for k in backend.checkpoint_keys(task_id) if "step:" in k}
+    steps = {
+        k for k in backend.checkpoint_keys(task_id) if STEP_ARM in Key.parse(k).structure().tags
+    }
     minted = {
         idempotency_key_for(Writer(task=str(task_id), placement=Key.parse(s))) for s in steps
     }
     return snapshot, domain, {key.stored() for key in minted}
+
+
+def _is_step(key: str) -> bool:
+    return STEP_ARM in Key.parse(key).structure().tags
 
 
 def _placements(keys: set[str]) -> list[str]:
@@ -258,7 +265,11 @@ def test_a_kind_announcing_retry_survives_a_crash_at_every_op_on_a_domain_per_at
         backend.register(f"minted-{run_id}", _retried, None, fault, layers, fresh=fresh)
         task_id = backend.spawn(f"minted-{run_id}", run_id)
         snapshot = backend.run_until_result(task_id)
-        steps = {k for k in backend.checkpoint_keys(task_id) if "step:" in k}
+        steps = {
+            k
+            for k in backend.checkpoint_keys(task_id)
+            if STEP_ARM in Key.parse(k).structure().tags
+        }
         minted = {
             idempotency_key_for(Writer(task=str(task_id), placement=Key.parse(s))).stored()
             for s in steps

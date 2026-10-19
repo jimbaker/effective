@@ -37,7 +37,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 from functools import cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, TypeAliasType, assert_never, get_args, get_origin
 
 try:
@@ -1476,20 +1476,38 @@ def check_sql_templates_file(path: str | Path) -> list[Violation]:
 #   - An untyped `str` name is a `ty` error at the seam, since `AwaitEvent.name` and
 #     `TaskContext.await_event` take a `Key`. What is left for a syntactic rule is a finished
 #     identity concatenated by hand and a template's leading positions restated by hand, in the
-#     positions where the substrate still takes a `str`, chiefly `Step.name`.
+#     positions where the substrate still takes a `str`: an author's step name, a tool's name, an
+#     event's name.
 _KEY_ESCAPE = "lint: key-composition"
 """Opt out with a reason — for a name that is genuinely not an identity this composer owns (a
 FOREIGN grammar's, e.g. the vendored SDK's `$awaitEvent:` checkpoint spelling)."""
 
-_IDENTITY_CALLS = ("step", "Step")
-"""Calls whose FIRST positional argument is an op identity. `step(...)` is the author surface and
-`Step(...)` the op itself; `.step(...)` on a ctx matches too, since the check is on the callee's
-trailing name."""
+_NAME_SLOTS: dict[str, tuple[tuple[int, ...], tuple[str, ...]]] = {
+    "step": ((0,), ("name",)),
+    "Step": ((0,), ("name",)),
+    "ask_llm": ((0,), ("name",)),
+    "judge": ((0,), ("name",)),
+    "select": ((0,), ("name",)),
+    "call_tool": ((0,), ("tool",)),
+    "await_event": ((0,), ("name",)),
+    "await_until": ((0,), ("name",)),
+    "AwaitEvent": ((), ("name",)),
+    "event_name": ((0,), ("name",)),
+    "qualified_event_name": ((), ("name",)),
+    "emit_event": ((0,), ("name", "event")),
+}
+"""Each call taking an op's name or an event's name, by its trailing name, with the positions and
+keywords of that name. A method call matches too (`ctx.step`, `app.emit_event`). An emitter's
+name is an engine's `emit_event(name, payload)` first argument, or `event=` by keyword; a test
+backend's `emit_event(task_id, event, payload)` passes it second, which only the keyword reaches.
+
+A call reached through another name (`ask = ask_llm`, a wrapper) is outside this table, as is a
+name built two assignments before the slot: the rule reads one hop of dataflow."""
 
 _IDENTITY_KEYWORDS = ("idempotency_key", "event_id")
-"""Keyword slots that take an identity wherever they appear. `name=` is deliberately NOT here: it
-is the most overloaded keyword in the tree (a task name, a tool name, a span name), so it is
-honored only on the calls above, where it IS the op key."""
+"""Keyword slots that take an identity wherever they appear. `name=` is not here: it is the most
+overloaded keyword in the tree (a task name, a tool name, a span name), so it is honored only on
+the calls above, where it names the op or the event."""
 
 
 def check_key_composition_source(source: str, filename: str = "<keys>") -> list[Violation]:
@@ -1501,10 +1519,10 @@ def _identity_slots(call: Any) -> Iterator[Any]:
     fn = call.field("function")
     if fn is None:
         return
-    callee = fn.text().rsplit(".", 1)[-1]
+    positions, keywords = _NAME_SLOTS.get(fn.text().rsplit(".", 1)[-1], ((), ()))
     args = _call_arguments(call)
-    if callee in _IDENTITY_CALLS and args and args[0].kind() != "keyword_argument":
-        yield args[0]
+    positional = [arg for arg in args if arg.kind() != "keyword_argument"]
+    yield from (positional[i] for i in positions if i < len(positional))
     for arg in args:
         if arg.kind() != "keyword_argument":
             continue
@@ -1512,9 +1530,7 @@ def _identity_slots(call: Any) -> Iterator[Any]:
         value = arg.field("value")
         if key is None or value is None:
             continue
-        if key.text() in _IDENTITY_KEYWORDS or (
-            key.text() == "name" and callee in _IDENTITY_CALLS
-        ):
+        if key.text() in _IDENTITY_KEYWORDS or key.text() in keywords:
             yield value
 
 
@@ -1529,9 +1545,9 @@ def _composed_bindings(source: str) -> dict[str, int]:
     only when a name bound to an f-string somewhere is *coincidentally* the same name used in an
     identity slot elsewhere, which the `# lint: key-composition` escape settles per site; it
     under-matches on two hops, an f-string through a helper's return, or a name bound in a
-    comprehension. A dataflow-complete version wants types, and the seams that HAVE types
-    (`Step.name` is the last identity slot still typed `str`) should get them instead: that is the
-    structural fix this rule stands in for.
+    comprehension. A dataflow-complete version wants types: a name slot typed `Key` alone needs
+    no syntactic rule, which is the structural fix this rule stands in for where a slot still
+    takes an author's `str`.
     """
     bound: dict[str, int] = {}
     try:
@@ -2556,7 +2572,46 @@ def registry_of(sources: Mapping[str, str]) -> tuple[list[Shape], list[Violation
                 )
                 continue
             known.append(fresh)
+    problems.extend(_borrowed_tags(variants))
     return [v for group in variants.values() for v in group], problems
+
+
+def _owner(site: str) -> PurePosixPath:
+    """The package a site belongs to: `src/examples/coder`, `src/effective`, `examples`."""
+    parts = PurePosixPath(site.rsplit(":", 1)[0]).parts
+    match parts:
+        case ("src", "examples", package, *_):
+            return PurePosixPath("src") / "examples" / package
+        case ("src", package, *_):
+            return PurePosixPath("src") / package
+        case _:
+            return PurePosixPath(*parts[:1])
+
+
+def _borrowed_tags(variants: Mapping[str, list[Shape]]) -> Iterator[Violation]:
+    """A tag minted in two packages, reported at each site outside the first package scanned and
+    naming both, since a fold reads a coordinate's role from one package's declaration."""
+    for tag, shapes in variants.items():
+        sites = [site for shape in shapes for site in shape.sites]
+        first = _owner(sites[0])
+        for site in sites[1:]:
+            if (other := _owner(site)) != first:
+                path, line = site.rsplit(":", 1)
+                packages = " and ".join(sorted(map(str, (first, other))))
+                yield Violation(
+                    "tag-in-two-packages",
+                    _TWO_PACKAGES.format(tag, packages),
+                    int(line),
+                    tag,
+                    path,
+                )
+
+
+_TWO_PACKAGES = (
+    "namespace {!r} is minted in {}: a fold or a decode reads a coordinate's role from one "
+    "declaration, so a key from either package could be read as the other's. Mint it in one "
+    "package and ask that package's minter elsewhere, or give one a tag of its own"
+)
 
 
 _ROLE_CONFLICT = (
@@ -3013,7 +3068,7 @@ def check_key_literals(
 
     1. is it in the LANGUAGE at all (`approve;front-door:a:b` is not);
     2. does it DECODE against a registered variant of that tag;
-    3. is it REACHABLE: an arm's payload is an ADDRESS, so `event;step:q` is well-formed,
+    3. is it REACHABLE: an arm's payload is an ADDRESS, so `event;step;llm:q` is well-formed,
        decodes, and is unmintable.
 
     **What it does NOT scan, said plainly because a gate's domain is its grammar.** A literal that

@@ -32,7 +32,7 @@ STAMP_NAME = "STAMP.json"
 """Written at the ROOT of an era tree by the corpus writer. Its presence distinguishes a tree
 the writer banked from a directory someone happened to create with the right name."""
 
-CURRENT_ERA = "era-7"
+CURRENT_ERA = "era-8"
 """Stores written by the CURRENT writer live under this name. Eras are told apart by PATH rather
 than by sniffing the keys: the point of a fixture is to state what it expects, and a classifier
 that read the keys would agree with any corpus by construction.
@@ -47,6 +47,7 @@ replayable, which is the one-directional guarantee the fixture holds.
     `era-3`         `task:{id};step;react:0`        every key opens with its arm
     `era-4`         `task:{id};step;react:turn,0`   a turn coordinate declares its role
     `era-5`         `task:{id};d:0;step;react:turn` the turn is a `descend` level's frame
+    `era-8`         `task:{id};d:0;step;llm;react:turn`  a step names its op's kind
 
 **Re-banking is the routine move**: a campaign is 32 trials
 and well under a cent, so a writer change re-banks rather than acquiring a translation layer:

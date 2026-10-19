@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault
+from _steps import placed_step
 
 from effective.api import step
 from effective.budget import MeasuredBudget
@@ -15,7 +16,7 @@ from effective.domain import AskLLM, CallTool, DomainOp, SpawnArgs
 from effective.fork import live_drive, measured_drive
 from effective.handlers.durable import DurableHandler
 from effective.handlers.recording import RecordingHandler
-from effective.keys import Key, Run, Subject, compose_key
+from effective.keys import Key, Subject, compose_key
 from effective.layers import op_layer
 from effective.ops import CompositionRefused, Minted, Named, Step
 from effective.permission import Refused
@@ -47,7 +48,7 @@ def test_a_tool_call_in_a_task_is_handed_its_minted_key():
     sent = CallTool(name="send", args={"to": "a"}, result_schema=dict)
     assert DurableHandler(_TaskCtx(), _Echo()).run(_asks(sent)) == {
         "to": "a",
-        "idempotency_key": "idempotency:t1;step:send",
+        "idempotency_key": placed_step("send", "tool", "idempotency:t1;"),
     }
 
 
@@ -134,7 +135,10 @@ def test_a_step_a_layer_injects_is_keyed_by_its_own_placement():
 
     sent = CallTool(name="send", args={}, result_schema=dict)
     DurableHandler(_TaskCtx(), Recording(), op_layers=[_audits_first]).run(_asks(sent))
-    assert seen == ["idempotency:t1;step:audit", "idempotency:t1;step:send"]
+    assert seen == [
+        placed_step("audit", "tool", "idempotency:t1;"),
+        placed_step("send", "tool", "idempotency:t1;"),
+    ]
 
 
 def test_a_key_an_untyped_caller_supplies_is_refused():
@@ -216,7 +220,9 @@ def test_an_in_process_fork_refuses_a_named_step(drive):
         drive()
 
 
-@pytest.mark.parametrize("fact", ["order:ORD-7#2", "step:notify"], ids=["occurrence", "arm"])
+@pytest.mark.parametrize(
+    "fact", ["order:ORD-7#2", placed_step("notify", "tool")], ids=["occurrence", "arm"]
+)
 def test_a_fact_naming_an_occurrence_or_an_op_is_refused_where_it_is_built(fact):
     with pytest.raises(CompositionRefused):
         Named(Key.parse(fact))
@@ -240,14 +246,14 @@ def test_a_live_fork_refuses_a_key_in_a_tool_calls_args():
         live_drive(_supplies_its_own_key("r"), None, _Metered(), {})
 
 
-def _spawns(run_id: str):
+def _spawns():
     request = SpawnArgs(task_name="child", params={}).call()
-    return (yield from step(compose_key(t"tool:spawn,{Run(run_id)}").stored(), request))
+    return (yield from step("spawn", request))
 
 
 def test_a_live_fork_refuses_a_spawn_it_has_no_task_to_name():
     with pytest.raises(Refused, match="a spawn is named by its task"):
-        live_drive(_spawns("r"), None, _Metered(), {})
+        live_drive(_spawns(), None, _Metered(), {})
 
 
 class _RecordingTask(RecordingCtx):

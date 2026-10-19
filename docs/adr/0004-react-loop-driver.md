@@ -34,8 +34,8 @@ layers, channels and the permission cascade rather than introducing a parallel m
 ### D1: the loop is a durable driver; the policy is a parameter
 
 `run_agent(prompt, max_iters, *, decide, act, guard, interrupt, compact, grantor)` is a `descend`
-judge with one turn per level. Every model turn is an `AskLLM` step `react:turn` and every action
-a `CallTool` step `tool:{name}`, inside the level's `d:{i}` frame, so a recorded trajectory
+judge with one turn per level. Every model turn is an `AskLLM` step keyed `step;llm;react:turn` and
+every action a `CallTool` step keyed `step;tool:{name}`, inside the level's `d:{i}` frame, so a recorded trajectory
 replays with no model. The seams:
 
 | seam | type | default |
@@ -44,7 +44,7 @@ replays with no model. The seams:
 | `act` | `(ToolRequest, level) -> Effect[ToolResult]` | `default_act`, an opaque `call_tool` |
 | `guard` | judges an action before it runs: `Proceed`, `Refuse` (the observation replaces the action) or `Ask` (parks on `guard:ask`) | none |
 | `interrupt` | the race seam (D4) | none |
-| `compact` | a pure trigger over the transcript; when it fires the loop records one `react:compact` step whose `TrajectorySummary` replaces the prefix, keeping the task and the last `KEEP_TAIL` messages | none |
+| `compact` | a pure trigger over the transcript; when it fires the loop records one `step;llm;react:compact` step whose `TrajectorySummary` replaces the prefix, keeping the task and the last `KEEP_TAIL` messages | none |
 | `grantor` | adds turns before the final level | none |
 
 `decide` need not call a model: a pure-Python policy is a valid step and leaves no op in the
@@ -80,7 +80,7 @@ and an optional `accrue` folds its total into a parent meter.
 
 Esc and slash commands are a race between a keypress and an op. The loop polls a non-blocking
 interrupt channel at the phases it subscribes to: before the decide, after it, and after the
-action. Each poll is a recorded `CallTool` keyed `tool:interrupt,{phase}`, so the race's winner is
+action. Each poll is a recorded `CallTool` keyed `step;tool;interrupt:{phase}`, so the race's winner is
 a checkpoint and replay re-derives it.
 
 | signal | effect |

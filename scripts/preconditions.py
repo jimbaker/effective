@@ -15,9 +15,7 @@ disk, a port answering, an image built — can be checked before anything runs, 
 probes do. **API AVAILABILITY cannot**: a provider that is up when preflight asks and rate-limits
 ninety seconds later is indistinguishable, in advance, from one that is up. It is discovered by
 the attempt failing, so it belongs to the call site rather than to preflight, and the call site's
-obligation is the same one: be loud, and continue. A `tape-check` run can abort at 0 steps
-against a valid credential while the next banks cleanly, so the gate goes red on a provider
-hiccup.
+obligation is the same one: be loud, and continue.
 
 **The capability -> recipe mapping below is DECLARED, and this docstring owes the reader why**,
 because `preflight.py` derives its own domain and says a hand-written list is the failure mode this
@@ -91,10 +89,8 @@ def spend() -> Precondition:
     the environment already carries a key, so an environment key WINS — and `justfile`'s
     `set dotenv-load` searches PARENT directories, so a `.env` outside the repo silently supplies
     one to every recipe. A `.env` in a parent directory therefore puts its key into every `just`
-    recipe ahead of `./api.env`. A stale one makes `just tape-check` abort its live run at 0 steps,
-    and the gate reports *"the fresh tape does not replay: model called during replay"*, which is
-    the empty tape talking and reads like a broken loop. A run bypassing `just` succeeds, which is
-    what makes it look transient.
+    recipe ahead of `./api.env`. A stale one fails a live recipe with the provider's authentication
+    error, and a run bypassing `just` succeeds, which is what makes the failure look transient.
 
     A presence check cannot see this, and a validity check would need a paid round trip. Comparing
     the two configured credentials costs nothing and names the exact hazard, so it is worth more
@@ -108,7 +104,7 @@ def spend() -> Precondition:
             False,
             "no OPENAI_API_KEY in env or ./api.env",
             "put OPENAI_API_KEY in ./api.env, or export it",
-            "tape-check cannot bank a fresh tape; the banked-tape lane skips",
+            "corpus-check cannot bank a fresh corpus",
         )
     if env_key and file_key and env_key != file_key:
         return Precondition(
@@ -168,14 +164,14 @@ def postgres() -> Precondition:
 
 def container() -> Precondition:
     """A rootless container runtime. The pinned images (`code-agent`, `pg-test`, `elk`, `formal`)
-    all rest on it, and `tape-check` needs the code-agent one to bank."""
+    all rest on it."""
     if (podman := shutil.which("podman")) is None:
         return Precondition(
             "container",
             False,
             "podman not on PATH",
             "install podman (rootless)",
-            "tape banking, pgt-up, the ELK and formal lanes",
+            "the container tier, pgt-up, the ELK and formal lanes",
         )
     try:
         subprocess.run([podman, "info"], capture_output=True, timeout=15, check=True)
@@ -185,7 +181,7 @@ def container() -> Precondition:
             False,
             f"podman present but not usable ({type(exc).__name__})",
             "check the rootless setup: podman info",
-            "tape banking, pgt-up, the ELK and formal lanes",
+            "the container tier, pgt-up, the ELK and formal lanes",
         )
     return Precondition("container", True, "podman usable", "", "")
 

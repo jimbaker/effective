@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _steps import called_name, placed_step
 
 from effective import RecordingHandler, ReplayHandler, ReplayMismatch
 from effective.channels import Repair
@@ -19,6 +20,7 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 sys.path.insert(0, str(EXAMPLES))
 set_temperature = importlib.import_module("first_workflow").set_temperature
 RESPONSES = importlib.import_module("testing_a_workflow").RESPONSES
+SETPOINT = placed_step("setpoint", "llm")
 
 
 def warmer(ceiling: float = 30):
@@ -29,7 +31,7 @@ def test_recording_asks_the_model_sets_the_thermostat_and_appends_one_row():
     recorder = RecordingHandler(RESPONSES)
     assert recorder.run(warmer()) == 22.0
     assert [entry.key.stored() for entry in recorder.trace] == [
-        "step:setpoint",
+        SETPOINT,
         "step;tool:thermostat",
         "ledger;setpoint:r1",
     ]
@@ -46,13 +48,13 @@ def test_the_guardrail_refuses_before_the_thermostat_runs():
     hot = RecordingHandler({"setpoint": {"celsius": 45}})
     refused = hot.run(lambda: set_temperature("r2", "make it much warmer"))
     assert isinstance(refused, Repair)
-    assert [entry.key.stored() for entry in hot.trace] == ["step:setpoint"]
+    assert [entry.key.stored() for entry in hot.trace] == [SETPOINT]
     assert hot.ledger == []
 
 
 def test_past_the_guardrail_an_uncanned_thermostat_raises():
     hot = RecordingHandler({"setpoint": {"celsius": 45}})
-    with pytest.raises(KeyError, match="tool:thermostat"):
+    with pytest.raises(KeyError, match=called_name("thermostat")):
         hot.run(lambda: set_temperature("r2", "make it much warmer", ceiling=50))
 
 

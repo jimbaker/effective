@@ -187,7 +187,7 @@ wants to know where it is reads them back rather than writing them down."""
 def _placed(key: str) -> tuple[dict[str, str], str]:
     """Split a placed key into `{frame tag: its first coordinate}` and the author's own op name.
 
-    `gather:0,1;item:sourdough;step:stock` -> `({"gather": "0", "item": "sourdough"}, "stock")`.
+    `gather:0,1;item:sourdough;stock` -> `({"gather": "0", "item": "sourdough"}, "stock")`.
 
     Total: text the parser refuses comes back as its own name, which the caller then fails to
     find rather than mis-answering."""

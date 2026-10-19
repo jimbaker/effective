@@ -307,9 +307,9 @@ and it belongs to the deployment.
 **not be the letter**: `step_key` wraps every `Step`
 in its own arm (`handlers/base.py:239`), so a `call_tool`'s letter is `step;tool:{name}`. Worse, the
 substrate **decouples the dispatch name from the durable key on purpose**: `activate_skill` keys
-under `skill:{name},activate` while its `CallTool` name is `skill-disclose` (`skills.py:142-146`),
-and `tool_interrupt` mints a *per-call* letter `tool:interrupt,{phase}` whose arity is its
-only collision defence. A `frozenset` of name-derived keys would match **zero** of those.
+under `step;tool;skill:{name},activate` while its `CallTool` name is `skill-disclose` (`skills.py`),
+and `tool_interrupt` mints a *per-call* letter `step;tool;interrupt:{phase}`, kept apart from an
+author's tool `interrupt` by its own tag. A `frozenset` of name-derived keys would match **zero** of those.
 
 ### 6b. The membership relation is UNOWNED: settle it before any matcher ships
 
@@ -322,7 +322,7 @@ anyway; and name and key are different axes on purpose, so a `Tool` cannot deriv
 
 The candidate carries two limits that are part of the decision, not footnotes. The pattern's
 vocabulary is the **key namespace, not the dispatch name**: the disclose tool's letters live
-under `step;skill:…` while its name is `skill-disclose`, which appears in no letter it mints, so
+under `step;tool;skill:…` while its name is `skill-disclose`, which appears in no letter it mints, so
 every pattern is hand-authored per family: a name↔pattern mapping someone must keep true, the
 nominal-where-structural shape again. And trailing-only wildcards cannot pin a later coordinate
 while wildcarding an earlier one, so the skill family is reachable only at whole-namespace grain,

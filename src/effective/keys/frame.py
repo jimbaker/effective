@@ -76,34 +76,38 @@ So a domain rule looks PAST a frame; only `leads_with_an_arm` — the primitive,
 the leading tag and nothing else — does not."""
 
 STEP_ARM = "step"
-"""The arm whose payload is AUTHOR text, and therefore the one no REFUSAL may read past.
+"""The arm whose payload is a step's kind and name, and therefore the one no REFUSAL may read past.
 
-`step;{name}` wraps whatever the author called their step, and *that is the point*: the arm is
-why no denylist is needed, because `step;ledger:x` is disjoint from `ledger:x` by construction. A
-rule that refused an author's `ledger:x` inside a step's payload would put a denylist back, one
-layer down.
+`step;{kind}:{name}` wraps an atom an author chose, and `step;{kind};{key}` a key a minter
+composed (`handlers.base.step_key`). The arm is why no denylist is needed: `step;llm:x` is
+disjoint from `ledger:x` by construction. A rule that refused a payload for the namespace it
+resembles would put a denylist back, one layer down.
 
-A PROJECTION does read past it, on a different authority: `step;code:seg,0,answer` is a key
+A PROJECTION does read past it, on a different authority: `step;tool;code:seg,0,answer` is a key
 `code.py` composed, so its `seg` coordinate carries the role that site declared and a fold drops
 it. What the arm bounds is what the SUBSTRATE may refuse, never what a payload's own mint says
 about itself.
 
-**And the precondition, because a shape match is not provenance.** The projection reads an
-author's payload through whatever variant its bytes fit, which is right when the author IS the
-registered site and a guess otherwise. A `tag:{}` variant declaring `Index` is where that bites:
-`step;ask:alice` and `step;ask:bob` fit `ask:{}`, so a fold merges two steps an author meant to
-keep apart and reports a cycle over a straight line. The registry knows how many there are, so
-count them rather than naming one::
+**And the precondition, because a shape match is not provenance.** The projection reads a payload
+through whatever variant its bytes fit, which is right when the registered site minted it. Two
+rules make that the case:
+
+| payload           | who minted it                                                |
+|-------------------|--------------------------------------------------------------|
+| an atom           | the author; text holding key structure is refused            |
+| a minter's `Key`  | the one package that owns the key's tag                      |
+
+The limit is an author's own composed `Key` passed as a step's name: `compose_key(t"ask:alice")`
+records `step;llm;ask:alice` and fits `ask:{}`, so a fold that drops its `Index` merges it with
+`ask:bob`. Each `tag:{}` variant declaring `Index` folds two such keys into one. Count them rather
+than naming one::
 
     uv run python -c "
     from effective.keys.registry import KeyMap
     print(sorted(t for t, vs in KeyMap.load().variants.items()
                  for v in vs if v.template == f'{t}:{{}}' and v.roles == ('index',)))"
-    # 2026-09-15: ask compact d gen rec search
+    # 2026-10-17: ask compact d gen rec search turn user"""
 
-Six of the thirty single-hole variants, and every one an ordinary English word an author reaches
-for. `code:action,{},{};tool:{}` and `code:seg,{},{}` carry a second term or a literal, so neither
-can be hit by accident. Which of the six to rule out is an open decision."""
 
 ADDRESS_ARMS = ("event", "ledger", "ledger-read", "emit")
 """The bare qualifiers whose payload is a WIRE ADDRESS — the arms a reachability rule can read.
@@ -358,10 +362,10 @@ def unmintable(key: str) -> str | None:
     **The rule: a bare ADDRESS ARM's payload may not itself open with an arm.** Nothing emits an
     event named after a checkpoint, so `event;step;tool:foo` is well-formed and unreachable.
 
-    **And the scan STOPS at the first bare `step`**, because everything after one is a name the
-    author chose and no structural claim survives it. `step;event;q` is a step somebody named
-    `event;q` — odd, and minted by `step_key` the moment they ask for it. Reading past the step arm
-    is how a reachability rule turns back into the denylist the arm term replaced.
+    **And the scan STOPS at the first bare `step`**, because everything after one is a step's
+    name and no structural claim survives it. `step;llm;event;q` is a step named by the composed
+    key `event;q`: odd, and minted by `step_key` the moment an author passes it. Reading past the
+    step arm is how a reachability rule turns back into the denylist the arm term replaced.
 
     Decidable because both tag sets are CLOSED: the key space is a qualification scheme over a
     finite alphabet, not a Turing-complete one, so "could anything mint this?" is a check and not a
@@ -488,6 +492,24 @@ class FramePosition:
     positional — two asks on one name are the same question asked twice, and two asks on
     different names are unrelated. Counting them together would make the n-th ask depend on what
     else the thread happened to await."""
+
+    placements: dict[Key, int] = field(default_factory=dict)
+    """How many times each full key, frames included, has been placed in this thread, so two
+    positions in one thread never share a key whatever names an author repeats."""
+
+    def place(self, placed: Key) -> Key:
+        """``placed`` at its occurrence in this thread of control::
+
+            step;tool:a  ->  step;tool:a        the first placement
+            step;tool:a  ->  step;tool:a#2      the second
+
+        A key that already names its occurrence, as a settlement await's does, is placed as it
+        is."""
+        if placed.structure().occurrence is not None:
+            return placed
+        count = self.placements.get(placed, 0) + 1
+        self.placements[placed] = count
+        return placed.occurrence(count)
 
     def next_await(self, name: Key) -> int:
         """The n-th ask on ``name`` in this thread of control, **1-based** unlike the positional

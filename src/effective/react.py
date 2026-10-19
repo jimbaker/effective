@@ -416,6 +416,10 @@ def react_key(kind: ReactStep) -> Key:
     return compose_key(t"react:{Name(kind)}")
 
 
+GUARD_ASKED = compose_key(t"guard:asked")
+"""The name of the step that puts a guard's question to the user."""
+
+
 def refusal(tool: str, diagnostic: str) -> ToolResult:
     """A refusal as the model reads it, from the ONE place that renders one.
 
@@ -452,7 +456,7 @@ def default_decide(request: TurnRequest) -> Effect[AssistantTurn]:
         response_schema=AssistantTurn,
         answer_schema=request.answer_schema,
     )
-    decided = yield from step(key.stored(), asked)
+    decided = yield from step(key, asked)
     return decided
 
 
@@ -497,8 +501,9 @@ def default_act(request: ToolRequest, level: Level) -> Effect[ToolResult]:
     load from its own checkpoint, taking the run down. A model naming a tool the deployment does
     not serve reaches this path."""
     schema: Any = ToolRefused | ToolResult
+    tool_key(request.name)  # an unusable name is refused here, as `UnusableToolName`
     result: ToolRefused | ToolResult = yield from step(
-        tool_key(request.name).stored(),
+        request.name,
         CallTool(name=request.name, result_schema=schema, args=request.args),
     )
     match result:
@@ -657,11 +662,11 @@ def typed_act(
         # union in a caller's hands does not type-check while one in the substrate's does.
         # Additive on the wire: a successful call records the same bytes it always did.
         schema: Any = ToolRefused | tool.result
+        # `tool.name` rather than `request.name`: they are equal by the lookup above, and taking
+        # it from the DECLARATION means the key and the dispatch cannot name two different tools.
+        tool_key(tool.name)  # an unusable name is refused here, as `UnusableToolName`
         value = yield from step(
-            # Composed, not f-stringed, and `tool_key` carries the reason. `tool.name` rather
-            # than `request.name`: they are equal by the lookup above, and taking it from the
-            # DECLARATION means the key and the dispatch cannot name two different tools.
-            tool_key(tool.name).stored(),
+            tool.name,
             CallTool(
                 name=tool.name,
                 result_schema=schema,
@@ -1194,7 +1199,7 @@ def _compacted(messages: list[dict[str, Any]]) -> Effect[list[dict[str, Any]]]:
     """The transcript with its prefix replaced by a recorded summary, keeping the task and the last
     `KEEP_TAIL` messages."""
     summary = yield from ask_llm(
-        react_key("compact").stored(), _summary_request(messages), TrajectorySummary
+        react_key("compact"), _summary_request(messages), TrajectorySummary
     )
     return [messages[0], summary_message(summary), *messages[1:][-KEEP_TAIL:]]
 
@@ -1211,7 +1216,7 @@ def _guarded(
             return refusal(request.name, reason)
         case Ask(question=question):
             asked = CallTool(name=ASK_TOOL, args={"question": question}, result_schema=ToolResult)
-            yield from step(compose_key(t"guard:asked").stored(), asked)
+            yield from step(GUARD_ASKED, asked)
             answer = yield from await_event(compose_key(t"guard:ask"), Allowed)
             return None if answer.allow else refusal(request.name, "the user declined")
         case unreachable:

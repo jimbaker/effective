@@ -153,7 +153,7 @@ only answer them; where the set is data you can change it.
 | refused | because |
 |---|---|
 | drop a `gather` branch | the result list is positional; it shrinks and every downstream index shifts. A type change, not an override |
-| renumber survivors after a drop | an index is a coordinate: unmodified `gather:0,2;step:b2` would become `gather:0,1;step:b2`, an identity nobody steered |
+| renumber survivors after a drop | an index is a coordinate: unmodified `gather:0,2;step;llm:b2` would become `gather:0,1;step;llm:b2`, an identity nobody steered |
 | add a `gather` branch | a closure is not in the tape: the program yields 3 branches, the tape holds 4, and the fourth has no body to re-execute. [ADR-0021](0021-dynamic-graphs-as-projections.md) §6's back edge in another form |
 
 Answering a branch (supplying its result without running it) is type-safe and key-stable, and is
@@ -194,7 +194,7 @@ answer (§6) is what would let the walk check the schema itself.
 
 | piece | what it closed |
 |---|---|
-| `handlers.base.walk_run` | the per-run ambient (`enter_task_run`, `run_scope`, no meter) in one place for every walk |
+| `handlers.base.walk_run` | the per-run ambient (`chain_held`, `run_scope`, no meter) in one place for every walk |
 | `layers.layer_routing` | the three layer-visibility tuples as one total decision; [`tests/test_layers.py`](../../tests/test_layers.py) pins that they are disjoint and cover every arm |
 | total dispatch | the replay and recording tables end in `case unreachable: assert_never(unreachable)` |
 | `ReplayHandler`'s `Respawn` arm | a `Respawn` has its own arm: it ends the run at the generation boundary, and is refused inside a gather branch |

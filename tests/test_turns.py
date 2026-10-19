@@ -83,9 +83,13 @@ class Called:
         return 1
 
 
+CALLS = {"a": ("a1", "a2"), "b": ("b1", "b2")}
+"""Each branch's two tool calls, in the order the branch makes them."""
+
+
 def _two_calls(branch: str):
-    for i in (1, 2):
-        yield from call_tool(f"{branch}{i}", {}, int)
+    for tool in CALLS[branch]:
+        yield from call_tool(tool, {}, int)
 
 
 def _gathered(backend, switches: int) -> list[tuple[str, ...]]:
@@ -117,7 +121,7 @@ def test_ops_of_gathered_branches_take_turns_in_every_order(backend, switches, r
 
 def _awaits_then_calls(branch: str, event: Key):
     yield from await_event(event, int)
-    yield from call_tool(f"{branch}1", {}, int)
+    yield from call_tool(CALLS[branch][0], {}, int)
 
 
 def test_the_choices_go_on_across_a_park(backend):

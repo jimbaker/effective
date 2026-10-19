@@ -7,6 +7,7 @@ re-interpreted under a different handler.
 """
 
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -62,9 +63,20 @@ class Named:
 class Step[T]:
     """Run a domain operation as a durable, checkpointed step."""
 
-    name: str
+    name: str | Key
     op: DomainOp[T]
     idempotency_key: Minted | Named | None = None
+
+
+def step_name_text(name: str | Key) -> str:
+    """A step's name as text: an author's atom as written, a minter's `Key` as stored."""
+    match name:
+        case Key():
+            return name.stored()
+        case str():
+            return name
+        case unreachable:
+            assert_never(unreachable)
 
 
 class Addressing(Enum):
@@ -640,6 +652,55 @@ class FormattedEventName(CompositionRefused):
         )
 
 
+class FormattedStepName(CompositionRefused):
+    """A step name given as text holding key structure.
+
+    A step's name is one atom, or a minter's key: text cannot carry structure injectively, and
+    `ask_llm("tool:search")` would take `call_tool("search")`'s key."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        held = " and ".join(
+            f"the {role} {byte!r}"
+            for byte, role in METACHARACTER_ROLES.items()
+            if byte in self.name
+        )
+        return (
+            f"the step name {self.name!r} holds {held}, so its structure was written as text: "
+            "name the step with one atom, put its context in a scope, or call a tool with "
+            "`call_tool`"
+        )
+
+
+class NumberedStepName(CompositionRefused):
+    """A step named by a key that carries an occurrence, which only the runtime numbers."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return (
+            f"the step name {self.name!r} carries an occurrence, which the runtime numbers: "
+            "name the step with the unnumbered key"
+        )
+
+
+class MalformedStepName(CompositionRefused):
+    """A step name given as text that is no atom."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(name, reason)
+        self.name = name
+        self.reason = reason
+
+    def __str__(self) -> str:
+        return f"the step name {self.name!r} is not one atom: {self.reason}"
+
+
 class ReservedEventName(CompositionRefused):
     """An await name in a reserved authority namespace that the substrate did not compose.
 
@@ -680,6 +741,25 @@ class OpIdentityAwaited(CompositionRefused):
             f"await name {self.name!r} opens with an op ARM ({' '.join(ARM_TAGS)}), so it is an "
             f"op's own identity, and no emitter delivers an event named after a checkpoint: "
             f"await an author subject or a substrate authority key"
+        )
+
+
+class FramedEventName(CompositionRefused):
+    """A relative await name that puts frames before its last term.
+
+    The frames around a relative await are its handler's, so `bar:x` awaited inside
+    `scoped(foo:0)` waits on `foo:0;bar:x`, and an await on the key `foo:0;bar:x` would share
+    that wire name and its answer."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+    def __str__(self) -> str:
+        return (
+            f"await name {self.name!r} holds frames, and a relative await's name is one term: "
+            "its handler adds the frames around it. Await the last term inside a `scoped(...)`, "
+            "or await another task's wire address with `Addressing.ABSOLUTE`"
         )
 
 
@@ -837,7 +917,7 @@ CHAIN_DEPTH: ContextVar[int] = ContextVar("effective_chain_depth", default=0)
 
 Lives here rather than in `combinators` for the reason `GENERATION_PARAM` does: both handlers
 read it and **a handler must not import a combinator**. The combinator sets it; the handlers
-reset it at a task boundary.
+hold it for a task run (`chain_held`).
 
 A `ContextVar` rather than a plain global because a gather branch runs in its own thread and
 `asyncio.to_thread` copies the context — so a branch correctly inherits "a chain encloses you"
@@ -845,14 +925,22 @@ instead of racing a shared counter. Deterministic under replay: it is re-derived
 re-executing the same generators, never read from the world (the determinism boundary is about
 I/O; this is in-process control state, like a frame's `FramePosition`).
 
-**Its reset is at the TASK RUN, not in a `finally`, and that was measured the hard way.** The
-first version reset in a `finally` around the step's body — which never runs when a gather
-branch's refusal propagates out of the handler without being thrown back into the workflow
-generator, because the generator is abandoned for the GC. Abandonment is not exceptional here:
-it is how a park and a generation boundary both work. So the flag leaked across runs, and in a
-long-lived WORKER that means task B refusing because task A left it dirty. Bounding it to the
-run makes a leak unobservable — a run that ends dirty has ended — and gives replay the same
-zero it started with."""
+**A run holds it, because the step that sets it may not finish:**
+
+| the step inside `respawn`       | the combinator's reset                                   |
+|---------------------------------|----------------------------------------------------------|
+| returns                         | runs                                                     |
+| lets a thrown refusal unwind it | skipped: `respawn` wraps the step in no `try`            |
+| raises a task-level error       | skipped: the error unwinds it, or the handler drops it   |
+| parks                           | skipped: the generator stays suspended, maybe referenced |
+
+So every walk enters `chain_held` at its run:
+
+| at the run's | the chain state               | so that                                  |
+|--------------|-------------------------------|------------------------------------------|
+| entry        | no chain                      | replay starts from the same zero         |
+| exit         | the caller's, as it was found | task B reads none of what task A left set |
+"""
 
 
 CHAIN_GENERATION: ContextVar[int | None] = ContextVar("effective_chain_generation", default=None)
@@ -875,8 +963,7 @@ handler-published generation would be absent exactly where the name has to be re
 must be distinguishable from a `descend` that is not in a chain at all — the second composes the
 name it always composed, so nothing outside a respawn moves a byte.
 
-Reset with its sibling at the task run, not in a `finally`, for the reason recorded above: a
-gather branch's refusal abandons the generator and no `finally` runs."""
+Held with its sibling for the task run, for the reason `CHAIN_DEPTH` gives."""
 
 
 def current_generation() -> int:
@@ -897,14 +984,33 @@ def current_generation() -> int:
     return CHAIN_GENERATION.get() or 0
 
 
-def enter_task_run() -> None:
-    """Reset the per-run control state a handler owns at a task boundary.
+@dataclass(frozen=True)
+class ChainPosition:
+    """Where in a `respawn` chain the code now running stands. The default is outside any chain."""
 
-    Called by both interpreters at the top of `run`. One function so the two cannot drift, and
-    named for the boundary rather than the variable so the next piece of per-run state has an
-    obvious home."""
-    CHAIN_DEPTH.set(0)
-    CHAIN_GENERATION.set(None)
+    depth: int = 0
+    generation: int | None = None
+
+    @classmethod
+    def current(cls) -> ChainPosition:
+        return cls(CHAIN_DEPTH.get(), CHAIN_GENERATION.get())
+
+
+@contextmanager
+def chain_held(at: ChainPosition) -> Iterator[None]:
+    """Hold the chain state at `at` for the block, and restore the caller's state after it.
+
+    | entered by                | at                                    |
+    |---------------------------|---------------------------------------|
+    | every walk's run          | `ChainPosition()`, a task run's start |
+    | a recorder's resumed park | the position the run parked at        |
+    """
+    depth, generation = CHAIN_DEPTH.set(at.depth), CHAIN_GENERATION.set(at.generation)
+    try:
+        yield
+    finally:
+        CHAIN_GENERATION.reset(generation)
+        CHAIN_DEPTH.reset(depth)
 
 
 def refuse_nested_respawn(task: str) -> Never:
@@ -1113,14 +1219,20 @@ def _leading_tag(name: str) -> str | None:
         return None
 
 
-def event_name(name: str | Key) -> Key:
+def _framed(name: Key) -> bool:
+    """Whether a key puts frames before its name: more than one term, led by no authority tag."""
+    return len(name.terms()) > 1 and name.structure().tags[0] not in RESERVED_AUTHORITY_TAGS
+
+
+def event_name(name: str | Key, addressing: Addressing = Addressing.RELATIVE) -> Key:
     """The `Key` an await parks on, built from an author's name: the await axis's `op_key`.
 
     ==========================================  ================================
     `name`                                      the await
     ==========================================  ================================
     a `Key` leading with an op arm              refused: `OpIdentityAwaited`
-    a parsed `Key` in a reserved namespace      refused: `ReservedEventName`
+    a parsed `Key` with a reserved term         refused: `ReservedEventName`
+    a relative `Key` framing another term       refused: `FramedEventName`
     any other `Key`                             parks on it
     text leading with an op arm                 refused: `OpIdentityAwaited`
     text in a reserved namespace                refused: `ReservedEventName`
@@ -1132,7 +1244,10 @@ def event_name(name: str | Key) -> Key:
     across the queue. So an author's await in the `approve` namespace would park beside the human
     tier's parks and could consume an approval meant for that gate; the reserved namespaces are
     refused by name for that reason. The substrate's own parks pass a composed `Key`, which
-    carries the `Scope` its `AuthorityTag` gave it, and `Key.parse` attaches none."""
+    carries the `Scope` its `AuthorityTag` gave it, and `Key.parse` attaches none.
+
+    A relative await's handler adds the frames around it, so its own name is one term; an
+    absolute await names another task's wire address as written, frames included."""
     # A decision table over the name's type and shape; the arms run in order.
     match name:
         # An op identity first, for text too: `event;review:m1` would otherwise be refused as
@@ -1141,8 +1256,12 @@ def event_name(name: str | Key) -> Key:
             raise OpIdentityAwaited(name.stored())
         # A substrate park carries the `Scope` its `AuthorityTag` gave it; `Key.parse` attaches
         # none, so an unscoped authority key was read rather than composed.
-        case Key(scope=None) if _leading_tag(name.stored()) in RESERVED_AUTHORITY_TAGS:
+        case Key(scope=None) if set(name.structure().tags) & set(RESERVED_AUTHORITY_TAGS):
             raise ReservedEventName(name.stored(), parsed=True)
+        # A substrate park leads with its authority tag, which no author key can carry, and
+        # may frame what it settles (`approve;step;tool:x`, `fork:r2;review:m1`).
+        case Key() if addressing is Addressing.RELATIVE and _framed(name):
+            raise FramedEventName(name.stored())
         # A scoped authority name and an occurrence of one, such as
         # `depth_grant_name(...).occurrence(2)`, are the substrate's own parks.
         case Key():

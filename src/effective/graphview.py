@@ -208,10 +208,10 @@ def bare_name(key: str) -> str:
     **A walk that peels one term at a time, to a fixed point.** `unframed` returns from the
     EARLIEST boundary starting a known tag, so `gather:0,0;rec:0;ledger;x:1` comes back whole: a
     single strip would leave a ledger node reported as kind `step`, and a collision
-    `ledger_collisions` could not see. And `unframed` LEAPS: from `rec:0;step;ledger;dup:m1` it
-    jumps straight to `ledger;dup:m1`, reading past the `step` arm that `grammar.STEP_ARM` says no
-    structural rule may read past, which would report two runs of one author-named step as a lost
-    ledger row. A walk that peels one term cannot leap.
+    `ledger_collisions` could not see. And `unframed` LEAPS: from `rec:0;step;llm;ledger;dup:m1`
+    it jumps straight to `ledger;dup:m1`, reading past the `step` arm that `grammar.STEP_ARM` says
+    no structural rule may read past, which would report two runs of one author-named step as a
+    lost ledger row. A walk that peels one term cannot leap.
 
     Named and shared because two callers need this exact normalization and a second spelling is how
     the drift starts: `kind_of` asks *what kind of node is this*, `ledger_collisions` asks *is this
@@ -366,9 +366,9 @@ class RunGraph:
 
     **Innermost, because every op carries an arm and every arm binds any payload.** `op_key` puts
     `step;`/`ledger;`/`event;` on the front, each registered as a trailing splice, so "some variant
-    decoded this" is true of every recorded key whatever sits behind it. `step;myown:3` is the case
-    that matters: a namespace nobody registered, carrying an integer coordinate that declares no
-    role, under an arm that decodes.
+    decoded this" is true of every recorded key whatever sits behind it. `step;llm;myown:3` is the
+    case that matters: a namespace nobody registered, carrying an integer coordinate that declares
+    no role, under an arm that decodes.
 
     Empty on a tape whose ops the substrate minted and whose payloads it registered, which is the
     ordinary case. Non-empty names a domain the map has not been told about."""
@@ -654,8 +654,8 @@ def axes(graph: RunGraph) -> dict[tuple[str, ...], frozenset[Column]]:
       collapsing one while keeping the other reduces nothing, which is the shape that made a
       lane's tag need a ruling at all: its ident is in bijection with its gather branch.
       A column merely *determined by* a dropped one survives, which is what keeps
-      `step;score:systems` and `step;score:story` two nodes: branch determines the rubric, but a
-      rubric does not determine the branch.
+      `rubric:systems;step;llm:score` and `rubric:story;step;llm:score` two nodes: branch
+      determines the rubric, but a rubric does not determine the branch.
     - **A constant is not an axis.** Nothing unrolls, and two constant columns are trivially
       mutually determining — so without this every column collapses whenever a tape has one row.
 
@@ -1107,12 +1107,10 @@ def to_text(graph: RunGraph, *, title: str | None = None) -> str:
     A machine run draws its own trajectory — `d:N` around `state:NAME` around the steps — and
     a flat tape draws a flat list, which is the honest picture of a ReAct loop.
 
-    **Hand-rendered, with no dependency, and that is a choice rather than an omission.** `rich`
-    has a `Tree`, and reaching for it here would put a library that arrives as a dev-group
-    transitive of an example (`code-agent` -> `typer` -> `rich`, imported nowhere in this repo)
-    inside the lean-deps half of the public seam. `to_mermaid` is the precedent: a projection
-    writes its own text. The box-drawing characters assume Unicode, which the design ruling
-    already grants — *"we are not targeting old vt100s"*.
+    **Hand-rendered, with no dependency.** `rich` has a `Tree`, and it arrives only with the
+    `tui` extra, outside the lean-deps half of the public seam. `to_mermaid` is the precedent: a
+    projection writes its own text. The box-drawing characters assume Unicode, which the design
+    ruling already grants: *"we are not targeting old vt100s"*.
 
     **Each level sorts by `order`, which is the whole reason that field exists.** A tree groups by
     containment, so without it the frameless postamble of a machine run hoists to the top of its

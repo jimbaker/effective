@@ -8,18 +8,11 @@ Runs *inside* an Absurd task (``def task(params, ctx): ...``) and maps:
     StoreArtifact    -> ctx.step("artifact:<ct>:<digest>", ...)  content-addressed
     SleepUntil       -> ctx.sleep_until(when)
 
-Every ``ctx.step`` checkpoint name is ``op_key(op)`` (``handlers/base``), the same producer the
-recording/replay core uses, so at a name's **first occurrence** the durable key and the
-replay-trace key for one op are the same string by construction. (A ``Step`` keeps its bare
-author name; the other arms carry their reserved tag, and a Step name that lands in a reserved
-namespace is rejected by ``op_key``.)
-
-**Occurrences:** the walk counts a repeated name (``DurableHandler._place``) and hands the engine
-``name#2``, which the engine checkpoints at exactly that name. The recording core is
-**positional** (no suffix; a re-yielded name re-serves the first occurrence's canned value). So
-the same-string guarantee holds for first occurrences, and at occurrence 2 and above the two
-sides diverge by construction: a *named* divergence, which the bridges normalize through
-``grammar.split_occurrence`` for ``measured_drive``'s positional keying.
+Every ``ctx.step`` checkpoint name is ``op_key(op)`` (``handlers/base``) at its occurrence, the
+same key the recording and replay walks record, so for an op the workflow yields the durable key
+and the replay-trace key are the same string. An op a layer injects is placed on the durable walk
+alone. Every walk counts a repeated key on its
+``FramePosition`` and places the n-th at ``key#n``; the engine checkpoints at exactly that name.
 
 Absurd checkpoints are JSON, so a step result round-trips through ``dict``.
 Serde is managed by Pydantic: every value is dumped to JSON-able data with
@@ -1443,9 +1436,6 @@ class DurableHandler:
         # scope frames between the branch root and the await would be silently dropped from the
         # re-armed name, and the run would park on a name no emitter can produce.
         self._scope_path = ""
-        # Per-execution occurrence counts for `_place`, the one minter of `#N`. Rebuilt per
-        # attempt, so it re-derives from the workflow's deterministic yield order on replay.
-        self._placements: dict[Key, int] = {}
         # What the walk op now running its layers has placed, so a re-forward is placed alike.
         self._reforwards: _Reforwards | None = None
         # Race admission (`effective.handlers.admission`). Every one of these is read only when
@@ -1504,7 +1494,7 @@ class DurableHandler:
         #
         # **This is the one place the two halves come apart**, which is why the branch path does
         # not use `walk_run()`: a branch enters a fresh layer SCOPE (its own dict, no
-        # cross-branch interference) but must NOT re-enter the RUN (`enter_task_run` would reset
+        # cross-branch interference) but must NOT re-enter the RUN (`chain_held` would reset
         # chain state mid-run). Per-RUN versus per-FRAME, stated once by this branch.
         if self._in_gather:
             with run_scope():
@@ -1887,7 +1877,8 @@ class DurableHandler:
     def _place(self, op: WorkflowOp) -> Key:
         """The op's full address: the ctx's frames, its placed key, and an occurrence.
 
-        A step's occurrence is minted here and nowhere else. `_step_name` hands the engine this
+        A step's occurrence is minted here, by the counter every walk places through
+        (`FramePosition.place`). `_step_name` hands the engine this
         placement in the ctx's coordinates, and the engine checkpoints at exactly that name, so a
         span, a `Writer` and the checkpoint carry one address. The Absurd SDK still numbers an
         await's or a sleep's name itself; the walk keeps those unique by position and by
@@ -1915,11 +1906,10 @@ class DurableHandler:
         reforwards = self._reforwards
         if reforwards is not None and (replayed := reforwards.replayed(placed)) is not None:
             return placed.occurrence(replayed)
-        count = self._placements.get(placed, 0) + 1
-        self._placements[placed] = count
+        here = self._position.place(placed)
         if reforwards is not None:
-            reforwards.counted(placed, count)
-        return placed.occurrence(count)
+            reforwards.counted(placed, here.structure().occurrence or 1)
+        return here
 
     def _handle(self, op: WorkflowOp) -> Any:
         match op:

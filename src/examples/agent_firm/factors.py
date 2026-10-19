@@ -28,7 +28,7 @@ from .knowledge import Pinned
 from .manifest import Manifest
 from .resolve import ASKED, RULED
 
-MODEL_STEPS = frozenset(step_key(name).stored() for name in ("explain", "engage"))
+MODEL_STEPS = frozenset(step_key(name, "llm").stored() for name in ("explain", "engage"))
 """The steps at which the firm asks a model: its proposer, and its critic."""
 
 

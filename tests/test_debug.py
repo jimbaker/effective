@@ -14,6 +14,8 @@ Proofs:
 import json
 from types import SimpleNamespace
 
+from _steps import called_step, placed_step
+
 from agent.debug import (
     ApplyResult,
     DebugResult,
@@ -140,23 +142,23 @@ def _canned_one_pass() -> dict:
     """seed (fail) -> propose fix -> score (pass): the op stream of a one-round fix."""
     return {
         "seed;tool:run_tests": TestReport(passed=False, summary="add(2,3)=-1, expected 5"),
-        "seed;tool:quality": QualityReport(score=1.0),
+        "seed;tool:check_quality": QualityReport(score=1.0),
         "gen:0;tool:read_file": BUGGY,
-        "gen:0;react:edit": Edit(path="calc.py", old="return a - b", new="return a + b"),
+        "gen:0;edit": Edit(path="calc.py", old="return a - b", new="return a + b"),
         "gen:0;tool:apply_edit": ApplyResult(ok=True, detail="applied to calc.py"),
         "cand:0,0;tool:run_tests": TestReport(passed=True),
-        "cand:0,0;tool:quality": QualityReport(score=1.0),
+        "cand:0,0;tool:check_quality": QualityReport(score=1.0),
     }
 
 
 CANNED_TRACE = [
-    "seed;step;tool:run_tests",
-    "seed;step;tool:quality",
-    "gen:0;step;tool:read_file",
-    "gen:0;step;react:edit",
-    "gen:0;step;tool:apply_edit",
-    "cand:0,0;step;tool:run_tests",
-    "cand:0,0;step;tool:quality",
+    called_step("run_tests", "seed;"),
+    called_step("check_quality", "seed;"),
+    called_step("read_file", "gen:0;"),
+    placed_step("edit", "llm", "gen:0;"),
+    called_step("apply_edit", "gen:0;"),
+    called_step("run_tests", "cand:0,0;"),
+    called_step("check_quality", "cand:0,0;"),
 ]
 
 

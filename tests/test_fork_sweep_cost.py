@@ -36,19 +36,21 @@ cross-engine property.
 """
 
 import json
+from functools import partial
 from uuid import UUID
 
 import pytest
+from _steps import placed_step
 from pydantic_core import to_jsonable_python
 from test_fork_sweep import new_message_id
 
-from effective.api import append_ledger, ask_llm, await_event
+from effective.api import append_ledger, ask_llm, await_event, scoped
 from effective.checkpoints import read_sqlite_conn
 from effective.cost import Usage, marked
 from effective.engines.sqlite import SqliteApp, SqliteLedger
 from effective.fork import fork_seed, run_fork
 from effective.handlers.durable import DurableHandler, fork_event_name
-from effective.keys import Segment, Subject, compose_key
+from effective.keys import Index, Segment, Subject, compose_key
 from effective.ops import LedgerRow
 from effective.sql import bind
 
@@ -62,7 +64,9 @@ def _wf(prefix_ops: int):
 
     def workflow(message_id: str):
         for i in range(prefix_ops):
-            yield from ask_llm(f"extract{i}", [], dict)
+            yield from scoped(
+                compose_key(t"prefix:{Index(i)}"), partial(ask_llm, "extract", [], dict)
+            )
         yield from append_ledger(
             LedgerRow(event_id=compose_key(t"extracted:{Segment(message_id)}"), kind="extracted")
         )
@@ -91,10 +95,9 @@ class _Dom:
 
 def _seeded_cost(app: SqliteApp, task_id: UUID) -> tuple[int, int]:
     """(rows, bytes of `state`) for one child's SEEDED prefix rows — the copy it pays for."""
+    extracts = "%" + placed_step("extract", "llm")
     rows = app.conn.execute(
-        *bind(
-            t"SELECT state FROM checkpoints WHERE task_id={task_id} AND name LIKE 'step:extract%'"
-        )
+        *bind(t"SELECT state FROM checkpoints WHERE task_id={task_id} AND name LIKE {extracts}")
     ).fetchall()
     return len(rows), sum(len(state or "") for (state,) in rows)
 

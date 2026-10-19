@@ -2,13 +2,13 @@
 
 import io
 import json
-from string.templatelib import Template
 from typing import get_args
 
 import pytest
+from _steps import placed_step
 
 from effective.cost import Usage
-from effective.keys import compose_key
+from effective.keys import Key, compose_key
 from effective.telemetry import (
     _LEVELS,
     _OPERATION,
@@ -332,18 +332,22 @@ def test_the_capture_guard_covers_the_whole_emitted_line():
 # --- the producer: spans -> the mapping `from_keys(telemetry=…)` takes -------------------------
 
 
-def _measured_tool(key: Template, *, ns: int) -> Span:
-    return Span(name="tool.t.0", kind="TOOL", session_id="s", duration_ns=ns, key=compose_key(key))
+ASKED = Key.parse(placed_step("a", "llm"))
+TOOL_A, TOOL_B = (Key.parse(placed_step(name, "tool")) for name in ("a", "b"))
 
 
-def _measured_llm(key: Template, *, ns: int, usd: float) -> Span:
+def _measured_tool(key: Key, *, ns: int) -> Span:
+    return Span(name="tool.t.0", kind="TOOL", session_id="s", duration_ns=ns, key=key)
+
+
+def _measured_llm(key: Key, *, ns: int, usd: float) -> Span:
     return Span(
         name="LM.0",
         kind="LLM",
         session_id="s",
         duration_ns=ns,
         usage_attributes=Usage(cost=usd).as_attributes(),
-        key=compose_key(key),
+        key=key,
     )
 
 
@@ -351,17 +355,17 @@ def test_measurements_sum_over_the_several_spans_one_op_can_yield():
     """One op can span more than once — each retry attempt does — so a node's figure is what that
     POSITION cost, retries included. Overwriting would silently report only the last attempt."""
     m = measurements(
-        [_measured_llm(t"step;a", ns=100, usd=0.01), _measured_llm(t"step;a", ns=250, usd=0.02)]
+        [_measured_llm(ASKED, ns=100, usd=0.01), _measured_llm(ASKED, ns=250, usd=0.02)]
     )
 
-    assert m == {"step;a": (pytest.approx(0.03), 350)}
+    assert m == {ASKED.stored(): (pytest.approx(0.03), 350)}
 
 
 def test_a_tool_span_reports_a_duration_and_no_cost():
     """`effective.cost.usd` rides in `Usage.as_attributes()`, which only an `AskLLM` span
     carries. The cost must stay `None` and NOT become `0.0` — `0.0` reads as "this node was free",
     which is the lie `Node.cost` stopped telling when it stopped being a `float`."""
-    (cost, duration) = measurements([_measured_tool(t"step;tool:a", ns=42)])["step;tool:a"]
+    (cost, duration) = measurements([_measured_tool(TOOL_A, ns=42)])[TOOL_A.stored()]
 
     assert cost is None
     assert duration == 42
@@ -369,9 +373,9 @@ def test_a_tool_span_reports_a_duration_and_no_cost():
 
 def test_a_mixed_key_keeps_the_cost_it_has():
     """A key whose spans are part measured and part not reports the measured part, not `None`."""
-    m = measurements([_measured_tool(t"step;a", ns=10), _measured_llm(t"step;a", ns=5, usd=0.25)])
+    m = measurements([_measured_tool(ASKED, ns=10), _measured_llm(ASKED, ns=5, usd=0.25)])
 
-    assert m == {"step;a": (pytest.approx(0.25), 15)}
+    assert m == {ASKED.stored(): (pytest.approx(0.25), 15)}
 
 
 def test_a_keyless_span_is_dropped_rather_than_counted_somewhere():
@@ -384,9 +388,9 @@ def test_the_sidecar_reader_agrees_with_the_live_fold(tmp_path):
     """THE invariant: the two producers are the same measurement by two routes. A dashboard reads
     the sidecar and a benchmark holds the spans; if these ever disagree, one surface is lying."""
     spans = [
-        _measured_llm(t"step;a", ns=100, usd=0.01),
-        _measured_llm(t"step;a", ns=250, usd=0.02),  # the same op, a second attempt
-        _measured_tool(t"step;tool:b", ns=42),
+        _measured_llm(ASKED, ns=100, usd=0.01),
+        _measured_llm(ASKED, ns=250, usd=0.02),  # the same op, a second attempt
+        _measured_tool(TOOL_B, ns=42),
     ]
     path = tmp_path / "spans.jsonl"
     sink = otlp_jsonl_sink(path, clock=lambda: 1_700_000_000_000_000_000)
@@ -402,9 +406,9 @@ def test_a_sidecar_row_without_an_address_is_skipped(tmp_path):
     path = tmp_path / "spans.jsonl"
     sink = otlp_jsonl_sink(path, clock=lambda: 1_700_000_000_000_000_000)
     sink(Span(name="LM.0", kind="LLM", session_id="s", duration_ns=9))  # no key
-    sink(_measured_tool(t"step;tool:a", ns=42))
+    sink(_measured_tool(TOOL_A, ns=42))
 
-    assert sidecar_measurements(path) == {"step;tool:a": (None, 42)}
+    assert sidecar_measurements(path) == {TOOL_A.stored(): (None, 42)}
 
 
 def test_two_runs_in_one_sidecar_do_not_silently_sum(tmp_path):
@@ -449,7 +453,7 @@ def test_a_truncated_trailing_line_is_skipped_rather_than_raising(tmp_path):
     mid-line is an ordinary outcome rather than corruption.
 
     Raising here does not surface a data problem: it takes down whatever is reading, which in
-    practice is the dashboard's run page (`dashboard.py` re-reads per request) and `tape-check`.
+    practice is the dashboard's run page (`dashboard.py` re-reads per request).
     The rows already written are still true, so the last partial one is dropped and the rest are
     served.
 

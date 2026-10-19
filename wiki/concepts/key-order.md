@@ -69,6 +69,25 @@ the shape of attenuation's law, a child's permissions within its parent's, which
 algebra a candidate foundation for the authority algebra. No test pins `≤`, and no formal model
 states it.
 
+## A step's key names its kind
+
+`step_key` puts a step's op kind inside the `step` arm, so the kinds are regions of the order:
+`step;llm` covers every `AskLLM` step, `step;judge` every judgment, and neither covers a tool step.
+
+| the step's name | its key |
+|---|---|
+| an atom: `ask_llm("extract")`, `call_tool("search")`, `judge("triage")` | `step;llm:extract`, `step;tool:search`, `step;judge:triage` |
+| a minter's unnumbered `Key`: a ReAct turn, a spawn, an interrupt poll | `step;llm;react:turn`, `step;tool;spawn:child`, `step;tool;interrupt:pre` |
+| text holding key structure, or a `Key` carrying an occurrence | refused (`FormattedStepName`, `NumberedStepName`) |
+
+Context goes in a scope or a frame (`rec:3;step;llm:summarize`). A minter's tag is owned by one
+package, and `--key-registry` refuses a registered tag minted in a second one.
+
+**The limit.** An author's own composed `Key` passed as a step's name can borrow another minter's
+tag within its kind: `compose_key(t"react:turn")` in author code records `step;llm;react:turn`,
+a ReAct turn's key. The ownership check reads this tree's minters, so it proves Effective's own
+code never borrows a tag, and an author can still write one.
+
 ## Related
 
 [concepts/witness-quotient](witness-quotient.md) is the other place an equivalence over keys and

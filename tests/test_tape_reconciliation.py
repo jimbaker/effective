@@ -16,10 +16,12 @@ Both walks here are members of the tape-test family and return a `TapeVerdict`, 
 from typing import Any
 
 import pytest
+from _steps import placed_step
 
 from agent.tape_bank import bank_refusal
 from effective.domain import AskLLM
 from effective.layers import compose_domain
+from effective.react import react_key
 from effective.tape import (
     TapeVerdict,
     VacuousTape,
@@ -28,6 +30,15 @@ from effective.tape import (
     unmeasured_steps,
     wire_divergences,
 )
+
+
+def turn(depth: int, frames: str = "") -> str:
+    """The placed key of the ReAct turn at `depth`, under any enclosing `frames`."""
+    return placed_step(react_key("turn"), "llm", f"{frames}d:{depth};")
+
+
+EMITTER = placed_step("write", "llm")
+"""A channel call that is an `AskLLM` and not a ReAct turn."""
 
 
 class _K:
@@ -71,10 +82,10 @@ def test_a_faithful_replay_diverges_nowhere():
 
     Everything else reads ops replay re-minted, on the grounds that the prompt is a function of
     the tape. That is derived from determinism; this is what measures it."""
-    trace = [_turn("d:0;step;react:turn", "go"), _turn("d:1;step;react:turn", "go", "did a thing")]
+    trace = [_turn(turn(0), "go"), _turn(turn(1), "go", "did a thing")]
     wire = {
-        **_wire("d:0;step;react:turn", "go"),
-        **_wire("d:1;step;react:turn", "go", "did a thing"),
+        **_wire(turn(0), "go"),
+        **_wire(turn(1), "go", "did a thing"),
     }
     wire_divergences(trace, wire).require_clean(at_least=2)
 
@@ -82,8 +93,8 @@ def test_a_faithful_replay_diverges_nowhere():
 def test_a_changed_message_is_named_by_position():
     """A divergence says WHICH message, because "the transcripts differ" is not actionable on a
     nine-message turn."""
-    trace = [_turn("d:1;step;react:turn", "go", "did a thing")]
-    wire = _wire("d:1;step;react:turn", "go", "did something ELSE")
+    trace = [_turn(turn(1), "go", "did a thing")]
+    wire = _wire(turn(1), "go", "did something ELSE")
     verdict = wire_divergences(trace, wire)
     assert verdict.witnessed == 1
     assert [v.why for v in verdict.violations] == [
@@ -94,8 +105,8 @@ def test_a_changed_message_is_named_by_position():
 def test_a_dropped_message_is_reported_as_a_count():
     """Length and content are different failures. A prefix that was truncated on the wire is not
     "message 2 differs"; there is no message 2."""
-    trace = [_turn("d:1;step;react:turn", "go", "did a thing")]
-    wire = _wire("d:1;step;react:turn", "go")
+    trace = [_turn(turn(1), "go", "did a thing")]
+    wire = _wire(turn(1), "go")
     verdict = wire_divergences(trace, wire)
     assert [v.why for v in verdict.violations] == [
         "replay rebuilt 2 message(s), the wire recorded 1"
@@ -110,8 +121,8 @@ def test_an_emitter_is_not_compared_at_all():
     difference a defect — the same mistake that made the span sidecar unusable for the transcript
     property in the first place. So the emitter is out of scope by ADDRESS, and a wire entry for
     it cannot manufacture a violation."""
-    trace = [_turn("d:0;step;react:turn", "go"), _turn("step;write:0", "totally different")]
-    wire = {**_wire("d:0;step;react:turn", "go"), **_wire("step;write:0", "not this at all")}
+    trace = [_turn(turn(0), "go"), _turn(EMITTER, "totally different")]
+    wire = {**_wire(turn(0), "go"), **_wire(EMITTER, "not this at all")}
     verdict = wire_divergences(trace, wire)
     assert verdict.witnessed == 1  # the emitter was not counted, not merely forgiven
     assert verdict.violations == ()
@@ -122,8 +133,8 @@ def test_a_sidecar_from_another_run_is_vacuous_rather_than_clean():
 
     A sidecar whose keys do not match the tape compares nothing and returns no violations — which
     reads exactly like success. `witnessed` is what turns it into a loud failure instead."""
-    trace = [_turn("d:0;step;react:turn", "go")]
-    verdict = wire_divergences(trace, _wire("d:9;step;react:turn", "go"))
+    trace = [_turn(turn(0), "go")]
+    verdict = wire_divergences(trace, _wire(turn(9), "go"))
     assert verdict.violations == ()
     assert verdict.witnessed == 0
     with pytest.raises(VacuousTape):
@@ -134,10 +145,8 @@ def test_a_transcript_that_stops_being_a_message_list_goes_vacuous_not_green():
     """A shape guard that fails loudly. If a turn's messages become a `Template` or a dict, this
     walk cannot compare them — and the honest outcome is a vacuous verdict the caller's floor
     rejects, not a quiet pass."""
-    trace = [
-        _Entry("d:0;step;react:turn", AskLLM(messages={"prompt": "go"}, response_schema=dict))
-    ]
-    verdict = wire_divergences(trace, _wire("d:0;step;react:turn", "go"))
+    trace = [_Entry(turn(0), AskLLM(messages={"prompt": "go"}, response_schema=dict))]
+    verdict = wire_divergences(trace, _wire(turn(0), "go"))
     assert verdict.witnessed == 0
     with pytest.raises(VacuousTape):
         verdict.require_clean()
@@ -147,8 +156,8 @@ def test_a_transcript_that_stops_being_a_message_list_goes_vacuous_not_green():
 
 
 def test_every_step_measured_is_clean():
-    tape = ["d:0;step;react:turn", "d:0;step;tool:run", "ledger;commit:run-1"]
-    measured = ["d:0;step;react:turn", "d:0;step;tool:run"]
+    tape = [turn(0), "d:0;step;tool:run", "ledger;commit:run-1"]
+    measured = [turn(0), "d:0;step;tool:run"]
     unmeasured_steps(tape, measured).require_clean(at_least=2)
 
 
@@ -158,10 +167,10 @@ def test_a_step_with_no_span_is_a_defect():
     `traced` sits on the domain seam, so every `step` node had a domain op run under it. A step
     the telemetry never saw is either an unmetered model call — money spent that no cost report
     can show — or one op minting two different addresses, which is the join silently breaking."""
-    tape = ["d:0;step;react:turn", "d:1;step;react:turn"]
-    verdict = unmeasured_steps(tape, ["d:0;step;react:turn"])
+    tape = [turn(0), turn(1)]
+    verdict = unmeasured_steps(tape, [turn(0)])
     assert verdict.witnessed == 2
-    assert [v.where for v in verdict.violations] == ["d:1;step;react:turn"]
+    assert [v.where for v in verdict.violations] == [turn(1)]
 
 
 def test_ledger_artifact_sleep_and_await_nodes_are_excused_by_kind():
@@ -173,9 +182,9 @@ def test_ledger_artifact_sleep_and_await_nodes_are_excused_by_kind():
         "artifact:text/plain,sha256-bc6f2dfef7b413bd",
         "sleep:epoch-1787614493",
         "event;review:m1",
-        "d:0;step;react:turn",
+        turn(0),
     ]
-    verdict = unmeasured_steps(tape, ["d:0;step;react:turn"])
+    verdict = unmeasured_steps(tape, [turn(0)])
     assert verdict.violations == ()
     assert verdict.witnessed == 1  # only the step was ever a candidate
 
@@ -183,7 +192,7 @@ def test_ledger_artifact_sleep_and_await_nodes_are_excused_by_kind():
 def test_scope_frames_do_not_change_the_kind():
     """A step inside a state visit or a gather branch is still a step. `kind_of` strips frames
     first, which is why this walk asks it rather than reading the leading term."""
-    tape = ["visit:1;state:draft;d:2;step;react:turn", "gather:0,0;step;tool:x"]
+    tape = [turn(2, "visit:1;state:draft;"), "gather:0,0;step;tool:x"]
     verdict = unmeasured_steps(tape, [])
     assert verdict.witnessed == 2
     assert len(verdict.violations) == 2
@@ -201,24 +210,15 @@ def test_a_tape_of_no_steps_is_vacuous_rather_than_clean():
 
 
 def test_a_tape_that_violates_the_property_is_refused_not_stamped():
-    """The banker's claim about re-banking, made checkable.
-
-    Everywhere this tape is described — `tape.py`, `tape_bank.py`, `test_banked_tape.py`,
-    `bank_tape.py` — it is called an INPUT rather than a golden output, and re-banking is called
-    safe because a freshly banked tape that violates the property still fails. That is only true
-    if BANKING checks, and it did not: `bank()` computed the whole verdict, read `.witnessed` off
-    it for the census, and discarded the violations. A tape that failed the walk was stamped and
-    copied over the good one.
-
-    The census and the property are different questions — *is this worth walking?* and *did it
-    pass?* — and the first was standing in for both."""
-    failing = TapeVerdict((Violation("d:1;step;react:turn", "cannot see the action it chose"),), 5)
+    """Re-banking is safe because a fresh tape that violates the property is refused. The census
+    (*is this worth walking?*) and the walk (*did it pass?*) answer different questions."""
+    failing = TapeVerdict((Violation(turn(1), "cannot see the action it chose"),), 5)
 
     refusal = bank_refusal(failing, actions=7)
 
     assert refusal is not None
     assert "VIOLATES" in refusal
-    assert "d:1;step;react:turn" in refusal, "the refusal must name the site, not just the count"
+    assert turn(1) in refusal, "the refusal must name the site, not just the count"
 
 
 def test_a_clean_and_substantial_tape_is_banked():

@@ -80,6 +80,7 @@ from effective.handlers.durable import (
 from effective.handlers.replay import ReplayMismatch
 from effective.keys import FramePosition, Key, Segment, compose_key, frame_path
 from effective.ops import (
+    Addressing,
     AwaitEvent,
     Gather,
     Race,
@@ -202,8 +203,25 @@ class Delivery:
         return gen.throw(self.refusal) if self.refusal is not None else gen.send(self.value)
 
 
+class PrefixReplayDivergence(ReplayMismatch):
+    """The prefix's `index`-th op is placed at `placed`, where the trace holds `recorded`."""
+
+    def __init__(self, index: int, placed: str, recorded: str) -> None:
+        super().__init__(index, placed, recorded)
+        self.index = index
+        self.placed = placed
+        self.recorded = recorded
+
+    def __str__(self) -> str:
+        return f"prefix divergence at {self.index}: {self.placed!r} != {self.recorded!r}"
+
+
 def replay_prefix[T](
-    program: Callable[[], Effect[T]], trace: list[TraceEntry], at: OpIndex
+    program: Callable[[], Effect[T]],
+    trace: list[TraceEntry],
+    at: OpIndex,
+    *,
+    position: FramePosition | None = None,
 ) -> tuple[Any, Delivery]:
     """Drive `program()` through `trace[:at]`, feeding recorded results only (never the
     domain). Returns `(gen, next_send)` positioned so the next `gen.send(next_send)` yields
@@ -213,7 +231,9 @@ def replay_prefix[T](
     recorded entries (which carry the scope prefix, so the keys still match) and its return value
     is sent into the parent. What is refused is a fork point *inside* a scoped body — `at` would
     then name an op whose parent frame this function cannot hand back, since the body is a
-    sub-generator the driver runs rather than one the workflow `yield from`-ed."""
+    sub-generator the driver runs rather than one the workflow `yield from`-ed.
+
+    `position` is the walk's, handed on to a tail that continues it."""
     if not 0 <= at <= len(trace):
         raise ValueError(f"fork index {at} out of range [0, {len(trace)}]")
     gen = program()
@@ -222,17 +242,17 @@ def replay_prefix[T](
     # point. `at` stays the typed one — it is the caller's coordinate (the at-index convention).
     i = 0
     # This walk's positional ordinals, exactly as a handler keeps them: a replayed prefix has
-    # to re-derive the same `sleep:{n}` the record assigned, and it can only do that by counting
-    # the same way.
-    position = FramePosition()
+    # to re-derive the same `sleep:{n}` and `#n` the record assigned, and it can only do that by
+    # counting the same way.
+    position = FramePosition() if position is None else position
     while i < at:
         op = delivery.into(gen)
         if isinstance(op, Scoped):
             delivery, i = _replay_scoped(op, trace, i, at, prefix="", position=position)
             continue
         with placing(op, position):
-            if (actual := placed_key(op)) != trace[i].key:
-                raise ReplayMismatch(f"prefix divergence at {i}: {actual!r} != {trace[i].key!r}")
+            if (actual := position.place(placed_key(op))) != trace[i].key:
+                raise PrefixReplayDivergence(i, actual.stored(), trace[i].key.stored())
         delivery = Delivery.of(trace[i])
         i += 1
     return gen, delivery
@@ -267,10 +287,23 @@ def _replay_scoped(
             delivery, i = _replay_scoped(inner, trace, i, at, prefix=scope, position=position)
             continue
         with placing(inner, position):
-            if (actual := placed_key(inner).prefixed(scope)) != trace[i].key:
-                raise ReplayMismatch(f"prefix divergence at {i}: {actual!r} != {trace[i].key!r}")
+            if (actual := position.place(placed_key(inner).prefixed(scope))) != trace[i].key:
+                raise PrefixReplayDivergence(i, actual.stored(), trace[i].key.stored())
         delivery = Delivery.of(trace[i])
         i += 1
+
+
+class ForkPointDivergence(ReplayMismatch):
+    """The op at fork point `at` is placed at `placed`, where the record holds `recorded`."""
+
+    def __init__(self, at: int, placed: str, recorded: str) -> None:
+        super().__init__(at, placed, recorded)
+        self.at = at
+        self.placed = placed
+        self.recorded = recorded
+
+    def __str__(self) -> str:
+        return f"fork point {self.at}: {self.placed!r} != {self.recorded!r}"
 
 
 def fork_at[T](
@@ -286,7 +319,8 @@ def fork_at[T](
     """Fork `program` at op `at`, substituting `substitute` as that op's result, and run the
     tail live under `domain`. For a pending-park fork (`at == len(trace)`) pass `pending_name`
     (the parked event name) — there is no `trace[at]` to validate against."""
-    gen, delivery = replay_prefix(program, trace, at)
+    position = FramePosition()
+    gen, delivery = replay_prefix(program, trace, at, position=position)
     op = delivery.into(gen)  # the op AT `at` (the fork point) — consumed here, guarded below
     # The fork point must be a DECISION to substitute. Guard the op CLASS before the key check:
     # a fork AT a sleep, write or concurrent op is refused by class, and op_key is not defined for
@@ -313,15 +347,20 @@ def fork_at[T](
             )
         case _:
             raise ForkPointRefused(op)  # AppendLedgerRow / StoreArtifact — a write, not a decision
+    with placing(op, position):
+        asked = placed_key(op)
+        placed = position.place(asked)
     if at < len(trace):
-        expected = trace[at].key
+        expected, actual = trace[at].key, placed
     elif pending_name is not None:
-        expected = op_key(AwaitEvent(pending_name, object))  # `event:{pending_name}`
+        # the parked name is the wait name: a settlement namespace numbers it per ask, as
+        # `placing` does, and a plain name is shared by every ask
+        expected, actual = op_key(AwaitEvent(pending_name, object)), asked
     else:
         raise ValueError("pending-park fork (at == len(trace)) requires pending_name")
-    if op_key(op) != expected:
-        raise ReplayMismatch(f"fork point {at}: {op_key(op)!r} != {expected!r}")
-    return live_drive(gen, substitute, domain, grants or {})
+    if actual != expected:
+        raise ForkPointDivergence(at, actual.stored(), expected.stored())
+    return live_drive(gen, substitute, domain, grants or {}, position=position)
 
 
 def _as_placed(op: WorkflowOp) -> WorkflowOp:
@@ -336,6 +375,16 @@ def _as_placed(op: WorkflowOp) -> WorkflowOp:
             placed_await_name(op), op.schema, addressing=op.addressing, deadline=op.deadline
         )
     return op
+
+
+def _parked_on(op: WorkflowOp, name: Key, prefix: str) -> Key:
+    """The name a fork reports `op` parked on, as the engines park it: under its frames, unless
+    the await's name is absolute."""
+    match op:
+        case AwaitEvent(addressing=Addressing.ABSOLUTE):
+            return name
+        case _:
+            return name.prefixed(prefix)
 
 
 def _live_loop(
@@ -355,10 +404,10 @@ def _live_loop(
     `prefix` is the scope path this generator runs under, so a tail that enters a `scoped(...)`
     keys its ops exactly as the base run did. A park inside a scope ends the tail, as any park
     does — a fork tail is one-shot, so no parent frame has to survive it."""
-    # This driver's ordinals. It refuses `SleepUntil` (`ForkedSleep`), so it needs no positional
-    # coordinate, but an await's OCCURRENCE is one: the fork tail composes the same name the base
-    # run parked on. A scoped body is handed its parent's `position`, so a scope entered twice
-    # counts on.
+    # This driver's ordinals and occurrences. It refuses `SleepUntil` (`ForkedSleep`), so it
+    # needs no sleep ordinal, but it places every key at its occurrence, and an await's
+    # settlement occurrence is the name the base run parked on. A scoped body is handed its
+    # parent's `position`, so a scope entered twice counts on.
     position = FramePosition() if position is None else position
     tail = ForkTail()
     while True:
@@ -371,7 +420,8 @@ def _live_loop(
             case Step():
                 result, usage = _run_live(op, domain)
                 tail.usage = tail.usage + usage
-                tail.trace.append(TraceEntry(op_key(op).prefixed(prefix), op, result))
+                here = position.place(op_key(op).prefixed(prefix))
+                tail.trace.append(TraceEntry(here, op, result))
                 send = result
             case Scoped(scope=scope):
                 # Structure: drive the body under the extended path and splice its trace in.
@@ -398,12 +448,11 @@ def _live_loop(
                     probe = _as_placed(op)
                     match inspect_only(probe, grants):
                         case Unanswered(name=name):
-                            tail.parked_at = name.prefixed(prefix)
+                            tail.parked_at = _parked_on(op, name, prefix)
                             return tail
                         case Observed(value=value):
-                            tail.trace.append(
-                                TraceEntry(op_key(probe).prefixed(prefix), op, value)
-                            )
+                            here = position.place(op_key(probe).prefixed(prefix))
+                            tail.trace.append(TraceEntry(here, op, value))
                             send = value
                         case unreachable:
                             assert_never(unreachable)  # pragma: no cover - proven dead
@@ -416,6 +465,7 @@ def live_drive(
     grants: dict[Key, Any],
     *,
     prefix: str = "",
+    position: FramePosition | None = None,
 ) -> ForkTail:
     """Interpret a live tail, under the same per-run ambient every other walk establishes.
 
@@ -424,12 +474,15 @@ def live_drive(
     own, which is the opposite of per-run. `RecordingHandler.run` and `DurableHandler.run` have the
     same split for the same reason.
 
+    `position` is the walk the tail continues: a fork hands on its prefix's, so a key the prefix
+    placed once is placed at `#2` in the tail.
+
     A fork RE-RUNS the base workflow with one substitution, so a `layer_run_state` cell must
     accumulate here exactly as on the recording, replay and durable walks. A fork whose ambient
     does not accumulate diverges from the run it is a counterfactual OF, and the difference is
     attributed to the substitution."""
     with walk_run():
-        return _live_loop(gen, send, domain, grants, prefix=prefix)
+        return _live_loop(gen, send, domain, grants, prefix=prefix, position=position)
 
 
 # --- the MEASURED (dollars) fork -----------------------------------------------------
@@ -543,19 +596,32 @@ def _run_live(op: Step[Any], domain: MeteredDomain) -> tuple[Any, Usage]:
     return domain.run_metered(op.op)
 
 
+class PrefixDivergence(ReplayMismatch):
+    """A measured run's `index`-th step is placed at `key`, where its recorded prefix holds another
+    step."""
+
+    def __init__(self, index: int, key: str) -> None:
+        super().__init__(index, key)
+        self.index = index
+        self.key = key
+
+    def __str__(self) -> str:
+        return f"measured prefix divergence at {self.index}: {self.key}"
+
+
 def _step_result(
-    op: Step[Any], prefix: Sequence[MeteredEntry], i: int, domain: MeteredDomain
+    op: Step[Any], placed: Key, prefix: Sequence[MeteredEntry], i: int, domain: MeteredDomain
 ) -> tuple[Any, Usage, bool]:
     """One Step's result: replayed FREE from the prefix, or run live. Returns
     `(result, usage, ran_live)` so the caller folds the live-only meter separately.
 
     The prefix decode is placed AT THE OP, never by the bridge, which cannot know the op
-    class."""
+    class. `placed` is the step's key under its frames, which is what the prefix recorded."""
     if i >= len(prefix):
         return (*_run_live(op, domain), True)
     entry = prefix[i]
-    if entry.key != op_key(op):
-        raise ReplayMismatch(f"measured prefix divergence at {i}: {op_key(op)!r}")
+    if entry.key != placed:
+        raise PrefixDivergence(i, placed.stored())
     return (*decode_checkpoint(op.op, entry), False)
 
 
@@ -616,7 +682,9 @@ def measured_drive[T](
     # see `live_drive` for the finding and why a fork needs it more than it looks.
     with walk_run():
         state = run.drive(program(), None, _MeasuredState(), prefix_path="")
-    return MeasuredTail(state.trace, state.meter, state.live, state.result, state.tripped_at)
+    # A parked run has no result, though a scope it finished before parking left one in `state`.
+    result = None if state.tripped_at is not None else state.result
+    return MeasuredTail(state.trace, state.meter, state.live, result, state.tripped_at)
 
 
 @dataclass
@@ -690,26 +758,26 @@ class _MeasuredRun:
                         state.tripped_at = outcome.name
                         return state
                     state.granted, state.trips = outcome
+                    placed = position.place(op_key(op).prefixed(prefix_path))
                     result, usage, ran_live = _step_result(
-                        op, self.prefix, state.steps, self.domain
+                        op, placed, self.prefix, state.steps, self.domain
                     )
                     state.steps += 1
                     if ran_live:
                         state.live = state.live + usage
                     state.meter = state.meter + usage
-                    state.trace.append(Driven(op_key(op).prefixed(prefix_path), op, result, usage))
+                    state.trace.append(Driven(placed, op, result, usage))
                     send = result
                 case _:
                     with placing(op, position):
                         probe = _as_placed(op)
                         match inspect_only(probe, self.grants):
                             case Unanswered(name=name):
-                                state.tripped_at = name.prefixed(prefix_path)
+                                state.tripped_at = _parked_on(op, name, prefix_path)
                                 return state
                             case Observed(value=value):
-                                state.trace.append(
-                                    Driven(op_key(probe).prefixed(prefix_path), op, value, Usage())
-                                )
+                                here = position.place(op_key(probe).prefixed(prefix_path))
+                                state.trace.append(Driven(here, op, value, Usage()))
                                 send = value
                             case unreachable:
                                 assert_never(unreachable)  # pragma: no cover - proven dead

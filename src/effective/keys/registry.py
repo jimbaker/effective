@@ -602,10 +602,10 @@ class KeyMap:
         WHOLE ends it.
 
         **What the registry claims is the whole reach**, including behind `step;`, whose payload is
-        the author's own key. `step;code:action,3,run;tool:fetch` projects its action index
+        a step's kind and name. `step;tool;code:action,3,run;tool:fetch` projects its action index
         because `code:action,{},{};tool:{}` is a registered variant declaring that coordinate an
-        `Index` (`code._action_key`), so the substitution is the author's own declaration read
-        back. `step;myown:thing` and `step;ledger:x` come back whole. That is `STEP_ARM`'s rule
+        `Index` (`code._action_key`), so the substitution is the minter's own declaration read
+        back. `step;llm;myown:3` comes back whole. That is `STEP_ARM`'s rule
         holding rather than bending: it forbids a structural rule REFUSING on what an author put
         behind the arm, and a projection refuses nothing.
 
@@ -622,8 +622,9 @@ class KeyMap:
         terms = base.split(TERM_SEPARATOR)
         out: list[str] = []
         # The LAST segment decides, because frames are a prefix and the identity is the question.
-        # `task:t7;step;myown:3` has a claimed frame in front of a namespace nobody registered, and
-        # reporting the frame's answer would say the map ruled on a key it could not read.
+        # `task:t7;step;llm;myown:3` has a claimed frame in front of a namespace nobody
+        # registered, and reporting the frame's answer would say the map ruled on a key it could
+        # not read.
         claimed = False
         for index, term in enumerate(terms):
             rest = TERM_SEPARATOR.join(terms[index:])
@@ -681,8 +682,9 @@ class KeyMap:
         The flag is whether the map reached the INNERMOST key, which is the only reading that
         answers anything. Every op carries an arm (`op_key`), and every arm's variant is a
         trailing splice binding any payload at all, so "some variant decoded this" is true of
-        every recorded key whatever sits behind the arm: `step;myown:3` decodes as `step;{}` while
-        `myown:3` is a namespace nobody registered and its integer coordinate declares no role.
+        every recorded key whatever sits behind the arm: `step;llm;myown:3` decodes as `step;{}`
+        while `myown:3` is a namespace nobody registered and its integer coordinate declares no
+        role.
 
         Re-rendering keeps the projection from becoming a second reader of the grammar: the same
         `_render_skeleton` the registry labels shapes with puts the delimiters back.

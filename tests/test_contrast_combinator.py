@@ -10,6 +10,8 @@ wrong (the registered architectural claim)."""
 import re
 from typing import Any
 
+from _steps import placed_step
+
 from agent.contrastbench import (
     _PINNED_OUT,
     _PINNED_SCRIPTS,
@@ -23,7 +25,7 @@ from agent.contrastbench import (
     run_combinator,
 )
 from effective.api import scoped
-from effective.code import CodeOutcome
+from effective.code import CodeOutcome, _segment_key
 from effective.cost import Usage
 from effective.handlers.recording import RecordingHandler
 from effective.keys import Segment, compose_key
@@ -80,9 +82,9 @@ def test_combinator_wf_routes_on_the_recorded_label():
 
     assert handler.run(wf) == "7"
     assert [e.key.stored() for e in handler.trace] == [
-        "task:t0;step:classify",
-        "task:t0;step:extract",
-        "task:t0;step;code:seg,0,answer",
+        placed_step("classify", "llm", "task:t0;"),
+        placed_step("extract", "llm", "task:t0;"),
+        placed_step(_segment_key("answer", False, 0), "tool", "task:t0;"),
     ]
 
 

@@ -30,6 +30,7 @@ from uuid import uuid4
 from effective.cache import Cache, FileStore
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import Answers, AskLLM, CallTool, Judge
+from effective.handlers.base import step_key
 from effective.interpreters.jev import MODEL as JEV_MODEL
 from effective.interpreters.web import (
     FETCH_TOOL,
@@ -116,7 +117,12 @@ class Scored:
     misses: Mapping[str, int]
 
 
-ASKED = {"search": "tool:search", "fetch": "tool:fetch", "read": "step:read", "judgment": "judge:"}
+ASKED = {
+    "search": "tool:search",
+    "fetch": "tool:fetch",
+    "read": step_key("read", "llm").stored(),
+    "judgment": "judge:",
+}
 
 
 def replay(

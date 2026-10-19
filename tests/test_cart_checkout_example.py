@@ -12,6 +12,7 @@ address, replay. Everything is computed from `_cart.CART`, so adding a line chan
 import _cart as cart
 import pytest
 from _keymap import by_op, including
+from _steps import placed_step
 
 from effective.api import GatherBranch, qualified_event_name
 from effective.graphview import fold_cycles, from_keys
@@ -86,7 +87,9 @@ def test_the_tape_folds_back_into_the_program_and_replays():
     assert counts["gather:*,*;item:*;step;tool:wanted"] == n  # one lane per line...
     assert counts["gather:*,*;item:*;step;tool:stock"] == n
     assert counts["gather:*,*;item:*;step;tool:price"] == n
-    assert counts["gather:*,*;item:*;step:substitute"] == sum(item.short for item in cart.CART)
+    assert counts["gather:*,*;item:*;" + placed_step("substitute", "llm")] == sum(
+        item.short for item in cart.CART
+    )
     assert by_op(program)[f"event;swap:{cart.ORDER_ID}"] == sum(item.asks for item in cart.CART)
     assert program.executions == len(tape)  # fewer nodes, never fewer facts
 

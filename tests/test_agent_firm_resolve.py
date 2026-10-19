@@ -42,6 +42,7 @@ from pydantic import ValidationError
 
 from effective.api import gather
 from effective.cost import FORMAT_PARAM, Usage
+from effective.domain import OpKind
 from effective.govern import (
     Ask,
     GateState,
@@ -913,9 +914,9 @@ def test_the_critique_parts_the_run_at_engage_and_nowhere_before(backend):
     assert (uncited.asked_at_park, _entries(uncited_firm)) == (None, [])
 
 
-def _level(loop: str, name: str, level: int) -> Key:
-    """Where `loop`'s step `name` runs at `level`."""
-    step = step_key(name)
+def _level(loop: str, name: str, level: int, kind: OpKind) -> Key:
+    """Where `loop`'s step `name`, of op kind `kind`, runs at `level`."""
+    step = step_key(name, kind)
     # lint: terminal-hole — `step` is the `Key` `step_key` mints.
     return compose_key(t"{Tag(loop)}:{Name(name)};d:{Index(level)};{step:domain=identity}")
 
@@ -926,7 +927,11 @@ def test_each_repair_and_retry_is_a_level_of_its_own_scope(backend):
     firm.world.critic = lambda op: (CritiqueWire.model_validate(next(critiques)), Usage())
     run = _resolved(backend, firm)
     looped = [key for key in _keys(backend, run) if "engage" in key or REMIND in key]
-    expected = [("repair", "engage", 0), ("repair", "engage", 1), ("retry", REMIND, 0)]
+    expected: list[tuple[str, str, int, OpKind]] = [
+        ("repair", "engage", 0, "llm"),
+        ("repair", "engage", 1, "llm"),
+        ("retry", REMIND, 0, "tool"),
+    ]
     assert looped == [_level(*at).stored() for at in expected]
 
 

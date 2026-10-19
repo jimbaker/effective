@@ -123,7 +123,8 @@ def turn_kind(key: str) -> TurnKind:
 
     The grammar answers it as a field read. `react:compact` is a `react` term whose FIRST
     COORDINATE is `compact` — a fact about arity and position, which is exactly what a substring
-    test cannot see and why `react:` needed a second string operation to disambiguate.
+    test cannot see and why `react:` needed a second string operation to disambiguate. The two
+    terms before it are the step arm and its kind, `llm`: a turn is a model call's step.
 
     An unparseable key is `OTHER`: a foreign or malformed address is certainly not one of our
     ReAct turns, and refusing to guess is cheaper than a heuristic here."""
@@ -131,7 +132,7 @@ def turn_kind(key: str) -> TurnKind:
         terms = parse(key).terms
     except KeySyntaxError:
         return TurnKind.OTHER
-    if not terms or terms[-1].tag != "react":
+    if [term.tag for term in terms[-3:]] != ["step", "llm", "react"]:
         return TurnKind.OTHER
     coordinates = terms[-1].coordinates
     if coordinates and coordinates[0].atoms[0].text == "compact":

@@ -9,6 +9,7 @@ engines.
 
 from collections.abc import Callable, Mapping
 from enum import StrEnum
+from functools import partial
 from typing import Any
 from uuid import uuid4
 
@@ -21,7 +22,7 @@ from effective.combinators import Grant
 from effective.cost import MeteredInterpreter, Usage
 from effective.govern import REFUSALS, ChildRefused
 from effective.handlers.recording import RecordingHandler
-from effective.keys import Name, Run, compose_key
+from effective.keys import Index, Name, Run, compose_key
 from effective.machine.evidence import CommandRun
 from effective.machine.outcomes import Exhausted, Finish, Outcome, Park, ParkReason
 from effective.machine.spec import Ctx, Evidence, Report, StateSpec
@@ -60,7 +61,7 @@ def spending(ctx: Ctx[Step]) -> Effect[Report[Said]]:
     note = compose_key(t"note:{Name('spent')},{Name(ctx.run_id)}")
     yield from append_ledger(LedgerRow(event_id=note, kind="noted"))
     for n in range(ASKS):
-        yield from ask_llm(f"ask-{n}", "spend", str)
+        yield from scoped(compose_key(t"ask:{Index(n)}"), partial(ask_llm, "ask", "spend", str))
     return Report(Said.DONE, summary="spent")
 
 
@@ -86,7 +87,9 @@ def writing(_ctx: Ctx[Step]) -> Effect[Evidence]:
 def spending_judge(_ctx: Ctx[Step], _evidence: Evidence) -> Effect[Said]:
     """Asks until the budget refuses, after its worker has returned."""
     for n in range(ASKS):
-        yield from ask_llm(f"judge-{n}", "spend", str)
+        yield from scoped(
+            compose_key(t"judge:{Index(n)}"), partial(ask_llm, "judge", "spend", str)
+        )
     return Said.DONE
 
 

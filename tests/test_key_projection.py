@@ -11,8 +11,11 @@ from functools import partial
 from itertools import pairwise
 
 import pytest
+from _steps import placed_step
 
+from effective.code import _action_key
 from effective.graphview import fold_cycles, from_keys, project, regroup
+from effective.handlers.base import step_key
 from effective.keys import Index, Name, Ordinal, Run, Subject
 from effective.keys.grammar import (
     PROJECTION_SIGIL,
@@ -21,6 +24,7 @@ from effective.keys.grammar import (
     parse,
 )
 from effective.keys.registry import KeyMap, _foreign_tail, _project_tail, _wrapped_payload
+from effective.ops import CompositionRefused
 
 pytestmark = pytest.mark.adversarial
 
@@ -141,7 +145,7 @@ def test_two_straight_line_sleeps_do_not_fold_into_a_cycle(keymap):
     `sleep -> a -> sleep -> b`, which reports a loop over a tape that has none. `Ordinal` keeps
     the fold from inventing that fact: a projection may hide what the record holds, never add to
     it."""
-    tape = ["sleep:0", "step:a", "sleep:1", "step:b"]
+    tape = ["sleep:0", placed_step("a", "tool"), "sleep:1", placed_step("b", "tool")]
 
     def position(key: str) -> str:
         return keymap.project(key, drop=(Index,)).display()
@@ -192,16 +196,6 @@ def test_the_map_is_found_from_the_module_not_from_the_shell():
     assert int(done.stdout) > 0
 
 
-def _step(tag: str, coordinate: str) -> str:
-    """The key an author's `step("<tag>:<coordinate>")` mints, composed rather than spelled."""
-    from effective.domain import CallTool
-    from effective.handlers.base import op_key
-    from effective.ops import Step
-
-    name = TAG_SEPARATOR.join((tag, coordinate))
-    return op_key(Step(name=name, op=CallTool(name="t", args={}, result_schema=str))).stored()
-
-
 def _folds_behind_the_arm(keymap: KeyMap) -> list[str]:
     """Every `tag:{}` variant declaring `Index`, which is the family an author's step name can
     collide with. Derived, so a new one joins the pin instead of the blind spot."""
@@ -213,34 +207,27 @@ def _folds_behind_the_arm(keymap: KeyMap) -> list[str]:
     )
 
 
-def test_an_authors_step_name_is_read_through_whatever_shape_it_fits(keymap):
-    """CHOSEN, not inherited, and the ruling on step payload provenance is owed.
+def test_an_authors_step_name_cannot_take_a_registered_shape(keymap):
+    """An author's step name is an atom, so no step can mint a key that reads as a substrate tag.
 
-    A projection reads behind the `step;` arm because it must. A code run's action index travels
-    there as author text (`code:action,{},{};tool:{}` under `step;`), so a walk that stopped at the
-    arm would make the substrate's own coordinate invisible.
-
-    The cost is that a shape match stands in for provenance: an author's two differently-named
-    steps merge, and the graph reports a cycle over a tape that has none. Parameterized over the
-    DERIVED family rather than over the one example that found it, so a new single-hole `Index`
-    tag reddens this instead of joining the blast radius unremarked."""
-    from effective.graphview import fold_cycles, from_keys
-
+    A name spelled `<tag>:<coordinate>` would put author text where a projection reads a
+    registered `Index`, and two differently named steps would merge into a cycle over a straight
+    line. Parameterized over the DERIVED family, so a new single-hole `Index` tag joins the pin."""
     family = _folds_behind_the_arm(keymap)
     assert family, "vacuous: no single-hole Index variant, so this pins nothing"
     for tag in family:
-        # Through `op_key`, so the witness is a key an author's `step(...)` really mints.
-        names = [_step(tag, "alpha"), _step(tag, "beta")]
-        folded = fold_cycles(from_keys("r1", names))
-        assert [n.count for n in folded.nodes] == [2], tag
-        assert folded.nodes[0].key == keymap.project(names[0], drop=(Index,)).display(), tag
-        assert folded.cyclic is True, tag  # over a straight line, which is the harm
+        with pytest.raises(CompositionRefused):
+            step_key(TAG_SEPARATOR.join((tag, "alpha")), "tool")
 
-    # The one that is read correctly, because the author IS the registered site.
-    actions = ["step;code:action,0,run;tool:fetch", "step;code:action,1,run;tool:fetch"]
+
+def test_a_projection_reads_behind_the_step_arm(keymap):
+    """A projection reads behind the `step;` arm because it must: a code run's action index
+    travels there, so a walk that stopped at the arm would make the substrate's own coordinate
+    invisible."""
+    actions = [placed_step(_action_key("run", False, j, "fetch"), "tool") for j in (0, 1)]
     folded_actions = fold_cycles(from_keys("r1", actions))
     assert [(n.key, n.count) for n in folded_actions.nodes] == [
-        ("step;code:action,*,run;tool:fetch", 2)
+        (actions[0].replace(",0,", "," + PROJECTION_SIGIL + ","), 2)
     ]
 
     # And a step whose name no variant fits is left alone and named as unread.
@@ -292,8 +279,10 @@ def test_an_optional_left_out_stays_out(keymap):
 def test_an_unclaimed_term_does_not_hide_the_terms_behind_it(keymap):
     """`rank:` is a fixture's own tag; the `gather:` and `rec:` coordinates behind it are the
     substrate's, and a tag this map was never told about is no reason to stop reading."""
-    projected = keymap.project("rank;gather:0,0;rec:0;step:shortlist", drop=(Index,))
-    assert projected.display() == "rank;gather:*,*;rec:*;step:shortlist"
+    projected = keymap.project(
+        placed_step("shortlist", "llm", "rank;gather:0,0;rec:0;"), drop=(Index,)
+    )
+    assert projected.display() == "rank;gather:*,*;rec:*;" + placed_step("shortlist", "llm")
 
 
 def test_a_key_the_grammar_refuses_still_projects_its_claimed_frames(keymap):
@@ -455,12 +444,14 @@ def test_the_two_peel_readers_cannot_disagree_about_what_projects(keymap):
     )
 
 
+ACTION_0 = placed_step(_action_key("run", False, 0, "fetch"), "tool")
+
 ARM_LED = (
     ("an arm over a namespace nobody registered", "step;myown:3", "step;myown:3", False),
     (
         "an arm over one the substrate mints",
-        "step;code:action,0,run;tool:fetch",
-        "step;code:action,*,run;tool:fetch",
+        ACTION_0,
+        ACTION_0.replace(",0,", "," + PROJECTION_SIGIL + ","),
         True,
     ),
     (

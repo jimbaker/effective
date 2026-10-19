@@ -6,14 +6,15 @@ free-prefix / poison proof, the `probe ≪ grant` shape, and `live_drive` foldin
 """
 
 import pytest
+from _steps import called_step, placed_step
 
-from effective.api import step
+from effective.api import call_tool, step
 from effective.budget import Grant, depth_grant_name
 from effective.combinators import Answered, Deeper, descend
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import AskLLM, CallTool
 from effective.fork import OpIndex, fork_at, live_drive, replay_prefix
-from effective.handlers.base import TraceEntry, artifact_id
+from effective.handlers.base import TraceEntry, artifact_id, op_key
 from effective.handlers.recording import RecordingHandler, Suspended
 from effective.handlers.replay import ReplayMismatch
 from effective.keys import Key, Segment, compose_key
@@ -37,6 +38,11 @@ class SequencedDomain:
         return out, PER_CALL
 
 
+def judge_at(depth: int) -> str:
+    """The stored key of `_judge`'s tool call at `depth`."""
+    return placed_step("judge", "tool", f"d:{depth};")
+
+
 def _judge(ctx, level):
     raw = yield from step("judge", CallTool(name="op", args={}, result_schema=str))
     return Answered(raw) if level.final else Deeper(raw)
@@ -52,7 +58,7 @@ def _parked_base() -> RecordingHandler:
     parked = base.run(_program)
     assert isinstance(parked, Suspended)
     assert parked.awaiting.stored() == f"{depth_grant_name('r', depth=1, generation=0).stored()}"
-    assert [e.key.stored() for e in base.trace] == ["d:0;step:judge"]
+    assert [e.key.stored() for e in base.trace] == [judge_at(0)]
     return base
 
 
@@ -65,9 +71,9 @@ def test_fork_at_recorded_park_two_arms_diverge_off_a_free_prefix():
     parked.resume(Grant(add_depth=0))  # base: stop at d1
     trace = base.trace
     assert [e.key.stored() for e in trace] == [
-        "d:0;step:judge",
+        judge_at(0),
         f"event;{depth_grant_name('r', depth=1, generation=0).stored()}",
-        "d:1;step:judge",
+        judge_at(1),
     ]
     at = OpIndex(
         [e.key.stored() for e in trace].index(
@@ -89,11 +95,11 @@ def test_fork_at_recorded_park_two_arms_diverge_off_a_free_prefix():
     assert stop.result == "stop-d1"
     assert grant.result == "g2"
     # tail traces are the divergence only; the shared prefix (d0) is in NEITHER
-    assert [e.key.stored() for e in stop.trace] == ["d:1;step:judge"]
+    assert [e.key.stored() for e in stop.trace] == [judge_at(1)]
     assert [e.key.stored() for e in grant.trace] == [
-        "d:1;step:judge",
+        judge_at(1),
         f"event;{depth_grant_name('r', depth=2, generation=0).stored()}",
-        "d:2;step:judge",
+        judge_at(2),
     ]
     # poison / free-prefix: each domain ran ONLY its tail's Step calls, never d0
     assert stop_dom.i == 1
@@ -114,7 +120,7 @@ def test_fork_at_pending_park_the_actual_voi_case():
         pending_name=depth_grant_name("r", depth=1, generation=0),
     )
     assert grant.result == "final-d1"
-    assert [e.key.stored() for e in grant.trace] == ["d:1;step:judge"]
+    assert [e.key.stored() for e in grant.trace] == [judge_at(1)]
 
 
 def test_fork_point_guard_bites_on_a_wrong_pending_name():
@@ -303,7 +309,9 @@ def _blocked_policy(op):
     from effective.permission import Allow, Deny
 
     return (
-        Deny("policy says no") if isinstance(op, Step) and op.name == "tool:blocked" else Allow()
+        Deny("policy says no")
+        if isinstance(op, Step) and op_key(op).stored() == called_step("blocked")
+        else Allow()
     )
 
 
@@ -313,11 +321,11 @@ def _routes_around_a_refusal():
     from effective.govern import Refused
 
     try:
-        yield from step("tool:blocked", CallTool(name="b", result_schema=str))
-        route = "allowed"
+        yield from call_tool("blocked", {}, str)
+        route, after = "allowed", "after-allowed"
     except Refused:
-        route = "refused"
-    yield from step(f"tool:after-{route}", CallTool(name="a", result_schema=str))
+        route, after = "refused", "after-refused"
+    yield from call_tool(after, {}, str)
     return route
 
 
@@ -339,7 +347,8 @@ def test_a_refused_prefix_op_replays_as_a_refusal_not_as_none():
 
     gen, delivery = replay_prefix(_routes_around_a_refusal, base.trace, OpIndex(1))
     assert delivery.refusal is base.trace[0].error, "the recorded refusal, not a value"
-    assert delivery.into(gen).name == "tool:after-refused", "the branch the base actually took"
+    taken = op_key(delivery.into(gen)).stored()
+    assert taken == called_step("after-refused"), "the branch the base actually took"
 
 
 def test_a_fork_point_inside_a_scope_is_refused_with_the_REGION_as_the_reason():
@@ -368,7 +377,8 @@ def test_a_fork_point_inside_a_scope_is_refused_with_the_REGION_as_the_reason():
     recorded = RecordingHandler(responses={"lane:0;a": "va", "lane:0;b": "vb", "after": "vc"})
     recorded.run(program)
     trace = recorded.trace
-    assert [e.key.stored() for e in trace] == ["lane:0;step:a", "lane:0;step:b", "step:after"], [
+    lane = [placed_step(name, "tool", "lane:0;") for name in ("a", "b")]
+    assert [e.key.stored() for e in trace] == [*lane, placed_step("after", "tool")], [
         e.key.stored() for e in trace
     ]
 

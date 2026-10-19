@@ -71,6 +71,7 @@ from _conformance import (
     two_step_wf,
     wake_race_collision_wf,
 )
+from _steps import called_step, placed_step
 from pydantic import BaseModel
 
 from effective.api import (
@@ -80,19 +81,19 @@ from effective.api import (
     await_event,
     await_until,
     call_tool,
-    direct_tool_key,
     qualified_event_name,
     sleep_until,
 )
 from effective.budget import Grant, budget_grant_name, depth_grant_name
-from effective.cost import FORMAT_PARAM, RecordedFormat, Usage, serve
+from effective.code import _action_key
+from effective.cost import FORMAT_PARAM, NEWEST_FORMAT, Usage, serve
 from effective.domain import CallTool, DomainOp
 from effective.engines import REPARK_MARGIN
 from effective.govern import GateState, Proceed, govern
 from effective.graphview import PARKED, from_keys, to_mermaid
 from effective.handlers.base import op_key, step_key
 from effective.handlers.durable import DurableHandler, SeedingCtx, fork_event_name
-from effective.keys import Index, Key, Run, Segment, compose_key, frame_path
+from effective.keys import Index, Key, Run, Segment, compose_key, frame_path, gather_prefix
 from effective.layers import retry, retry_domain
 from effective.machine.spec import Ctx
 from effective.machine.trampoline import appending_states, canonical_violations
@@ -158,7 +159,7 @@ def test_a_run_reads_the_params_it_was_admitted_with(backend):
     assert backend.run_until_result(task_id).result == {
         "run_id": run_id,
         "manifest": {"case": "sla-cap"},
-        FORMAT_PARAM: RecordedFormat.V1.value,
+        FORMAT_PARAM: NEWEST_FORMAT.value,
     }
     with pytest.raises(ValueError, match="run_id"):
         backend.spawn(f"admit-{run_id}", run_id, params={"run_id": "another"})
@@ -1187,7 +1188,7 @@ def test_ledger_is_append_only(backend):
     """The two-bookkeepers invariant on both engines: idempotent by event_id, and the
     DB blocks UPDATE (RAISE(ABORT) on SQLite, the plpgsql trigger on Postgres)."""
     run_id = f"r-{uuid4().hex[:8]}"
-    event_id = f"{run_id}:x"
+    event_id = compose_key(t"x:{Run(run_id)}").stored()
     backend.ledger_append(run_id, event_id, "k")
     backend.ledger_append(run_id, event_id, "k")  # idempotent: ON CONFLICT DO NOTHING
     assert backend.ledger_kinds(run_id) == ["k"]
@@ -1250,8 +1251,8 @@ def _gate_send_email(op):
     return Allow()
 
 
-SEND_EMAIL_ACTION = Key.parse("step;code:action,0,c;tool:send_email")
-"""The op key the code minter gives `run_code_wf`'s action, spelled: that minter is private."""
+SEND_EMAIL_ACTION = Key.parse(placed_step(_action_key("c", False, 0, "send_email"), "tool"))
+"""The op key the code minter gives `run_code_wf`'s action."""
 
 
 def test_durable_run_code_action_parks_for_human_approval(backend):
@@ -1724,20 +1725,20 @@ def test_checkpoint_reader_projects_one_key_sequence_on_both_engines(backend):
     assert snap.state == "completed", snap
 
     keys = backend.checkpoint_keys(task_id)
-    assert sorted(keys) == sorted(
-        [
-            "gather:0,0;step;tool:a",
-            f"gather:0,0;ledger;{run_id}:ka",
-            "gather:0,1;step;tool:b",
-            f"gather:0,1;ledger;{run_id}:kb",
+    rows = {
+        "a": LedgerRow(event_id=compose_key(t"ka:{Run(run_id)}"), kind="ka"),
+        "b": LedgerRow(event_id=compose_key(t"kb:{Run(run_id)}"), kind="kb"),
+    }
+    expected = {
+        gather_prefix(0, branch): [
+            called_step(tool, gather_prefix(0, branch)),
+            op_key(AppendLedgerRow(row=row)).prefixed(gather_prefix(0, branch)).stored(),
         ]
-    )
-    for branch, tool, kind in ((0, "a", "ka"), (1, "b", "kb")):
-        within = [k for k in keys if k.startswith(f"gather:0,{branch};")]
-        assert within == [
-            f"gather:0,{branch};step;tool:{tool}",
-            f"gather:0,{branch};ledger;{run_id}:{kind}",
-        ]
+        for branch, (tool, row) in enumerate(rows.items())
+    }
+    assert sorted(keys) == sorted(key for within in expected.values() for key in within)
+    for frame, placed in expected.items():
+        assert [k for k in keys if k.startswith(frame)] == placed
 
 
 def test_checkpoint_reader_excludes_the_engines_await_bookkeeping(backend):
@@ -1939,20 +1940,21 @@ def test_durable_park_inside_recurses_fold_carries_the_fold_frames(backend):
     # a committed step's key is its op key, which opens with the `step` arm. Under one set of
     # frames they now read:
     #
-    #     gather:1,0;fold:0,0;merge          the park's wire name (address)
-    #     gather:1,0;fold:0,0;step:merge     the merge step's checkpoint (identity)
+    #     gather:1,0;fold:0,0;merge                  the park's wire name (address)
+    #     gather:1,0;fold:0,0;<the merge step key>   the merge step's checkpoint (identity)
     #
     # They were one string before the arm, which is why this assertion could compare them. Ask
     # `step_key` for the leaf rather than re-spelling it, so the two stay derived from the same
     # minters the emitter contract uses.
-    committed = qualified_event_name(*fold_frames, name=step_key("merge"))
+    committed = qualified_event_name(*fold_frames, name=step_key("merge", "tool"))
     assert committed.stored() in set(backend.checkpoint_keys(task_id)), (
         "the merge step must commit UNDER the fold frames"
     )
     # And the two differ ONLY by the arm — the frames are shared, which is the property that
     # makes an emitter's name and the step's checkpoint locatable from one another.
     address = qualified_event_name(*fold_frames, name="merge")
-    assert committed.stored() == address.stored().replace(";merge", ";step:merge")
+    frames = address.stored().removesuffix("merge")
+    assert committed.stored() == placed_step("merge", "tool", frames)
 
     # The name a fold-frame-blind park would have used — must not wake it.
     backend.emit_event(task_id, branched(1, 0, ev_name(run_id)), {"extra": 99})
@@ -2264,10 +2266,10 @@ def _parking_then_sleeping_then_waiting(
     """
 
     def wf(_run_id: str):
-        name = compose_key(t"shared:{Segment(token)}")
-        first = yield from await_until(name, _Ack, deadline=deadline)
+        shared = compose_key(t"shared:{Segment(token)}")
+        first = yield from await_until(shared, _Ack, deadline=deadline)
         yield from sleep_until(wake_at)
-        second = yield from await_until(name, _Ack, deadline=ahead)
+        second = yield from await_until(shared, _Ack, deadline=ahead)
         return {"first": _arm(first), "second": _arm(second)}
 
     return wf
@@ -2308,9 +2310,9 @@ def _two_waits_on_one_name(token: str, first_deadline: datetime, second_deadline
     """Two bounded waits on ONE name: the shape a receive loop has."""
 
     def wf(_run_id: str):
-        name = compose_key(t"shared:{Segment(token)}")
-        first = yield from await_until(name, _Ack, deadline=first_deadline)
-        second = yield from await_until(name, _Ack, deadline=second_deadline)
+        shared = compose_key(t"shared:{Segment(token)}")
+        first = yield from await_until(shared, _Ack, deadline=first_deadline)
+        second = yield from await_until(shared, _Ack, deadline=second_deadline)
         return {"first": _arm(first), "second": _arm(second)}
 
     return wf
@@ -2376,8 +2378,8 @@ def _answering_then_parking(token: str, deadline: datetime):
     """A wait that REPLAYS: the release park is what sends the run back through it."""
 
     def wf(_run_id: str):
-        name = compose_key(t"shared:{Segment(token)}")
-        first = yield from await_until(name, _Ack, deadline=deadline)
+        shared = compose_key(t"shared:{Segment(token)}")
+        first = yield from await_until(shared, _Ack, deadline=deadline)
         yield from await_event(compose_key(t"release:{Segment(token)}"), _Ack)
         return {"answer": _arm(first)}
 
@@ -2388,9 +2390,9 @@ def _answering_after_a_wait(token: str, first: datetime, second: datetime):
     """Two waits on one name, reporting the SECOND; one claim decides both."""
 
     def wf(_run_id: str):
-        name = compose_key(t"shared:{Segment(token)}")
-        yield from await_until(name, _Ack, deadline=first)
-        answer = yield from await_until(name, _Ack, deadline=second)
+        shared = compose_key(t"shared:{Segment(token)}")
+        yield from await_until(shared, _Ack, deadline=first)
+        answer = yield from await_until(shared, _Ack, deadline=second)
         return {"answer": _arm(answer)}
 
     return wf
@@ -2400,10 +2402,10 @@ def _answering_after_a_sleep(token: str, first: datetime, wake_at: datetime, sec
     """The same pair with a sleep between, so the second wait is decided on a LATER claim."""
 
     def wf(_run_id: str):
-        name = compose_key(t"shared:{Segment(token)}")
-        yield from await_until(name, _Ack, deadline=first)
+        shared = compose_key(t"shared:{Segment(token)}")
+        yield from await_until(shared, _Ack, deadline=first)
         yield from sleep_until(wake_at)
-        answer = yield from await_until(name, _Ack, deadline=second)
+        answer = yield from await_until(shared, _Ack, deadline=second)
         return {"answer": _arm(answer)}
 
     return wf
@@ -2680,7 +2682,7 @@ def test_two_runs_under_distinct_gates_are_isolated_on_both_engines(backend):
         )
         tasks[run] = backend.spawn(f"gated-{run}", run)
         parks[run] = GateState(
-            run_id=run, gate=gate, op_key=step_key("tool:charge_card").stored(), occurrence=0
+            run_id=run, gate=gate, op_key=called_step("charge_card"), occurrence=0
         ).park_name
 
     first, second = (f"{token}a", f"{token}b")
@@ -2714,9 +2716,9 @@ def _twice_on_one_grant(token: str):
     op-occurrence, so the walk qualifies it — which is exactly what one answer must not settle."""
 
     def wf(_run_id: str):
-        name = depth_grant_name(token, generation=0, depth=1)
-        first = yield from await_event(name, Grant)
-        second = yield from await_event(name, Grant)
+        grant = depth_grant_name(token, generation=0, depth=1)
+        first = yield from await_event(grant, Grant)
+        second = yield from await_event(grant, Grant)
         return {"first": first.add_depth, "second": second.add_depth}
 
     return wf
@@ -2845,7 +2847,7 @@ def test_the_same_event_id_from_a_DIFFERENT_task_is_allowed_silently(backend):
     generation 0 and again in 3 is ONE row, and generations share a run id — so only the task
     tells them apart. The second append must be a silent no-op, not a refusal."""
     run_id = f"r-{uuid4().hex[:8]}"
-    event_id = f"{run_id}:done"
+    event_id = compose_key(t"done:{Run(run_id)}").stored()
     backend.ledger_append(run_id, event_id, "gen0", writer=_writer("task-0", "ledger;x:1"))
     # A different task, a different placement, the same id — the shape the feature is made of.
     backend.ledger_append(run_id, event_id, "gen3", writer=_writer("task-3", "ledger;x:9"))
@@ -2860,7 +2862,7 @@ def test_the_same_placement_re_appending_is_allowed(backend):
     surviving ledger row poison its own run on every subsequent attempt — a durable substrate
     turning its own crash recovery into a permanent failure."""
     run_id = f"r-{uuid4().hex[:8]}"
-    event_id = f"{run_id}:done"
+    event_id = compose_key(t"done:{Run(run_id)}").stored()
     writer = _writer("task-0", "gather:0,0;ledger;x:1")
     backend.ledger_append(run_id, event_id, "first", writer=writer)
     backend.ledger_append(run_id, event_id, "retry", writer=writer)  # byte-identical writer
@@ -2884,7 +2886,7 @@ def test_a_different_placement_in_the_SAME_task_is_refused(backend):
     """The one arm that refuses, at the store rather than through a workflow — so the decision
     table is pinned cell by cell and not only through the shape that happens to reach it."""
     run_id = f"r-{uuid4().hex[:8]}"
-    event_id = f"{run_id}:done"
+    event_id = compose_key(t"done:{Run(run_id)}").stored()
     backend.ledger_append(run_id, event_id, "first", writer=_writer("t", "gather:0,0;ledger;x:1"))
     with pytest.raises(PlacedWriterCollision, match="two placed ops in task"):
         backend.ledger_append(
@@ -2976,7 +2978,7 @@ DRAFT_TOOLS = ("read_file", "apply_fix", "run_suite")
 def _visit_step(visit: int | None, state: str, tool: str) -> str:
     """One of the machine's tool checkpoints, ASKED FOR rather than spelled.
 
-    Every piece goes through the minter that produces it — `step_key` for the `step;` arm,
+    Every piece goes through the producer it names: the op `call_tool` yields for the step,
     `frame_path` for each scope frame — so this is the key as it is CANONICALLY supposed to be
     stored, and a change to the arm or to the frame delimiter travels here. Splitting the stored
     bytes on `;` instead would be the nominal move where a structural one belongs: it would keep
@@ -2985,11 +2987,10 @@ def _visit_step(visit: int | None, state: str, tool: str) -> str:
     # lint: terminal-hole — `visit` is an `int` here, narrowed by the guard, so it needs no wrapper
     path = "" if visit is None else frame_path("", compose_key(t"d:{visit}"))
     path = frame_path(path, compose_key(t"state:{Segment(state)}"))
-    # `direct_tool_key` is PRODUCTION's minter for a tool called outside a loop, which is what
-    # this walk's hand-written workers do; `.stored()` is the explicit flatten at the seam where
-    # `step_key` requires a `str`, the layering rule rather than a dodge. `react.tool_key` is
-    # the in-loop minter and carries a turn sub-term, so it is the wrong one here.
-    return step_key(direct_tool_key(tool).stored()).prefixed(path).stored()
+    # `call_tool` is PRODUCTION's way to call a tool outside a loop, which is what this walk's
+    # hand-written workers do. `react.tool_key` is the in-loop minter and carries a turn
+    # sub-term, so it is the wrong one here.
+    return called_step(tool, path)
 
 
 def test_a_re_entered_state_stays_injective_on_both_engines(backend):

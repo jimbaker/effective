@@ -262,8 +262,8 @@ def run_code[T](
     delimiter no key atom may hold. No name can forge a scope boundary that no
     ``scoped(...)`` opened: every key below leads with the ``code`` tag, so a name
     carrying ``;`` splices after ``code;seg:{j};`` and never stands where a frame
-    stands. ``scoped(rec:0, run_code("x"))`` records ``rec:0;step;code:seg,0,x``,
-    while a run named ``rec:0;x`` records ``step;code;seg:0;rec:0;x``.
+    stands. ``scoped(rec:0, run_code("x"))`` records ``rec:0;step;tool;code:seg,0,x``,
+    while a run named ``rec:0;x`` records ``step;tool;code;seg:0;rec:0;x``.
 
     **Namespacing is not this function's job.** It names its checkpoints
     ``code:seg,{j},{name}`` / ``code:action,{j},{name};tool:{tool}`` and nothing
@@ -296,7 +296,7 @@ def run_code[T](
         seg = 0
         while True:
             outcome = yield from step(
-                _segment_key(name, structured, seg).stored(),
+                _segment_key(name, structured, seg),
                 CallTool(
                     name=EXECUTE_TOOL,
                     args={
@@ -323,7 +323,7 @@ def run_code[T](
                     f"{CODE}:{name} requested more than {MAX_ACTIONS} actions; "
                     "runaway action loop (raise MAX_ACTIONS deliberately if real)"
                 )
-            action_key = _action_key(name, structured, j, request.name).stored()
+            action_key = _action_key(name, structured, j, request.name)
             try:
                 # result_schema=object: the step returns the RAW checkpoint form and
                 # we thread exactly that, never a validated object re-dumped, which

@@ -17,7 +17,7 @@ import psycopg
 import pytest
 
 from effective.counterfactual import FORKED_KIND, Forked, genesis_row
-from effective.keys import Key
+from effective.keys import Run, compose_key
 from effective.ops import LedgerRow
 
 DSN = os.environ.get("DATABASE_URL", "postgresql://effective:effective@localhost:5432/effective")
@@ -80,7 +80,7 @@ def test_a_canonical_writer_marks_rows_not_hypothetical():
     rid = f"canon-{uuid4().hex[:8]}"
     ledger = PostgresLedger(DSN, workflow_run_id=rid)
     try:
-        ledger.append(LedgerRow(event_id=Key.parse(f"{rid}:e1"), kind="request_processed"))
+        ledger.append(LedgerRow(event_id=compose_key(t"e1:{Run(rid)}"), kind="request_processed"))
     finally:
         ledger.close()
     with psycopg.connect(DSN) as c:
@@ -101,7 +101,9 @@ def test_a_hypothetical_writer_marks_every_row_and_writes_a_genesis():
     ledger = PostgresLedger(DSN, workflow_run_id=fork, hypothetical=True)
     try:
         ledger.append(genesis_row(fork, forked_from=base, forked_at_event=f"{base}:e1"))
-        ledger.append(LedgerRow(event_id=Key.parse(f"{fork}:tail"), kind="request_processed"))
+        ledger.append(
+            LedgerRow(event_id=compose_key(t"tail:{Run(fork)}"), kind="request_processed")
+        )
     finally:
         ledger.close()
     with psycopg.connect(DSN) as c:
@@ -123,7 +125,7 @@ def test_a_hypothetical_row_is_ITSELF_append_only():
     rid = f"launder-{uuid4().hex[:8]}"
     ledger = PostgresLedger(DSN, workflow_run_id=rid, hypothetical=True)
     try:
-        ledger.append(LedgerRow(event_id=Key.parse(f"{rid}:e1"), kind="request_processed"))
+        ledger.append(LedgerRow(event_id=compose_key(t"e1:{Run(rid)}"), kind="request_processed"))
     finally:
         ledger.close()
     with psycopg.connect(DSN) as c, pytest.raises(psycopg.errors.RaiseException):

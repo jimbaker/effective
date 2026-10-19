@@ -7,12 +7,16 @@ from uuid import uuid4
 import psycopg
 import pytest
 from _conformance import PG_DSN, CountingDomain, Fault
+from _steps import placed_step
 
 from effective.api import call_tool
-from effective.checkpoints import SparsePrefix, positional_key
-from effective.keys import Key
+from effective.checkpoints import SparsePrefix, dense_key
+from effective.keys import FramePosition, Key
 from effective.layers import current_placement, op_layer
 from effective.permission import Refused
+
+A, A2, A3 = (placed_step("a", "tool", occurrence=n) for n in (1, 2, 3))
+B, B2 = (placed_step("b", "tool", occurrence=n) for n in (1, 2))
 
 
 @op_layer
@@ -56,23 +60,18 @@ def test_a_prefix_missing_a_refused_ask_is_refused_on_export(backend):
 
 @pytest.mark.parametrize(
     "names",
-    [["step:a#2"], ["step:a", "step:a#3"], ["step:a", "step:b#2"]],
+    [[A2], [A, A3], [A, B2]],
     ids=["first-missing", "second-missing", "another-name-counted"],
 )
 def test_a_prefix_with_a_gap_in_any_name_is_refused(names):
-    seen: dict[Key, int] = {}
+    seen = FramePosition()
     for name in names[:-1]:
-        positional_key(name, seen)
+        dense_key(name, seen)
     with pytest.raises(SparsePrefix):
-        positional_key(names[-1], seen)
+        dense_key(names[-1], seen)
 
 
-def test_a_dense_prefix_strips_each_occurrence():
-    seen: dict[Key, int] = {}
-    names = ["step:a", "step:b", "step:a#2", "step:a#3"]
-    assert [positional_key(n, seen).stored() for n in names] == [
-        "step:a",
-        "step:b",
-        "step:a",
-        "step:a",
-    ]
+def test_a_dense_prefix_keeps_each_occurrence():
+    seen = FramePosition()
+    names = [A, B, A2, A3]
+    assert [dense_key(n, seen).stored() for n in names] == names

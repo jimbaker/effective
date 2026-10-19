@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from _authority import ruled
+from _steps import placed_step
 
 from effective.api import ask_llm, gather
 from effective.budget import MeasuredBudget, budget_grant_name
@@ -32,6 +33,7 @@ USAGES: list[tuple[str, Usage]] = [
     ("ans-2", Usage(prompt_tokens=20, completion_tokens=8, cost=0.002)),
 ]
 BOTH = Usage(prompt_tokens=30, completion_tokens=13, cost=0.003)
+ASK1 = placed_step("ask1", "llm")
 
 
 def _metering_llm(turns):
@@ -95,7 +97,7 @@ def test_v1_envelopes_askllm_and_meters_above_the_checkpoint(app, task):
 
     assert out == {"a": "ans-1", "b": "ans-2"}
     assert handler.meter == BOTH  # both usages folded into the handler-owned meter
-    stored = _stored(app, task, "step:ask1")
+    stored = _stored(app, task, ASK1)
     assert set(stored) == {"result", "usage"}  # enveloped, not a bare result
     assert stored["result"] == "ans-1"  # the workflow still sees the bare result on read
     assert stored["usage"]["cost"] == 0.001
@@ -133,7 +135,7 @@ def test_a_bare_model_checkpoint_fails_loud_not_silent(app, task):
     ).run(_two_ask_wf)
     app.conn.execute(
         "UPDATE checkpoints SET state = ? WHERE task_id = ? AND name = ?",
-        (json.dumps("ans-1"), task, "step:ask1"),
+        (json.dumps("ans-1"), task, ASK1),
     )
 
     with pytest.raises(RecordedValueRejected, match=r"\{result, usage\}"):
@@ -154,7 +156,7 @@ def test_v1_gather_folds_branch_subtotals_into_parent_in_index_order(app, task):
     assert out == {"results": ["ans-1", "ans-2"]}
     assert handler.meter == BOTH  # both branches' subtotals reached the parent meter
     assert isinstance(
-        _stored(app, task, "gather:0,0;step:ask0"), dict
+        _stored(app, task, placed_step("ask0", "llm", "gather:0,0;")), dict
     )  # per-branch envelope, prefixed
 
 

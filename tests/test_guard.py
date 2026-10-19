@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 from _conformance import Fault, FaultCtx, FaultPosition, at_every_op
+from _steps import placed_step
 
 from effective import Effect
 from effective.api import qualified_event_name
@@ -21,6 +22,7 @@ from effective.handlers.recording import RecordingHandler
 from effective.interpreters.tools import spawn_tool
 from effective.keys import Index, Run, compose_key
 from effective.react import (
+    GUARD_ASKED,
     Allowed,
     Ask,
     AssistantTurn,
@@ -113,7 +115,7 @@ def test_an_ask_rings_the_user_then_parks_and_their_answer_decides(allow: bool):
     )
     observation = _observed(recorder, Ask("Alice?"))
     ran = _ran(recorder)
-    asked = ran.index("d:0;step;guard:asked")
+    asked = ran.index(placed_step(GUARD_ASKED, "tool", "d:0;"))
     assert ran[asked + 1] == "d:0;event;guard:ask"
     assert ("d:0;step;tool:send_code" in ran) is allow
     assert observation.startswith("sent" if allow else "[refused] send_code")

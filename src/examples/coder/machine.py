@@ -22,8 +22,9 @@ from typing import Any, assert_never
 
 from effective.api import Effect, call_tool, scoped
 from effective.channels import cite, skill
+from effective.compose import sub_scope
 from effective.domain import ToolRefused
-from effective.keys import Key, Name, Run, compose_key
+from effective.keys import Key, Run
 from effective.machine.evidence import CommandRun
 from effective.machine.outcomes import Advance, Exhausted, Finish, Outcome, Park, ParkReason
 from effective.machine.spec import Ctx, Evidence, Worker
@@ -157,7 +158,7 @@ def specs(
     )
 
 
-DEEPER = compose_key(t"sub:{Name('deeper')}")
+DEEPER = sub_scope("deeper")
 
 type Delegate = Callable[[Placement], Effect[dict[str, Any]]]
 """A child coder, handed where it will sit."""

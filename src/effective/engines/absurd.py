@@ -509,7 +509,7 @@ def _adapt_ctx(ctx: Any) -> Any:
     **It scans the whole wrapper stack.** A caller may build a wrapper stack over a raw SDK ctx
     and pass the STACK: the outermost object is one of ours, and the raw SDK ctx underneath would
     receive our `Key` step names, which the vendored SDK f-strings into
-    `Key(_value='step:extract_ticket', _scope=None)#2`, a REPR committed to a durable name. A
+    `Key(_parsed=ParsedKey(terms=(...)), _scope=None)#2`, a REPR committed to a durable name. A
     SQLite ctx needs no adapter, so a SQLite run stays green whether or not the stack is adapted.
 
     So this is a **decision table over the ctx chain**: four arms, exhausted by a wildcard, so

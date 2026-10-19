@@ -77,7 +77,7 @@ cascade's `AwaitEvent`, [`src/effective/permission.py`](../src/effective/permiss
 
 | you call | you get | note |
 |---|---|---|
-| `step(name, op)` | the step's result, replayed on re-execution | the workhorse. `op` is an inert `DomainOp` **value**, not a callable, which is what makes it recordable. `idempotency_key=Minted()` asks the handler to mint the tool's key from the task and the step's placement. The name is an **identity**, so it must be deterministic. An op stopped while it ran raises `OpCancelled` here; catch it in the scope that yielded the step |
+| `step(name, op)` | the step's result, replayed on re-execution | the workhorse. `op` is an inert `DomainOp` **value**, not a callable, which is what makes it recordable. `idempotency_key=Minted()` asks the handler to mint the tool's key from the task and the step's placement. The name is an **identity**, so it must be deterministic: one atom or a minter's `Key`, keyed under the op's kind (`step("x", CallTool(...))` is `step;tool:x`, `ask_llm("x", ...)` is `step;llm:x`); text holding key structure is refused, and context goes in `scoped`. An op stopped while it ran raises `OpCancelled` here; catch it in the scope that yielded the step |
 | `ask_llm(name, messages, schema)` | the model's response, parsed to `schema` | the first argument is the step **name** (an identity), not the prompt; `messages` carries the channel template, the data axis |
 | `call_tool(name, args, schema)` | the tool's result | accrues no spend today: the cost layer meters only `AskLLM`, so a budget test asserting a carry must use `ask_llm` |
 | `store_artifact(value, content_type)` | an artifact reference | for anything too big or too binary to sit in a checkpoint |
@@ -317,12 +317,16 @@ The pattern to imitate: **a refusal that only says "no" has failed at its job.**
 
 ### 4.14 Two corollaries that each cost real defects
 
-**Per-run control state resets at the task run, never in a `finally`.** A generator
-here is *abandoned*, not resumed, when a park, a generation boundary, or a branch
-refusal unwinds it, and abandonment is **normal**, it is how both a park and a
-generation boundary work. `CHAIN_DEPTH` leaked across runs exactly this way, which in
-a long-lived worker means task B refusing because task A left it dirty. Reset in
-`ops.enter_task_run`, and note a gather branch is *not* a task boundary.
+**Per-run control state is held by the task run, never by the combinator that sets it.**
+A park, a task-level error, or a refusal the step lets unwind leaves the step unfinished,
+so the combinator's own reset may never run. `ops.chain_held` holds it:
+
+| where | the chain state held |
+|---|---|
+| a walk's run, on entry | no chain |
+| a walk's run, on exit | the caller's, as it was found |
+| a recorder's resumed park | the position the run parked at |
+| a gather branch | the run's, inherited: a branch is not a task boundary |
 
 **Check that a refusal's recommended remedy is reachable from where the author
 stands.** This rule was broken twice in a row, the second time *after* the first had been

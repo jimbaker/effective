@@ -167,11 +167,11 @@ sequenceDiagram
   participant world
   run->>world: step#59;tool:runbook
   b1->>world: step#59;tool:deploys
-  b3->>world: step#59;tool:errors
   b2->>world: step#59;tool:traces
+  b3->>world: step#59;tool:errors
   run->>world: step#59;judge:cause
-  run->>world: d:0#59;step:narrow
-  run->>world: d:1#59;step:narrow
+  run->>world: d:0#59;step#59;llm:narrow
+  run->>world: d:1#59;step#59;llm:narrow
   Note over run: awaits event#59;remedy:inc-0412,rollback
   world-->>run: event#59;remedy:inc-0412,rollback
   run->>world: step#59;tool:remediate
@@ -190,10 +190,10 @@ on the workflow's line. The approval sits between the last drill level and the r
 graph LR
   n0["step;tool:runbook"]
   n1["gather:*,*;step;tool:deploys"]
-  n2["gather:*,*;step;tool:errors"]
-  n3["gather:*,*;step;tool:traces"]
+  n2["gather:*,*;step;tool:traces"]
+  n3["gather:*,*;step;tool:errors"]
   n4["step;judge:cause"]
-  n5["d:*;step:narrow x2"]
+  n5["d:*;step;llm:narrow x2"]
   n6{{"event;remedy:inc-0412,rollback"}}
   n7["step;tool:remediate"]
   n0 --> n1
@@ -224,9 +224,9 @@ sequenceDiagram
   participant b4 as gather:0,3
   participant world
   b1->>world: step#59;tool:security
+  b3->>world: step#59;tool:docs
   b2->>world: step#59;tool:performance
   b4->>world: step#59;tool:flags
-  b3->>world: step#59;tool:docs
   run->>world: step#59;judge:readiness
   Note over run: awaits event#59;owner:rc3,performance
   world-->>run: event#59;owner:rc3,performance
@@ -250,17 +250,17 @@ sequenceDiagram
   participant b6 as gather:2,2
   participant world
   run->>world: step#59;tool:tickets
-  b1->>world: rec:0#59;step:observe
-  b3->>world: rec:2#59;step:observe
-  b2->>world: rec:1#59;step:observe
-  run->>world: d:0#59;step:consolidate
-  run->>world: d:1#59;step:consolidate
+  b1->>world: rec:0#59;step#59;llm:observe
+  b3->>world: rec:2#59;step#59;llm:observe
+  b2->>world: rec:1#59;step#59;llm:observe
+  run->>world: d:0#59;step#59;llm:consolidate
+  run->>world: d:1#59;step#59;llm:consolidate
   b4->>world: step#59;judge:kind
+  b4->>world: step#59;tool:file
   b6->>world: step#59;judge:kind
   b5->>world: step#59;judge:kind
-  b6->>world: step#59;tool:file
-  b4->>world: step#59;tool:file
   b5->>world: step#59;tool:file
+  b6->>world: step#59;tool:file
 ```
 <!-- /projected -->
 
@@ -276,8 +276,8 @@ commit order between concurrent branches, folded onto one node.
 ```mermaid
 graph LR
   n0["step;tool:tickets"]
-  n1["gather:*,*;rec:*;step:observe x3"]
-  n2["d:*;step:consolidate x2"]
+  n1["gather:*,*;rec:*;step;llm:observe x3"]
+  n2["d:*;step;llm:consolidate x2"]
   n3["gather:*,*;step;judge:kind x3"]
   n4["gather:*,*;step;tool:file x3"]
   n0 --> n1
@@ -285,9 +285,10 @@ graph LR
   n1 --> n2
   n2 --> n2
   n2 --> n3
-  n3 -->|"x2"| n3
-  n3 --> n4
-  n4 -->|"x2"| n4
+  n3 -->|"x2"| n4
+  n4 --> n3
+  n3 --> n3
+  n4 --> n4
 ```
 <!-- /projected -->
 
@@ -300,17 +301,17 @@ voice
 ├─ step;tool:tickets
 ├─ gather:0,0
 │  └─ rec:0
-│     └─ step:observe
+│     └─ step;llm:observe
 ├─ gather:0,2
 │  └─ rec:2
-│     └─ step:observe
+│     └─ step;llm:observe
 ├─ gather:0,1
 │  └─ rec:1
-│     └─ step:observe
+│     └─ step;llm:observe
 ├─ d:0
-│  └─ step:consolidate
+│  └─ step;llm:consolidate
 ├─ d:1
-│  └─ step:consolidate
+│  └─ step;llm:consolidate
 ├─ gather:2,0
 │  ├─ step;judge:kind
 │  └─ step;tool:file

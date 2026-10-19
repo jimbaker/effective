@@ -65,7 +65,9 @@ NAME_PATTERN = 'case ast.Name(id="None"):'
 GATHER_FIELD = "gather: int"
 CLEARED_PATTERN = "case Cleared(granted=advanced, trips=advanced_trips):"
 GATHER_PATTERN = "case GatherBranch(gather=g, index=i):"
-SCOPE_PATTERN = "case Key(scope=None) if _leading_tag(name.stored()) in RESERVED_AUTHORITY_TAGS:"
+SCOPE_PATTERN = (
+    "case Key(scope=None) if set(name.structure().tags) & set(RESERVED_AUTHORITY_TAGS):"
+)
 
 
 def test_a_module_level_def_is_not_swept_as_an_attribute() -> None:
@@ -228,7 +230,9 @@ def test_every_keyword_pattern_is_reachable() -> None:
     # an arm of its own, `react.unwrap` an exhausted run's repair reason and budget, and
     # `react._settled` a refused answer's reason.
     # `react._carrying` reads the loop a redirect hands the next level.
-    assert reached == 347, f"the corpus this fix was measured on held 347; found {reached}"
+    # `handlers.base.op_key` reads a step's op, whose kind its key names.
+    # `fork._parked_on` reads an await's addressing.
+    assert reached == 349, f"the corpus this fix was measured on held 349; found {reached}"
 
     seen = {
         (str(p), line + 1)

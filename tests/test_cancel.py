@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from _steps import called_name
 from _witness import WatchedEvent
 
 from effective import RecordingHandler, ReplayHandler, cancel, coroutine_api
@@ -137,7 +138,7 @@ def test_an_action_cancelled_while_it_ran_is_its_observation_and_replays_as_reco
     assert replayed == ran
     ending = ran.trajectory
     assert isinstance(ending, Escaped)
-    assert (ending.origin, ending.name, ending.partial) == ("action", "tool:ls", "a b")
+    assert (ending.origin, ending.name, ending.partial) == ("action", called_name("ls"), "a b")
 
 
 def test_a_final_decide_cancelled_while_it_ran_escapes():

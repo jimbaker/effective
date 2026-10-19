@@ -14,13 +14,13 @@ from uuid import uuid4
 import pytest
 from _conformance import Fault, FaultPosition
 
-from effective.api import Effect, append_ledger, ask_llm, call_tool
+from effective.api import Effect, append_ledger, ask_llm, call_tool, scoped
 from effective.cost import MeteredInterpreter, Usage
 from effective.domain import CallTool, DomainOp
 from effective.govern import ChildRefused
 from effective.handlers.recording import RecordingHandler
 from effective.handlers.replay import ReplayHandler
-from effective.keys import Name, Run, compose_key
+from effective.keys import Index, Name, Run, compose_key
 from effective.machine.evidence import CommandRun
 from effective.machine.outcomes import Exhausted, Finish, Outcome
 from effective.machine.spec import Ctx, Evidence, Fused, Report, StateSpec
@@ -66,7 +66,9 @@ def refusing_as_a_group(_ctx: Ctx[Step], _evidence: Evidence) -> Effect[Said]:
 def spending(_ctx: Ctx[Step], _evidence: Evidence) -> Effect[Said]:
     """Asks until the budget refuses."""
     for n in range(3):
-        yield from ask_llm(f"judge-{n}", "spend", str)
+        yield from scoped(
+            compose_key(t"spend:{Index(n)}"), partial(ask_llm, "judge", "spend", str)
+        )
     return Said.DONE
 
 

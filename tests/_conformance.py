@@ -184,11 +184,11 @@ class CountingDomain:
 
 
 def two_step_wf(run_id: str):
-    """4 ctx ops: tool:a, ledger;<run>:e1, tool:b, ledger;<run>:e2."""
+    """4 ctx ops: tool:a, ledger;e1:<run>, tool:b, ledger;e2:<run>."""
     a = yield from call_tool("a", {}, int)
-    yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:e1"), kind="k1"))
+    yield from append_ledger(LedgerRow(event_id=compose_key(t"e1:{Run(run_id)}"), kind="k1"))
     b = yield from call_tool("b", {}, int)
-    yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:e2"), kind="k2"))
+    yield from append_ledger(LedgerRow(event_id=compose_key(t"e2:{Run(run_id)}"), kind="k2"))
     return {"a": a, "b": b}
 
 
@@ -206,21 +206,26 @@ def gather_wf(run_id: str):
     so a crash mid-gather keeps committed branch-steps and re-runs only the rest. 4 ctx
     ops total; results join in branch order."""
 
-    def branch(tool: str, kind: str):
+    def branch(tool: str, kind: str, event_id: Key):
         def thunk():
             v = yield from call_tool(tool, {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:{kind}"), kind=kind))
+            yield from append_ledger(LedgerRow(event_id=event_id, kind=kind))
             return v
 
         return thunk
 
-    results = yield from gather([branch("a", "ka"), branch("b", "kb")])
+    results = yield from gather(
+        [
+            branch("a", "ka", compose_key(t"ka:{Run(run_id)}")),
+            branch("b", "kb", compose_key(t"kb:{Run(run_id)}")),
+        ]
+    )
     return {"results": results}
 
 
 def colliding_gather_wf(run_id: str):
     """`gather_wf` with the one difference under test: both branches author the SAME `event_id`
-    instead of hand-disambiguating to `:ka`/`:kb`.
+    instead of hand-disambiguating to `ka:`/`kb:`.
 
     The substrate places the two appends distinctly (`gather:0,0;ledger;<run>:done` vs
     `gather:0,1;…`), so the TAPE separates them; the ledger's `UNIQUE(event_id)` does not, and
@@ -257,13 +262,15 @@ def scoped_wf(run_id: str):
     are `rec:0;tool:a` and `rec:1;tool:a`; nothing in the workflow spells either.
 
     Also pins that a scope's namespacing reaches the LEDGER arm, not just steps: each body
-    appends under a bare `{run_id}:e`, and the two rows can only coexist because the checkpoint
+    appends under `e:{run_id},{i}`, and the two rows can only coexist because the checkpoint
     keys differ (`ledger;` ids are the author's, but the append's checkpoint is scoped)."""
 
     def body(i: int):
         def thunk():
             v = yield from call_tool("a", {}, int)
-            yield from append_ledger(LedgerRow(event_id=Key.parse(f"{run_id}:e{i}"), kind=f"k{i}"))
+            yield from append_ledger(
+                LedgerRow(event_id=compose_key(t"e:{Run(run_id)},{Index(i)}"), kind=f"k{i}")
+            )
             return v
 
         return thunk
@@ -338,8 +345,10 @@ def recurse_fold_park_wf(run_id: str):
         return ["a", "b"]  # two chunks at fanin 2 -> exactly one fold level runs
         yield  # pragma: no cover — generator marker
 
-    def leaf(chunk):
-        return (yield from step(f"leaf-{chunk}", CallTool(name="a", args={}, result_schema=int)))
+    def leaf(_chunk):
+        # Each chunk's leaf runs in its own branch of the leaf gather, so the branch frame keeps
+        # the two `leaf` steps apart.
+        return (yield from step("leaf", CallTool(name="a", args={}, result_schema=int)))
 
     def combine(group):
         yield from step("merge", CallTool(name="a", args={}, result_schema=int))

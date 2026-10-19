@@ -14,9 +14,8 @@ em-dash costs nothing — the check is for control bytes, and corruption in any 
 
 **Scope, stated because a gate's reach is easy to overclaim.** This is the STATIC half of
 `just check` — parse, `effective.lint`'s role-dispatched rules, and ruff without `--fix`. It is not
-`ty`, not the test suite, and not "the module imports". The narrowing matters: `effective.lint`
-itself records that the code-agent gate runs 3 of the ~20 invocations in the recipe, so *"the gate
-equals `just lint` by construction"* was measurably too wide and is not claimed here.
+`ty`, not the test suite, and not "the module imports". `just lint` runs further invocations, so
+this gate does not equal it.
 """
 
 import re

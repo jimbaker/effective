@@ -103,8 +103,8 @@ from effective.handlers.durable import spawn_done_name
 from effective.handlers.recording import RecordingHandler, Respawned, Suspended
 from effective.keys import Index, Key, Name, compose_key
 from effective.ops import Writer
-from effective.skills import Pin
-from effective.spawning import ChildAnswer, Returned
+from effective.skills import Pin, activation_key
+from effective.spawning import ChildAnswer, Returned, spawn_key
 
 type Body = Callable[[], Effect[str]]
 """A thunk producing one observable op — what gets substituted into a hole."""
@@ -121,6 +121,8 @@ type Frame = GatherBranch | Key
 
 LEAF = "leaf"
 """The name of the single op every composed workflow bottoms out in."""
+LEAF_KEY = step_key(LEAF, "tool")
+"""The leaf's `Step` key: the leaf is a tool step."""
 
 
 class Disposition(Enum):
@@ -151,6 +153,12 @@ class Prologue:
 
     name: str
     frames: tuple[Frame, ...] = ()
+    minted: Key | None = None
+    """The key a substrate minter gives the op, where `name` is that key's text."""
+
+    def step(self) -> Key:
+        """The op's `Step` key: every prologue op is a tool step."""
+        return step_key(self.minted if self.minted is not None else self.name, "tool")
 
 
 @dataclass(frozen=True)
@@ -368,7 +376,7 @@ def _build_mutual(slot: int) -> Built:
 
 def _build_hoisted(slot: int) -> Built:
     skill = f"sk{slot}"
-    activate = f"skill:{skill},activate"
+    activate = activation_key(skill).stored()
 
     def hole(body: Body) -> Effect[str]:
         return (yield from hoisted((skill,), lambda _pins: body()))
@@ -377,7 +385,7 @@ def _build_hoisted(slot: int) -> Built:
         name="hoisted",
         is_branch=False,
         frames=(),
-        overhead=(Prologue(activate),),
+        overhead=(Prologue(activate, minted=activation_key(skill)),),
         responses={activate: Pin(name=skill, content_hash="h", body="b")},
         hole=hole,
     )
@@ -403,8 +411,8 @@ promoted durable subset rather than the infra-free grid); and the task-addressin
 
 
 CHILD_RUN_ID = "c1"
-SPAWN_KEY = "tool:spawn,c1"
-DONE_KEY = spawn_done_name(Writer(task=str(uuid4()), placement=Key.parse(SPAWN_KEY)))
+SPAWN_KEY = spawn_key(CHILD_RUN_ID).stored()
+DONE_KEY = spawn_done_name(Writer(task=str(uuid4()), placement=spawn_key(CHILD_RUN_ID)))
 """What the CHILD task emits, from its own params — unframed, because it has never seen ours."""
 DONE_EVENT = DONE_KEY.stored()
 """`DONE_KEY` on the wire, for the assertions that read text."""
@@ -484,11 +492,11 @@ def expected_keys(*chain: Built, leaf_name: str = LEAF) -> list[str]:
     enclosing: tuple[Frame, ...] = ()
     for built in chain:
         keys += [
-            qualified_event_name(*enclosing, *pro.frames, name=step_key(pro.name)).stored()
+            qualified_event_name(*enclosing, *pro.frames, name=pro.step()).stored()
             for pro in built.overhead
         ]
         enclosing += built.frames
-    keys.append(qualified_event_name(*enclosing, name=step_key(leaf_name)).stored())
+    keys.append(qualified_event_name(*enclosing, name=step_key(leaf_name, "tool")).stored())
     return keys
 
 

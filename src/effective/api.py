@@ -52,7 +52,7 @@ type Effect[T] = Generator[WorkflowOp, Any, T]
 
 
 def step[T](
-    name: str, op: DomainOp[T], idempotency_key: Minted | Named | None = None
+    name: str | Key, op: DomainOp[T], idempotency_key: Minted | Named | None = None
 ) -> Effect[T]:
     """The `Step` primitive, typed: every domain op reaches its handler through here.
 
@@ -61,7 +61,7 @@ def step[T](
     return cast(T, served(name, raw))
 
 
-def ask_llm[T](name: str, messages: Any, schema: type[T]) -> Effect[T]:
+def ask_llm[T](name: str | Key, messages: Any, schema: type[T]) -> Effect[T]:
     """A convenience over `step` carrying an `AskLLM`; `name` is the op name."""
     return (yield from step(name, AskLLM(messages=messages, response_schema=schema)))
 
@@ -69,12 +69,12 @@ def ask_llm[T](name: str, messages: Any, schema: type[T]) -> Effect[T]:
 def judge[M: BaseModel](name: str, template: Template, output: type[M]) -> Effect[M]:
     """Ask every question in `template` in one `Judge`; `output`'s fields are the question names.
 
-    The op name is minted as `judge:{name}`."""
+    The step is named `name`, an atom."""
     asked = battery(template)
     if (fields := field_names(asked.questions)) != set(output.model_fields):
         raise TemplateError(f"questions {sorted(fields)} != fields {sorted(output.model_fields)}")
     op = Judge(state=asked.state, questions=asked.questions, response_schema=Answers)
-    answered = yield from step(compose_key(t"judge:{Name(name)}").stored(), op)
+    answered = yield from step(name, op)
     # A durable handler loads the schema; the recording core hands back the value as canned.
     answers = Answers.model_validate(answered).root
     checked(asked.questions, answers)
@@ -114,19 +114,16 @@ def select(
 
 
 def direct_tool_key(name: str) -> Key:
-    """The op key for a tool call, `tool:{name}`; a frame around the call, such as a ReAct turn's
-    `d:{i}`, places it.
+    """A tool call's kinded name, `tool:{name}`, which `step_key` wraps as `step;tool:{name}`; a
+    frame around the call, such as a ReAct turn's `d:{i}`, places it.
 
-    `tool:` carries a hierarchical step name inside the hole as author path text rather than
-    forging interior segments. A minter, so a test asks for the name rather than spelling it;
     `react.tool_key` refuses a model-chosen name this cannot compose."""
     return compose_key(t"tool:{Name(name)}")
 
 
 def call_tool[T](tool: str, args: dict[str, Any], schema: type[T]) -> Effect[T]:
-    """A convenience over `step` carrying a `CallTool`; the op name is MINTED from `tool`."""
-    key = direct_tool_key(tool)
-    return (yield from step(key.stored(), CallTool(name=tool, args=args, result_schema=schema)))
+    """A convenience over `step` carrying a `CallTool`; the step is named for `tool`."""
+    return (yield from step(tool, CallTool(name=tool, args=args, result_schema=schema)))
 
 
 def await_event[T](
@@ -158,7 +155,7 @@ def await_event[T](
 
     `RELATIVE` is the default, and the one an author passes. The substrate passes `ABSOLUTE` where
     a joining parent awaits a child's answer (`fork.join_fork`, `compose.spawn_subagent_task`)."""
-    raw = yield AwaitEvent(name=event_name(name), schema=schema, addressing=addressing)
+    raw = yield AwaitEvent(name=event_name(name, addressing), schema=schema, addressing=addressing)
     return cast(T, raw)
 
 
@@ -190,7 +187,10 @@ def await_until[T](
     `match` the two arms: `WaitOutcome` is closed, so a handler for both is the totality check.
     """
     raw = yield AwaitEvent(
-        name=event_name(name), schema=schema, addressing=addressing, deadline=deadline
+        name=event_name(name, addressing),
+        schema=schema,
+        addressing=addressing,
+        deadline=deadline,
     )
     return cast(WaitOutcome[T], raw)
 
@@ -345,8 +345,8 @@ def scoped[T](scope: Key, body: Callable[[], Effect[T]]) -> Effect[T]:
 
     **`scope` is a `Key`.** Every scope atom is a tag plus fields (`rec:0`, `fold:1,2`, `d:3`), so
     it is composed by the one composer and is injective by construction. Nesting is nesting:
-    `scoped(a, lambda: scoped(b, body))` namespaces under `{a};{b};`, so a step `s` inside
-    `scoped(a:1, scoped(b:2, …))` records as `a:1;b:2;step:s`.
+    `scoped(a, lambda: scoped(b, body))` namespaces under `{a};{b};`, so an `ask_llm("s")` inside
+    `scoped(a:1, scoped(b:2, …))` records as `a:1;b:2;step;llm:s`.
 
     The body is a thunk (like a gather branch) rather than an already-started generator, so the
     handler owns when it runs, which is what lets replay re-enter the scope by re-execution
@@ -383,7 +383,7 @@ def gather_frame(g: int, i: int, qualified: Key) -> Key:
     are also the names a dozen docstrings already use for this coordinate. Renaming the published
     fields is a separate decision from moving the code, and should look like one."""
     # `domain=any`, because this mints a FRAME and a frame wraps EITHER. `qualified_event_name`
-    # hands it a park's wire address; the composition oracle hands it `step:leaf`, an op's own
+    # hands it a park's wire address; the composition oracle hands it `step;tool:leaf`, an op's own
     # identity, exactly as the handlers do with their `gather_prefix(g, i)`. A frame is not
     # a position that narrows, so there is nothing here for a domain to say — which is what the
     # escape is for, and the only place in the substrate that earns it.

@@ -6,7 +6,6 @@ the roles compose, they inherit every refusal rather than restating it, and the 
 the FIELD behind the wrapper so `explain` still names a producer.
 """
 
-
 import pytest
 
 from effective.keys import Index, Key, Name, Role, Run, Segment, Subject, compose_key
@@ -117,8 +116,9 @@ def test_the_grammar_erases_the_role_and_the_key_still_round_trips():
 
 
 def _shapes(*sources):
-    """`registry_of` over one named source per site: the two-site cases need two names."""
-    return registry_of({f"minters{index}.py": text for index, text in enumerate(sources)})
+    """`registry_of` over one named source per site, all in one package: the two-site cases need
+    two names, and one owner for the tag they share."""
+    return registry_of({f"src/pkg/minters{index}.py": text for index, text in enumerate(sources)})
 
 
 def _undeclared(source):

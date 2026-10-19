@@ -55,7 +55,7 @@ lint:
     uv run python -m effective.lint --totality src
     uv run python -m effective.lint --ordered-arms src
     uv run python -m effective.lint --totality-escapes src
-    uv run python -m effective.lint --key-composition src/effective src/agent src/tui src/examples scripts
+    uv run python -m effective.lint --key-composition src examples tests scripts
     uv run python -m effective.lint --terminal-holes tests
     uv run python -m effective.lint --authority-tags src/effective src/agent src/examples examples
     uv run python -m effective.lint --authority-scopes src/effective src/agent src/examples examples

@@ -7,7 +7,11 @@ slot) and an arbitrary tool-dispatch both drop into the same loop, and the loop
 still drives them to a `Trajectory`.
 """
 
+from _steps import called_step
+
 from effective import RecordingHandler, call_tool
+from effective.domain import CallTool
+from effective.ops import Step
 from effective.react import (
     AssistantTurn,
     ToolRequest,
@@ -55,16 +59,19 @@ def test_custom_act_rewrites_tool_dispatch():
         return next(script)
 
     def act(request, tag):
-        # `wrapped-`, not `wrapped:`: `call_tool` splices the name into `tool:{Segment(name)}`,
-        # one coordinate, and a `Segment` refuses an interior delimiter loudly rather than
-        # encoding it. The rename is this test's own vocabulary; what it exercises — a custom
-        # `act` rewriting tool dispatch — is unchanged.
-        result = yield from call_tool(f"wrapped-{request.name}", request.args, ToolResult)
+        # One router tool answers every request, and the requested tool rides in its args.
+        args = {"tool": request.name, **request.args}
+        result = yield from call_tool("wrapped", args, ToolResult)
         return result
 
-    h = RecordingHandler({"tool:wrapped-search": ToolResult(content="r")})
+    h = RecordingHandler({"tool:wrapped": ToolResult(content="r")})
     traj = h.run(lambda: run_agent("q", decide=decide, act=act))
 
     assert isinstance(traj, Trajectory)
     assert traj.answer == "ok"
-    assert [e.key.stored() for e in h.trace] == ["d:0;step;tool:wrapped-search"]
+    assert [e.key.stored() for e in h.trace] == [called_step("wrapped", "d:0;")]
+    match h.trace[0].op:
+        case Step(op=CallTool(args=args)):
+            assert args == {"tool": "search", "q": "x"}
+        case unexpected:
+            raise AssertionError(unexpected)

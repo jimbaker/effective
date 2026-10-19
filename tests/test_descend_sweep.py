@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from functools import cache
 
 import pytest
+from _steps import placed_step
 
 from effective.api import GatherBranch, gather, qualified_event_name, step
 from effective.budget import Grant, depth_grant_name
@@ -291,7 +292,9 @@ def check_the_fold_collapses_the_drill(run: Outcome) -> None:
     # Summed by the OP rather than by a folded label: the sweep generates widths, so whether a
     # `gather:` frame wraps the drill is a property of the case, not of the invariant.
     assessed = sum(
-        node.count for node in run.program.nodes if bare_name(node.key) == f"step:{ASSESS}"
+        node.count
+        for node in run.program.nodes
+        if bare_name(node.key) == placed_step(ASSESS, "tool")
     )
     assert assessed == len(run.levels)
 

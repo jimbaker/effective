@@ -27,7 +27,7 @@ from uuid import UUID
 
 from effective.engines.sqlite import connect
 from effective.handlers.base import TraceEntry
-from effective.keys import Key, unframed
+from effective.keys import FramePosition, Key, unframed
 from effective.keys.grammar import TAG_SEPARATOR, TERM_SEPARATOR, split_occurrence
 from effective.sql import bind
 
@@ -153,22 +153,28 @@ class SparsePrefix(ValueError):
     earlier asks, which leave no checkpoint. A positional replay of it would hand a later ask's
     value to an earlier ask, so it is refused."""
 
+    def __init__(self, name: str, held: int) -> None:
+        super().__init__(name, held)
+        self.name = name
+        self.held = held
 
-def positional_key(name: str, seen: dict[Key, int]) -> Key:
-    """A step checkpoint's name without its occurrence, for a replay that indexes by position.
-
-    `seen` counts the occurrences read so far, per name, in commit order; an occurrence that is
-    not the next one raises `SparsePrefix`."""
-    base, occurrence = split_occurrence(name)
-    key = Key.parse(base)
-    count = seen.get(key, 0) + 1
-    if (occurrence or 1) != count:
-        raise SparsePrefix(
-            f"{name!r} is occurrence {occurrence or 1} of {base!r}, and the prefix holds "
-            f"{count - 1} before it: an earlier ask was refused and left no checkpoint, so a "
-            "positional replay would bind the wrong answer"
+    def __str__(self) -> str:
+        return (
+            f"{self.name!r} is occurrence {split_occurrence(self.name)[1] or 1}, and the prefix "
+            f"holds {self.held} before it: an earlier ask was refused and left no checkpoint, so "
+            "a positional replay would bind the wrong answer"
         )
-    seen[key] = count
+
+
+def dense_key(name: str, seen: FramePosition) -> Key:
+    """A step checkpoint's name as a key, for a replay that indexes by position.
+
+    `seen` places the names read so far in commit order, as the walk placed them; a name the walk
+    would have numbered otherwise raises `SparsePrefix`."""
+    key = Key.parse(name)
+    expected = seen.place(Key.parse(split_occurrence(name)[0]))
+    if key != expected:
+        raise SparsePrefix(name, (expected.structure().occurrence or 1) - 1)
     return key
 
 

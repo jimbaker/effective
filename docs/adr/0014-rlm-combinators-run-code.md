@@ -168,13 +168,13 @@ Namespacing is structural. `scoped(scope, body)` yields a `Scoped` op that the h
 by running `body` with every key it mints prefixed by `scope`, in the same position and by the
 same mechanism as a gather branch's `gather:{g},{i};` coordinate. `scope` is a `Key` composed by
 the one composer. A frame ends at the term separator `;`, which `scope_prefix` refuses inside an
-atom, and nesting composes by nesting: a step `s` inside `scoped(a:1, scoped(b:2, …))` records as
-`a:1;b:2;step:s`. The combinators wrap each branch (`rec:{i}`, `fold:{level},{k}`, `d:{depth}`)
+atom, and nesting composes by nesting: an `ask_llm("s")` inside `scoped(a:1, scoped(b:2, …))`
+records as `a:1;b:2;step;llm:s`. The combinators wrap each branch (`rec:{i}`, `fold:{level},{k}`, `d:{depth}`)
 and `code_act` runs inside the turn's frame, so no author threads a scope through a callback or
 splices one onto a name. A `run_code` name cannot forge a scope boundary no `scoped` opened,
 because every key `run_code` mints leads with the `code` tag behind the `step` arm:
-`scoped(rec:0, run_code("x"))` records `rec:0;step;code:seg,0,x`, while a run named `rec:0;x`
-records `step;code;seg:0;rec:0;x`. `run_code` also refuses a name containing `/`, the path
+`scoped(rec:0, run_code("x"))` records `rec:0;step;tool;code:seg,0,x`, while a run named `rec:0;x`
+records `step;tool;code;seg:0;rec:0;x`. `run_code` also refuses a name containing `/`, the path
 delimiter no key atom may hold. The flattening's injectivity on well-formed scopes is
 `flatten_injective_on` in [`formal/lean/Effective/Scopes.lean`](../../formal/lean/Effective/Scopes.lean), with the aliasing foil
 `flattenBad` ([ADR-0016](0016-formalization-and-operational-semantics.md)); that model spells the separator `/`, and [ADR-0016](0016-formalization-and-operational-semantics.md) names the gap.

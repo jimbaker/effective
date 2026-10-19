@@ -10,6 +10,8 @@ Proves the four structural rules and the MOO unification with no live model:
 
 from collections.abc import Callable
 
+from _steps import placed_step
+
 from effective import Effect, RecordingHandler, ReplayHandler, Suspended, step
 from effective.domain import CallTool
 from effective.improve import Measurement, Reflection, improve
@@ -60,11 +62,11 @@ def test_single_objective_is_the_argmax_singleton():
     assert front[0].asi == "best"  # the ASI rides along
     # proposal and scoring are the recorded op stream, in order
     assert [e.key.stored() for e in h.trace] == [
-        "seed;step:score",
-        "gen:0;step:propose",
-        "cand:0,0;step:score",
-        "gen:1;step:propose",
-        "cand:1,0;step:score",
+        placed_step("score", "tool", "seed;"),
+        placed_step("propose", "tool", "gen:0;"),
+        placed_step("score", "tool", "cand:0,0;"),
+        placed_step("propose", "tool", "gen:1;"),
+        placed_step("score", "tool", "cand:1,0;"),
     ]
 
 
@@ -181,7 +183,7 @@ def test_compaction_folds_asi_history_but_pins_the_rubric():
     )
     assert [s.candidate for s in front] == [2]
     # the summarize op ran as a recorded step
-    assert any(e.key.stored() == "compact:1;step:digest" for e in h.trace)
+    assert any(e.key.stored() == placed_step("digest", "tool", "compact:1;") for e in h.trace)
     # the summarizer saw the ASI history but NEVER the rubric
     assert summarized == ["ASI-seed\nASI-0"]
     assert all(RUBRIC not in shown for shown in summarized)
