@@ -246,8 +246,8 @@ below them; a Lean boundary law waits until the crossing has more than one site.
 - The measured park and ask is available: a run that crosses its ceiling waits durably for a
   grant, resumable from recorded state, with per-seam spend attribution, and a fork can re-run the
   free recorded prefix and probe both grant arms before the grant is decided.
-- Enabling it is a handler-side choice: build the handler with `RecordedFormat.from_params(params)`
-  and pass a `MeasuredBudget`.
+- Enabling it is a handler-side choice: pass the handler a `MeasuredBudget`. The handler reads the
+  run's recorded format from its task context, so no argument names it.
 - `CallTool` cost is out of scope until a tool reports usage; only model-call `Usage` is
   enveloped. Tokens ride the same `Usage`.
 - Bench cost totals read the handler-owned meter or a ledger projection; `MeteredInterpreter.meter`

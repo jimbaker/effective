@@ -46,7 +46,7 @@ from effective.cost import Usage
 from effective.keys import Index, Key, Name, Subject, compose_key
 from effective.ops import LedgerRow
 from effective.parked import answer
-from examples.agent_firm.ar import REMIND, TERMS
+from examples.agent_firm.ar import ENDED, REMIND, TERMS, Round, _ended_of
 from examples.agent_firm.cases import CASES, DISCOUNT, SLA_CAP, Case
 from examples.agent_firm.critic import AS_CLAIMED
 from examples.agent_firm.engage import REPAIRS, CritiqueWire, Proposal
@@ -319,6 +319,26 @@ def test_a_case_stopped_every_time_is_the_firms_dissent(backend):
 
 
 @pytest.mark.adversarial
+def test_a_case_the_firm_left_stopped_closes_on_a_later_pass(backend):
+    """The firm stops when two passes agree, and a stopped case is still asked on the next pass."""
+    world, books = _firm_world(_proposed(*[Decimal(4000)] * 2 * (1 + REPAIRS))), _books()
+    firmed = partial(firm, books, list(CASES.values()), critic=False)
+    stopped = Open(case=INVOICE, broken=("paid-in-full",), last=Last.STOPPED, round=0)
+    assert _settled_as(_driven(backend, world, firmed).result) == Converged(
+        Books(passes=2, open={INVOICE: stopped})
+    )
+    advanced = _driven(backend, world, partial(advance, SLA_CAP, books, stopped, critic=False))
+    assert _read(advanced.result) == Closed(case=INVOICE, round=0)
+
+
+@pytest.mark.parametrize("critic", [True, False], ids=["critic", "no-critic"])
+def test_an_exception_asks_one_approval_with_or_without_the_critic(backend, critic):
+    world, books = _world(), _books()
+    run = _driven(backend, world, lambda: advance(SLA_CAP, books, None, critic=critic))
+    assert (_read(run.result), run.parks) == (Closed(case=INVOICE, round=0), 1)
+
+
+@pytest.mark.adversarial
 def test_a_denied_case_stays_open_beside_its_settling_siblings(backend):
     """The gathered parks wake lowest branch first, so the first ruling is `SLA_CAP`'s."""
     world = _firm_world(_proposed())
@@ -362,6 +382,39 @@ def test_a_reminder_out_of_attempts_twice_is_continued_until_it_lands(backend):
     run = _driven(backend, world, _firmed([SLA_CAP], _books()))
     assert _settled_as(run.result) == Converged(Books(passes=4, open={}))
     assert (world.calls[REMIND], world.erp.residual(INVOICE)) == (2 * RETRIES + 1, 2000)
+
+
+def test_a_continuation_that_runs_out_again_leaves_the_case_unlanded(backend):
+    world, books = _world(remind=_answers(*[BOUNCED] * (2 * RETRIES))), _books()
+    assert _passed(backend, world, books) == _opened(Last.UNLANDED, 0)
+    before = Counter(world.calls)
+    assert _passed(backend, world, books, _opened(Last.UNLANDED, 0)) == _opened(Last.UNLANDED, 0)
+    assert _calls(world, before)[REMIND] == RETRIES
+    assert _passed(backend, world, books, _opened(Last.UNLANDED, 0)) == Closed(
+        case=INVOICE, round=0
+    )
+
+
+@pytest.mark.parametrize(
+    ("ending", "result", "closed"),
+    [
+        ("completed", {"landed": {}}, 0),
+        ("compensated", {"rejected": "notify", "reason": "r", "undone": []}, 1),
+    ],
+    ids=["completed", "compensated"],
+)
+def test_a_case_in_flight_follows_its_holders_ending(backend, ending, result, closed):
+    world, books = _world(), _books()
+    held = LedgerRow(event_id=_terms(books, 0), kind=TERMS, credit="1000.00", claimant="another")
+    _driven(backend, world, lambda: claim_ledger(held))
+    assert _passed(backend, world, books) == _opened(Last.IN_FLIGHT, 0)
+    row = LedgerRow(
+        event_id=_ended_of(SLA_CAP, Round(books, 0)), kind=ENDED, ending=ending, result=result
+    )
+    _driven(backend, world, lambda: claim_ledger(row))
+    assert _passed(backend, world, books, _opened(Last.IN_FLIGHT, 0)) == Closed(
+        case=INVOICE, round=closed
+    )
 
 
 @pytest.mark.adversarial

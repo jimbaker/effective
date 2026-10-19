@@ -23,7 +23,7 @@ def test_a_computed_all_is_not_readable_from_source() -> None:
     """`_declared_all` reads the tree, so a module that COMPUTES its `__all__` declares nothing it
     can see — and that is the honest answer rather than a zero.
 
-    It is also why the export census reconciles the way it does. 426 of the 449 entries under
+    It is also why the export census reconciles the way it does. 417 of the 440 entries under
     `src/` are spelled; the other 23 come from two modules whose `__all__` is
     `[n for n in dir() if not n.startswith("_")]`, evaluated at import, and both of them leak
     `StrEnum` into the public surface (the dynamic `__all__` is not yet spelled out).
@@ -47,7 +47,7 @@ def test_a_computed_all_is_not_readable_from_source() -> None:
         for module in sorted(Path("src").rglob("*.py"))
         if de._declared_all(module)
     }
-    assert sum(len(v) for v in spelled.values()) == 426, "the AST-readable half of the surface"
+    assert sum(len(v) for v in spelled.values()) == 417, "the AST-readable half of the surface"
     for computed in ("src/effective/coding/states.py", "src/effective/prose/states.py"):
         assert de._declared_all(Path(computed)) == [], "computed at import, invisible to the tree"
 

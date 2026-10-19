@@ -15,7 +15,7 @@ park-await, `BudgetRefused` raise and state write-back. Implicit placement and r
 where a driver can drift, for both interpreters.
 
 `(A-money)`: the Lean model uses Nat units; Python uses dollars, mapped by `UNIT = 0.001`. The
-reals-to-Nat abstraction is discharged HERE by sampling (running the float transition). NOTE: float
+reals-to-Nat abstraction is sampled HERE (running the float transition), not proved. NOTE: float
 addition is non-associative, so a NEW vector whose *accumulated* `granted` lands exactly on the
 ceiling with a non-dyadic sum could flip cleared<->parked without the Lean row noticing — keep
 vectors on small integer-unit scales away from an exact accumulated `==` at the ceiling (the

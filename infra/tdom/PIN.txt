@@ -68,8 +68,12 @@ LICENSE.sha256  8b1512ca825ae5186c949b5697e3f4a99e0d3f502a226ed622ba45699ddbd7ed
 # forward to 3.14.7 once this landed, so the vendored fix is what the gate runs on now — the
 # 3.14.5 column is the regression check, not the shipping configuration.
 #
-# Re-run the probe when re-vendoring. A fix that makes the 15 pass while degrading what a
-# malformed template reports is not a fix, and only the malformed half of the probe says so.
+# The probe is `tests/test_tdom_pin.py`, in the gate. A fix that makes the 15 pass while
+# degrading what a malformed template reports is not a fix, and only the malformed half says so.
+#
+# Upstream 0.1.20, measured 2026-10-14: the three well-formed cases pass on 3.14.7, and three
+# malformed ones fail. `t'<'` renders `&lt;`, `t'<!--'` renders a comment, and an unclosed
+# attribute quote reports an unresolved placeholder. It does not pass this gate.
 
 # --- hashes ---
 #
@@ -107,6 +111,6 @@ d404738f58c202267416e2118a7e588e9cc337e75610a321ae3a579efad31b47  tdom/utils.py
 #
 # Delete `tdom = { path = "infra/tdom" }` from [tool.uv.sources], set the dependency to the
 # first upstream release carrying the fix, `uv lock && uv sync`, run the probe on both
-# interpreters, and delete this directory. Do not un-vendor on a version bump alone —
-# check that the fix is IN it (`grep -n "_drain_pending_feed\|super().close()" tdom/parser.py`),
+# interpreters (`tests/test_tdom_pin.py`), and delete this directory. Do not un-vendor on a version
+# bump alone: check that the fix is IN it (`grep -n "_drain_pending_feed\|super().close()" tdom/parser.py`),
 # because 0.1.18 shipped after this bug existed and did not touch parser.py at all.

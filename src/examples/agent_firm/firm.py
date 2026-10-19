@@ -1,4 +1,4 @@
-"""`firm`: settle a book's cases until a pass changes none of them.
+"""`firm`: settle a book's cases until two passes agree on which stay open.
 
 A case's state is the ledger's: its rounds' claims and endings. Each pass advances every open case
 by what its ledger says.
@@ -104,7 +104,10 @@ def firm(
     budget: int = PASSES,
 ) -> Effect[Settled[Books]]:
     """Pass over `cases` in `books` until two passes leave the same cases open, each in the same
-    round for the same reason, none of them one a pass can still continue."""
+    round for the same reason and none unlanded or compensated, or until `budget` passes have run.
+
+    A stopped case is asked again on every pass and a case in flight follows its holder, so either
+    can still close after the firm stops."""
     named = {case.invoice.id: case for case in cases}
 
     def passed(before: Books) -> Effect[Books]:

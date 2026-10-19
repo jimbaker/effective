@@ -150,8 +150,8 @@ $$
       \langle W[v/\bullet],\; C,\; L,\; E\rangle}\;\textsf{(Step-Replay)}
 $$
 
-**Step-Replay does not evaluate $\tau$.** That single premise is exactly-once-under-replay, and it
-is the whole of durability.
+**Step-Replay does not evaluate $\tau$.** That single premise keeps a recorded effect from being
+evaluated again, and it is the whole of durability.
 
 $$
 \frac{\,E(e)=v\,}{\langle \mathsf{await}(e,S);W,C,L,E\rangle \rightarrow \langle W[v/\bullet],C,L,E\rangle}
@@ -240,8 +240,9 @@ $$
 \Downarrow_H(W) \;=\; \Downarrow_H\!\big(\mathrm{crash}_j(W)\ \text{then resume}\big)\qquad\text{for every } j
 $$
 
-Side effects fire exactly once because every committed $n$ takes Step-Replay on the re-run. The
-suite checks this at **every** $j$ over a hand-matched range of fault positions, on both
+A recorded effect is never evaluated again, because every committed $n$ takes Step-Replay on the
+re-run. An effect that completed before its checkpoint committed runs again, so exactly-once at an
+outside receiver is the receiver's, by a key it remembers or a claim protocol. The suite checks this at **every** $j$ over a hand-matched range of fault positions, on both
 engines. That sweep is the single highest-value test in the repo.
 
 ### 3.5 Handlers as refinements

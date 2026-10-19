@@ -29,29 +29,3 @@ re-derived from it. For the semantic rung it is a position and a new name; jedi 
 Both are pure functions of their inputs, so a replay re-binds the recorded intent and never
 re-runs the tool — which is what keeps an editor inside the determinism boundary.
 """
-
-from effective.coding.edits.semantic import (
-    SemanticEdit,
-    SemanticError,
-    declared_arms,
-    references,
-    rename,
-)
-from effective.coding.edits.structural import (
-    StructuralEdit,
-    StructuralRule,
-    apply_structural,
-    structural_matches,
-)
-
-__all__ = [
-    "SemanticEdit",
-    "SemanticError",
-    "StructuralEdit",
-    "StructuralRule",
-    "apply_structural",
-    "declared_arms",
-    "references",
-    "rename",
-    "structural_matches",
-]

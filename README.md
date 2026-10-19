@@ -184,7 +184,7 @@ All under `src/effective/` unless noted.
 | typed prompt channels: `render`, `Gated`, `Repair`, cache and role directives, skill disclosure | `channels.py`, `skills.py` |
 | identity: every op key composed from a t-string by one injective grammar | `keys/` |
 | concurrency: `gather`, `race`, `quorum` | `api.py`, `choice.py` |
-| combinators: `recurse`, `route`, `descend`, and sandboxed code as an effect (`run_code`, on Pydantic Monty) | `combinators.py`, `code.py`, `monty.py` |
+| combinators: `recurse`, `route`, `descend`, `fixpoint` and `mutual` (loops in constant stack), `respawn` (a long loop as a chain of tasks), `hoisted` (a skill activated once above a fan-out), and sandboxed code as an effect (`run_code`, on Pydantic Monty) | `combinators.py`, `code.py`, `monty.py` |
 | judgments: `judge` and `select` ask typed questions from a t-string | `judgment.py`, `api.py` |
 | layers: retry, permission, budgets and telemetry as generator middleware, and `govern` to compose them | `layers.py`, `govern.py` |
 | the ReAct agent loop, with interrupts, steering and in-flight cancellation | `react.py`, `interrupts.py`, `steering.py`, `cancel.py` |
@@ -196,6 +196,15 @@ All under `src/effective/` unless noted.
 | optimization: `improve` (reflective prompt evolution) over a Pareto frontier of cost, quality and latency | `improve.py`, `pareto.py`, and the benches in `src/agent/` |
 | the read side: a run as a graph, cards, a dashboard, a terminal viewer | `graphview.py`, `cards/`, `dashboard.py`, `runview.py`, `src/tui/` |
 | interpreters for ops: OpenAI, the `claude -p` and `codex exec` CLIs, a judge service, a shell, the web | `interpreters/` |
+
+## Not yet in the box
+
+| missing | where it stands |
+|---|---|
+| memory between runs | a run's record is durable; no design yet carries what one run learned into the next |
+| MCP servers as tools | not decided, and the coding example declines them; command-line tools through the sandboxed shell are nearer |
+| a guide to building with a coding agent | this repository was built that way; the page showing how is not written |
+| a deployment from zero | a walkthrough from a fresh managed Postgres to a running worker is not written |
 
 ## Examples
 
@@ -211,13 +220,68 @@ All under `src/effective/` unless noted.
 | `uv run python -m examples.agent_firm sla-cap` | an accounts-receivable firm: a payment short of its invoice is explained, critiqued against the contract, approved by someone other than its proposer, and settled by saga through an ERP port ([`wiki/concepts/agent-firm.md`](wiki/concepts/agent-firm.md)) | nothing; `--odoo` settles on Odoo Community, after `just odoo-up` |
 | `just tui-demo`, `just dashboard` | the terminal viewer and the run dashboard over a demo run | the `tui` extra for the viewer |
 
+## The agent firm
+
+`src/examples/agent_firm/` is an accounts-receivable function run by agents under controls a
+finance team uses: every action has an owner, an approval where policy requires one, and a record
+that survives a crash. A payment that matches its invoice is applied with nobody asked. A payment
+short of its invoice is an exception, and goes through these stages:
+
+| stage | what happens |
+|---|---|
+| admit | the run's inputs are fixed in its spawn params: the case, the round of the books, the snapshot of the firm's rules |
+| observe | `reconcile` holds each case to the firm's invariants |
+| explain | a model proposes a credit through a `Gated` channel: within the shortfall, citing the case's documents |
+| engage | an outside critic reviews the proposal against the contract |
+| authorize | a `govern` policy parks the claim until someone other than its proposer approves it; the ruling names the digest of the terms, which carry the digest of the settlement's plan, and a changed plan is refused |
+| act | a `saga` posts the memo and applies it and the payment through an ERP port, unwinding on a rejection |
+| settle the books | `firm`, a `fixpoint`, repeats the stages over every open case until two passes agree, and reports what stays open and why |
+
+`uv run python -m examples.agent_firm sla-cap` runs one case through the first six stages, and
+`--odoo` settles it on Odoo Community after `just odoo-up`; `tests/test_agent_firm_fixpoint.py`
+runs the firm over the books. The decisions are [ADR-0027](docs/adr/0027-the-firm-settles-to-a-fixpoint.md) (the fixpoint) and
+[ADR-0028](docs/adr/0028-an-approval-binds-its-effect.md) (what an approval binds); the controls and the tests that hold each one are in
+[`wiki/concepts/agent-firm.md`](wiki/concepts/agent-firm.md).
+
+The settlement is a saga. Each posting carries its undo, and a rejected step unwinds the steps that
+landed, latest first, so the memo is unapplied before it is reversed and no posted entry is
+deleted. A rejected reversal fails the run with that reversal named, and leaves the posted entries
+it did not reach for a person. Otherwise the run ends one of three ways: completed, compensated (and resolved again in the next round), or unlanded (a
+reminder that ran out of attempts, continued on the next pass).
+
+```mermaid
+flowchart TD
+    observe["observe: the payment is $3,000 short"] --> explain["explain: a model proposes a credit"]
+    explain --> critique["critique: the contract caps the credit at $1,000"]
+    critique --> gate{"approval: someone other than the proposer,<br/>bound to the terms and the plan"}
+    gate -- denied --> open["the case stays open"]
+    gate -- approved --> memo["post the $1,000 credit memo"]
+    memo --> pay["apply the $97,000 payment"]
+    pay --> apply["apply the memo"]
+    apply --> notify["notify the customer"]
+    notify --> remind["remind the customer of the $2,000 owed"]
+    remind --> completed(["completed"])
+    remind -- out of attempts --> unlanded(["unlanded: continued next pass"])
+    notify -- rejected --> u1["unapply the memo"]
+    u1 --> u2["unapply the payment"]
+    u2 --> u3["reverse the memo"]
+    u3 --> compensated(["compensated: resolved in the next round"])
+```
+
+The command scripts the critic's review and the controller's approval, so it needs no keys, and it
+runs the completed path; the compensated and unlanded endings run in
+`tests/test_agent_firm_saga.py`. The $2,000 still owed stays a receivable, and the reminder asks the
+customer to pay it. The general ledger the firm settles against in testing is Odoo Community,
+digest-pinned under Podman: `just odoo-up`, then `just odoo-test` with `just pgt-up`. Without it,
+a scripted Odoo answers the same calls in memory.
+
 ## Learn more
 
 | read | for |
 |---|---|
 | [`docs/intro.md`](docs/intro.md) | the model in ten minutes: generator, handler, tape, layers, combinators |
 | [`docs/first-workflow.md`](docs/first-workflow.md) | the first workflow, line by line |
-| [`wiki/concepts/testing.md`](wiki/concepts/testing.md) | testing a workflow: canned results, replay as the determinism oracle, crash at every op |
+| [`wiki/concepts/testing.md`](wiki/concepts/testing.md) | testing a workflow, and how the substrate is verified: crash at every op, two engines, schedules, models and proofs |
 | [`docs/effective-101.md`](docs/effective-101.md) | the concepts in depth: the op set, the combinator algebra, the temporal shapes |
 | `wiki/index.md` | one concept a page, and the index of architecture decisions |
 | [`wiki/references.md`](wiki/references.md) | the work Effective builds on: Recursive Language Models, GEPA, ReAct, Absurd, tdom and more |
@@ -236,6 +300,8 @@ All under `src/effective/` unless noted.
 | `tui` | the terminal viewer (textual, rich) |
 | `judge` | the Jev judge interpreter |
 | `bridge` | the arrivals bridge (redis) |
+| `coding` | the lint and the coding machine's tools (ast-grep, jedi) |
+| `binary` | psycopg with its own libpq, for a machine without one |
 
 ## Contributing
 
@@ -243,14 +309,11 @@ All under `src/effective/` unless noted.
 just check        # the gate: lint, ty, the docs and key checks, the suite
 just pgt-up       # the test Postgres under Podman, for the durable lane
 just formal       # Lean proofs and the Quint typecheck
-just odoo-up      # Odoo Community under Podman; `just odoo-test` runs the AR firm against it
+just odoo-up      # Odoo Community under Podman; with `pgt-up`, `just odoo-test` runs the AR firm against it
 ```
 
-Beside the formal gates, two instruments in the suite test composition. A turnstile forces the
-order in which gather branches commit, so a test names the schedule it checks
-([`tests/_schedules.py`](tests/_schedules.py)). Each `fixpoint` is checked against a reference
-spelling by open recursion, on both engines, with a crash at every checkpoint
-([`tests/test_fixpoint.py`](tests/test_fixpoint.py)).
+How the substrate is verified, from crash sweeps to the formal models, is on the testing page
+([`wiki/concepts/testing.md`](wiki/concepts/testing.md)).
 
 Run `just check` from a git clone: its docs gate reads `git ls-files`. Without a test Postgres, it
 skips the Postgres-backed tests and runs everything else.

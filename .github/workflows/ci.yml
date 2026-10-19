@@ -3,6 +3,7 @@
 #   formal  lake build (Lean/Mathlib) + quint typecheck (the spec gate)
 #   durable the crash-replay + cross-engine suite against a real Postgres
 #   odoo    the AR firm's suites against Odoo Community, both pinned in Podman
+#   free-threaded: the core installed whole on free-threaded CPython, census and race suites
 #
 # `durable` exists because `check` cannot fail for the reason that matters here: the
 # Postgres-backed tests SKIP without a database, so a `check` job that never sees one
@@ -38,7 +39,7 @@ jobs:
       - uses: ./.github/actions/free-disk
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-      # uv sync installs the pinned Python 3.14 + deps (ast-grep is a dep).
+      # uv sync installs the pinned Python 3.14 + deps (ast-grep comes with the dev group).
       # `just check` runs the full lint set + pytest; the Postgres-backed tests
       # auto-skip without a container (the cov gate owns those), so no service
       # is needed here.
@@ -94,6 +95,26 @@ jobs:
           DATABASE_URL: postgresql://effective:effective@localhost:5432/effective
           EFFECTIVE_REQUIRE_PG: "1"
         run: just test
+
+  # The core on free-threaded CPython: installed whole with the GIL off, an import census of every
+  # module, and the race suites against the pinned Postgres. psycopg's pure build reads the
+  # runner's libpq.
+  free-threaded:
+    name: free-threaded (the core with the GIL off)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/free-disk
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq5
+      - run: podman --version
+      - run: just pgt-up
+      - name: the core's census and race suites, GIL off
+        env:
+          DATABASE_URL: postgresql://effective:effective@localhost:5432/effective
+        run: just race-free-threaded
 
   # The AR firm's live arm: its ERP port, saga and resolution against Odoo Community in a
   # digest-pinned pod, on both engines. Without Odoo the arm skips, so `EFFECTIVE_REQUIRE_ODOO`

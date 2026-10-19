@@ -117,7 +117,7 @@ second, and may settle there. They differ in recorded reads and ERP calls, since
 the run that made it.
 
 **Falsified if:** the firm, run again after it converged with every case closed, changes the books
-or tells the customer again; a denial ends the run; the firm converges with a case it could still run; the firm fails to
+or tells the customer again; a denial ends the run; the firm converges with a case unlanded or compensated; the firm fails to
 converge on the canonical cases within two passes, three with a stopped case.
 **Checked by** the convergence pins and the done pins in `tests/test_agent_firm_fixpoint.py`: the
 canonical firm run twice, two runs of one case in every schedule within one switch, and one run

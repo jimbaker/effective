@@ -132,7 +132,7 @@ the fold frames went undeclared and unexercised for a while. Index by hole.
 
 | registry | members | why it is its own registry |
 |---|---|---|
-| **holes** (the frames grid) | 7: `gather`, `scoped`, `recurse`, `recurse@fold`, `route`, `descend`, `hoisted` | value-returning: can be a row *and* a column |
+| **holes** (the frames grid) | 8: `gather`, `scoped`, `recurse`, `recurse@fold`, `route`, `descend`, `mutual`, `hoisted` | value-returning: can be a row *and* a column |
 | **terminals** | 2: `fork`, `respawn` | no hole. `fork` **leaves** the task; `respawn` **ends** it. Column only |
 | **respawn-as-outer** | 1: `generation_outer()` | contributes no frames; row only |
 
@@ -329,6 +329,24 @@ found and written up. A message naming an escape hatch the author cannot reach i
 defect, not a courtesy.
 
 ---
+
+### 4.15 Loops in constant stack: `fixpoint` and `mutual`
+
+`fixpoint` and `mutual` are each `descend` with a judge already written, so each iteration is a level under `d:{n}`, the
+loop runs in constant stack, and a grant extends it as it extends a descent.
+
+| combinator | each level | it ends |
+|---|---|---|
+| `fixpoint(initial, step, budget=...)` | `step` applied to the value so far | `Converged` when `converged(value, step(value))`; `Unconverged` with its cause: `"levels"` when the budget and every grant run out, `"governed"` when a step or the ask for more levels is refused for its spend |
+| `mutual(start, roles, budget=...)` | the role a `Hand` names, under `d:{n};state:{role}` | when a role answers; a role handing off at its final level raises `DescendedPastBudget` |
+
+Two calls of either in one scope both start at `d:0`; the walk mints the second's repeated levels
+as occurrences (`d:0;…#2`), so its names depend on how far the first ran. Give each its own
+`scoped`, as the firm scopes its passes under the books. A step that
+runs a `fixpoint` gets its `Unconverged` back as a value, and returning the inner value unchecked
+can hand the outer loop the same value twice, which reads as convergence. The AR firm is a
+`fixpoint` over the books: each pass advances every open case, and the firm stops when two passes
+leave the same cases open ([ADR-0027](adr/0027-the-firm-settles-to-a-fixpoint.md)).
 
 ## 5. The temporal shapes
 

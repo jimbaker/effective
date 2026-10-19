@@ -23,7 +23,7 @@ import sys
 
 import psycopg
 
-from effective.lint import configured
+from effective.config import configured
 
 QUEUE_TABLE_PREFIXES = ("t_", "c_", "e_", "r_")
 """Absurd's per-queue tables: tasks, checkpoints, events, runs (`absurd.sql`). One set per queue,

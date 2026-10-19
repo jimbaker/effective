@@ -24,8 +24,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ast_grep_py import SgRoot
 from pydantic import BaseModel
+
+try:
+    from ast_grep_py import SgRoot
+except ImportError as missing:
+    raise ImportError(
+        "effective.coding.edits.structural needs the coding extra: effective[coding]"
+    ) from missing
 
 from effective.coding.gate import find_ruff_config
 

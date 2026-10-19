@@ -224,9 +224,9 @@ The aliasing (A-serialize) forecloses is the string-layer sibling of `keyBad`, `
 `flattenBad` foil: a delimiter-free interpolation admits $(\texttt{a},\texttt{12})$ against
 $(\texttt{a1},\texttt{2})$. A separator bug in the gather or arm-term rendering would still pass
 the Lean gate, and is caught by the grammar's refusal and by the pin grid. Leaving it out of Lean
-is deliberate: serialization injectivity is enumerable rather than inductive, a product of op shape
-× interpolated-value shape × delimiter × `PYTHONHASHSEED` × backend that a parameter grid covers
-and induction cannot see.
+is a deferral: a parameter grid samples the product of op shape × interpolated-value shape ×
+delimiter × `PYTHONHASHSEED` × backend, and a left inverse over the grammar,
+$\mathrm{parse}(\mathrm{render}(k)) = k$, would prove the string layer for every key.
 
 **Value axis: a deterministic normal form.** The other boundary serializes a checkpoint or digest
 payload. $\mathsf{canon}$ (`canonical_form` in [`src/effective/handlers/base.py`](../../src/effective/handlers/base.py), behind
@@ -273,8 +273,10 @@ $$
 \qquad \text{for every } j,
 $$
 
-with side effects (the $\tau\Downarrow v$ premises) firing exactly once, because every committed
-$n$ takes $\textsf{Step-Replay}$ on the re-run. [`tests/test_replay_crash.py`](../../tests/test_replay_crash.py) checks this at every
+with every committed $n$ taking $\textsf{Step-Replay}$ on the re-run, so a recorded effect (a
+$\tau\Downarrow v$ premise) is never evaluated again. An effect that completed before its checkpoint
+committed is evaluated again on resume: exactly-once at an outside receiver is the receiver's, by a
+key it remembers or a claim protocol. [`tests/test_replay_crash.py`](../../tests/test_replay_crash.py) checks this at every
 $j$ by example.
 
 ## Invariant fit (I1 to I6)

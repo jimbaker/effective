@@ -19,7 +19,7 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from effective.lint import configured  # noqa: E402
+from effective.config import configured  # noqa: E402
 from scripts import link_check as lc  # noqa: E402
 
 WIKI_STUB = """# wiki

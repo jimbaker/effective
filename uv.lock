@@ -11,12 +11,15 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "-P7D"
 
+[manifest]
+overrides = [{ name = "psycopg", specifier = ">=3.3" }]
+
 [[package]]
 name = "absurd-sdk"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/18/6a/2d4199ddc3d846ba13c51aa9c8614b9ee42a5af5144ef456ef11f4f6aa20/absurd_sdk-0.5.0.tar.gz", hash = "sha256:b22fbe8d10f649d0ed427ba16d885a4a452e4240f412591e7f087fe8584a6f00", size = 14973, upload-time = "2026-08-04T13:06:40.682Z" }
 wheels = [
@@ -172,13 +175,11 @@ source = { editable = "." }
 dependencies = [
     { name = "absurd-sdk" },
     { name = "alembic" },
-    { name = "ast-grep-py" },
     { name = "fastapi" },
     { name = "htmltools" },
     { name = "httpx" },
-    { name = "jedi" },
     { name = "openai" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg" },
     { name = "pydantic" },
     { name = "pydantic-monty" },
     { name = "pyyaml" },
@@ -188,8 +189,15 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+binary = [
+    { name = "psycopg-binary" },
+]
 bridge = [
     { name = "redis" },
+]
+coding = [
+    { name = "ast-grep-py" },
+    { name = "jedi" },
 ]
 judge = [
     { name = "typesafe-sdk" },
@@ -202,7 +210,7 @@ tui = [
 [package.dev-dependencies]
 dev = [
     { name = "ast-grep-cli" },
-    { name = "effective", extra = ["bridge", "judge", "tui"] },
+    { name = "effective", extra = ["binary", "bridge", "coding", "judge", "tui"] },
     { name = "httpx" },
     { name = "markdown-it-py" },
     { name = "pytest" },
@@ -214,18 +222,22 @@ dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
+race = [
+    { name = "pytest-xdist" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "absurd-sdk", specifier = ">=0.5.0" },
     { name = "alembic", specifier = ">=1.14" },
-    { name = "ast-grep-py", specifier = ">=0.45.3,<0.46" },
+    { name = "ast-grep-py", marker = "extra == 'coding'", specifier = ">=0.45.3,<0.46" },
     { name = "fastapi", specifier = ">=0.142.2" },
     { name = "htmltools", specifier = ">=0.7.0" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "jedi", specifier = ">=0.20.0" },
+    { name = "jedi", marker = "extra == 'coding'", specifier = ">=0.20.0" },
     { name = "openai", specifier = ">=3.24.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3" },
+    { name = "psycopg", specifier = ">=3.3" },
+    { name = "psycopg-binary", marker = "extra == 'binary'", specifier = ">=3.3" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-monty", specifier = "==1.1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -237,12 +249,14 @@ requires-dist = [
     { name = "typesafe-sdk", marker = "extra == 'judge'", specifier = "==0.7.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
-provides-extras = ["tui", "bridge", "judge"]
+provides-extras = ["tui", "bridge", "judge", "coding", "binary"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ast-grep-cli", specifier = ">=0.45.3,<0.46" },
+    { name = "effective", extras = ["binary"] },
     { name = "effective", extras = ["bridge"] },
+    { name = "effective", extras = ["coding"] },
     { name = "effective", extras = ["judge"] },
     { name = "effective", extras = ["tui"] },
     { name = "httpx", specifier = ">=0.28" },
@@ -256,6 +270,7 @@ dev = [
     { name = "ruff", specifier = ">=0.16.10" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
+race = [{ name = "pytest-xdist", specifier = ">=3.8.0" }]
 
 [[package]]
 name = "execnet"
@@ -730,11 +745,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/db/2f/cb91e5502ec9de1de6f1b76cfbf69531932725361168bb06963620c77e2e/psycopg-3.3.4.tar.gz", hash = "sha256:e21207764952cff81b6b8bdacad9a3939f2793367fdac2987b3aac36a651b5bc", size = 165799, upload-time = "2026-05-01T23:31:55.179Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/e0/7b3dee031daae7743609ce3c746565d4a3ed7c2c186479eb48e34e838c64/psycopg-3.3.4-py3-none-any.whl", hash = "sha256:b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a", size = 213001, upload-time = "2026-05-01T23:20:50.816Z" },
-]
-
-[package.optional-dependencies]
-binary = [
-    { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
 ]
 
 [[package]]

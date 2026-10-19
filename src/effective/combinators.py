@@ -685,7 +685,9 @@ def fixpoint[C](
     and a grant extends it as it extends a descent. The ask for more levels is governed like a
     step: refused for its spend, it ends the loop ``"governed"``. A budget refusal inside a step
     is caught whole or as a member of a group; any other refusal in the group is raised. Two
-    ``fixpoint`` calls in one scope both start at ``d:0``, so each takes its own ``scoped``.
+    ``fixpoint`` calls in one scope both start at ``d:0``, and the walk mints the second's repeated
+    levels as occurrences, so its names depend on how far the first ran: give each its own
+    ``scoped``.
 
     A step that runs a ``fixpoint`` gets its ``Unconverged`` back as a value, so a step returning
     the inner value unchecked can hand the outer loop the same value twice, which ``converged``
@@ -751,8 +753,9 @@ def mutual[K: str, V, T](
 
     Each hop is a ``descend`` level, the role running under ``d:{n};state:{role}``, so the calls
     run in constant stack. ``budget`` bounds the hands: without a grant ``budget + 1`` roles run,
-    the last at its final level. Two ``mutual`` calls in one scope both start at ``d:0``, so each
-    takes its own ``scoped``.
+    the last at its final level. Two ``mutual`` calls in one scope both start at ``d:0``, and the
+    walk mints the second's repeated levels as occurrences, so its names depend on how far the
+    first ran: give each its own ``scoped``.
 
     | when                                  | it raises               | before         |
     |---------------------------------------|-------------------------|----------------|

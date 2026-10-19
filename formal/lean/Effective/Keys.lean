@@ -64,9 +64,9 @@ discharged in the codebase** two ways:
 `Scopes.lean` *does* prove the string layer for the **scope** grammar
 (`flatten_injective_on`, L1.8): the one interpolation whose split-at-`/`
 argument is clean enough to induct on. The gather-path and arm-tag serializations
-stay in the by-construction and sampling tiers by nature: serialization
-injectivity is *enumerable, not inductive* (op-shape × value-shape × delimiter ×
-`PYTHONHASHSEED` × backend), which a parameter grid covers and induction cannot see.
+stay in the by-construction and sampling tiers by choice: a parameter grid samples
+op-shape × value-shape × delimiter × `PYTHONHASHSEED` × backend, and a left inverse
+over the grammar, `parse (render k) = some k`, would prove them for every key.
 -/
 
 namespace Effective.Keys

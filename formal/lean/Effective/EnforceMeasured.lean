@@ -20,7 +20,7 @@ is sequential-only (a branch handler holds no budget), so there is no interleavi
 Money is modeled as `ℕ` in abstract units (the Python uses dollars; the semantics are threshold +
 order, so `ℕ` suffices and keeps every check `decide`-able). The unit maps to the Python conformance
 vectors by a fixed scale — see `Effective/enforce_vectors.json` and the conformance test that consumes
-it. `(A-money)`: the reals→ℕ abstraction is discharged by *sampling* (the exported vectors are run
+it. `(A-money)`: the reals→ℕ abstraction is *sampled* (the exported vectors are run
 against the live float `enforce_measured`), not proved in Lean — a determinism-only, value-axis
 boundary that gets no Lean node (the skill's tier rule).
 -/

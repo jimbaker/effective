@@ -51,8 +51,8 @@ import pytest
 # always tracks; the env var is for production, which does not run this file.
 os.environ["EFFECTIVE_TRACK_CONNECTIONS"] = "1"
 
+from effective.config import configured
 from effective.engines.sqlite import SqliteApp, unclosed_connections
-from effective.lint import configured
 
 _DEFAULT_DSN = "postgresql://effective:effective@localhost:5432/effective"
 
@@ -534,9 +534,7 @@ def pytest_sessionstart(session) -> None:
     A SERIAL run locks the shared database and resets it instead. Either keeps its connection for
     the per-test sweep. `pytest_sessionstart`, NOT
     `pytest_report_header`: the header hook is not called at all under `-q`, and every gate in
-    this repo runs `-q` — so the first version of this silently did nothing in exactly the runs it
-    was written for. (Found by counting rows before and after a run rather than by trusting the
-    hook.)"""
+    this repo runs `-q`, so a header hook would do nothing in exactly the runs it serves."""
     global _CLEARED, _SWEEP_CONN
     if _PROVISIONED:
         return  # parallel controller: it runs no tests, and the base database is nobody's
@@ -607,12 +605,11 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     Enforced even when the run already failed, and deliberately: a leak found while triaging
     another failure is still a leak, and skipping the check then is how it comes back.
 
-    **It PRINTS and sets the exit status; it does not raise, and that distinction cost real
-    time.** The first version raised `pytest.UsageError` here, which pytest reports *instead of*
-    the session's own summary — so a run with both a leak and a failing test showed the leak and
-    swallowed the traceback entirely. A gate that hides the failures you are debugging is worse
-    than the leak it reports; this one has to compose with a red run, because a red run is
-    exactly when someone is reading the output.
+    **It PRINTS and sets the exit status; it does not raise.** A `pytest.UsageError` here is
+    reported *instead of* the session's own summary, so a run with both a leak and a failing test
+    would show the leak and swallow the traceback entirely. A gate that hides the failures you
+    are debugging is worse than the leak it reports; this one has to compose with a red run,
+    because a red run is exactly when someone is reading the output.
     """
     global _LOCK_CONN, _SWEEP_CONN
     for held in (_LOCK_CONN, _SWEEP_CONN):

@@ -20,7 +20,7 @@ examples.agent_firm sla-cap` runs one case; the module docstring has the others.
 | authorize | a `govern` policy parking the claim on any case that breaks an invariant, a $0 credit included, until a principal other than its proposer approves it; the ask names the credit and the deduction and binds the digest of the terms row, which carries the digest of the settlement's plan, and the ruling names that digest, so a credit nobody approved holds no round and a plan nobody approved runs no leg (ADR-0028); each ask and each ruling is a ledger row, paired by pass | `resolve.py` |
 | act | `saga` over the legs built from the settlement's plan, which is data: compensable legs, at most one pivot, then retriable legs, checked at construction; a retriable leg is a `fixpoint` under `retry:{leg}`, one level per attempt, which a grantor may extend | `saga.py`, `ar.py` |
 | end | how the settlement ended, appended to the ledger once its saga does: completed, compensated or unlanded; a round after the first opens only once the round before it ended compensated | `ar.py` |
-| settle the books | `firm`: a `fixpoint` under `firm:{books}` whose passes advance every open case concurrently by what the ledger says of its rounds, until two passes leave the same cases open in the same rounds for the same reasons, none of them one a pass can still run (ADR-0027) | `firm.py` |
+| settle the books | `firm`: a `fixpoint` under `firm:{books}` whose passes advance every open case concurrently by what the ledger says of its rounds, until two passes leave the same cases open in the same rounds for the same reasons, none of them unlanded or compensated, or the pass budget runs out (ADR-0027) | `firm.py` |
 
 | leg | kind | ERP op or tool | undone by |
 |---|---|---|---|
@@ -37,6 +37,84 @@ performs nothing, so no other settlement's apply can land between the owner's un
 and its reversal. A settlement that cannot recover is another process's to finish. A refused spend
 ends a retry or a repair and is raised, since every later metered op is refused the same way.
 `settlement` takes a grantor for the collection, and no resolution passes one yet.
+
+```mermaid
+flowchart LR
+    admit["admit<br/>inputs fixed"] --> observe["observe<br/>invariants"]
+    observe --> explain["explain<br/>credit within the shortfall"]
+    explain --> engage["engage<br/>citations held"]
+    engage --> authorize{"authorize<br/>not the proposer,<br/>bound to terms and plan"}
+    authorize --> act["act<br/>each leg once, with its undo"]
+    act --> settle["settle the books<br/>until two passes agree"]
+    settle -. next pass .-> observe
+```
+
+## Approval
+
+The op an approval gates is the settlement's claim of its round: the terms row, which names the
+invoice, the credit, the deduction and the digest of the settlement's plan. The policy parks the
+claim with an ask that binds the digest of that row, and the ruling has to name the same digest.
+
+```mermaid
+sequenceDiagram
+    participant S as settlement
+    participant G as approval policy
+    participant L as ledger
+    participant C as controller
+    S->>G: claim the round (terms row: invoice, credit, deduction, plan)
+    G->>L: ask row: the terms, the digest it binds, the park
+    G-->>S: park
+    C->>L: read the ask
+    C->>S: ruling: decision and the digest it rules on
+    S->>G: resume with the ruling
+    alt the digest is another effect's, or none
+        G-->>S: refused before the policy reads the decision, with no ruling row
+    else the ruler is the proposer
+        G->>L: ruling row: the proposer, and what it answered
+        G->>L: ask again, naming the proposer
+        G-->>S: park
+    else denied
+        G->>L: ruling row: who ruled, and what
+        G-->>S: refused, naming the ruler: the case stays open, denied
+    else approved
+        G->>L: ruling row: who ruled, and what
+        G->>L: the terms row lands: the round is claimed
+        S->>S: run the legs, refused if the plan has changed
+    end
+```
+
+A ruling on another effect is refused before the policy reads its decision, so an approval of $500
+cannot release a claim of $1,000, and an approval of one plan cannot release another. The ruler is
+a name the answering surface asserts, and authenticating it is the host's. The
+binding's law is on [concepts/authority](authority.md).
+
+## Sagas and compensation
+
+A settlement's plan is data: a list of planned legs, each with its kind, the ERP op or tool it
+sends and the op that undoes it, and its digest is what the terms row carries. The saga runs the
+legs in order. When a leg is rejected, it undoes the legs that landed, latest first, so the memo is
+unapplied from the invoice before it is reversed.
+
+| ending | when | what the books hold | next |
+|---|---|---|---|
+| completed | every leg landed | the memo and both matches | the case closes |
+| compensated | a leg was rejected | every posted entry; the memo matched to its reversal, the payment unapplied | the next round resolves the case again |
+| unlanded | a retriable leg ran out of attempts | what landed before it | the next pass continues the leg under the round's keys |
+
+The residuals on the `sla-cap` case: $100,000 invoiced, $97,000 paid, $3,000 deducted, and a
+$1,000 credit, the contract's cap on an outage credit.
+
+| entry | after a completed settlement | after a compensated one |
+|---|---|---|
+| invoice | $2,000 owed | $100,000 owed |
+| payment | $0 unapplied | $97,000 unapplied |
+| credit memo | $0 | $0, matched to its reversal |
+| reversal | | $0 |
+
+No posted entry is deleted: a compensation posts a reversal beside the memo. A reversal whose memo sits in
+a locked period posts in the open period (closed-period reversal handling). Every leg is sent
+under a key naming the case, the round, the leg and its attempt, so a leg resumed after a crash
+reaches the ERP under the key it was first sent with.
 
 ## The firm settles to a fixpoint
 
@@ -60,6 +138,48 @@ firm, the first converged with every case closed, equal one in the books and in 
 is told; they differ in
 the reads each records.
 
+A pass maps the open cases $B_n$, each with its round and why it is open, to $B_{n+1}$. The firm
+stops when a pass changes nothing and no open case is unlanded or compensated, the two endings the
+next pass is certain to act on:
+
+```math
+\mathrm{settled}(B_n, B_{n+1}) \iff B_{n+1} = B_n \;\land\; \forall o \in B_{n+1}.\ \mathrm{last}(o) \notin \{\mathsf{unlanded}, \mathsf{compensated}\}
+```
+
+Stopping is two passes agreeing, and a later pass can still change a case it leaves open: a stopped
+case is asked again on every pass, so a usable answer closes it, and a case in flight follows its
+holder (`test_a_case_the_firm_left_stopped_closes_on_a_later_pass`,
+`test_a_case_in_flight_follows_its_holders_ending`). The budget bounds the number of passes; a pass
+that waits on an approval waits as long as the approver does.
+
+A settlement that raises, as a rejected undo does, appends no ending, so its round reads as claimed
+and the case as in flight on every later pass, and the firm's run over the books fails with it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> unclaimed
+    unclaimed --> closed: owes nothing
+    unclaimed --> stopped: no proposal
+    unclaimed --> denied: refused
+    unclaimed --> completed: settled
+    unclaimed --> compensated: rejected
+    unclaimed --> unlanded: ran out
+    unclaimed --> inflight: held
+    compensated --> unclaimed: next round
+    unlanded --> completed: continued
+    unlanded --> unlanded: ran out again
+    inflight --> inflight: holder open
+    inflight --> closed: holder completed
+    inflight --> unclaimed: holder compensated
+    inflight --> unlanded: holder unlanded
+    completed --> closed
+    stopped --> unclaimed: next pass
+    denied --> denied: asks nobody
+```
+
+A held round follows its holder's ending: a completed one closes the case, a compensated one
+sends it to the next round, and an unlanded one is continued by the pass that finds it.
+
 ## Knowledge and the factors
 
 Knowledge (K) is a stock. A snapshot of the firm's rules is read by digest at a recorded step, so a replay
@@ -80,6 +200,34 @@ measures how much more the critic moves the outcome with the SLA rule held than 
 run's manifest, given both arms' snapshots, and refuses a stray run, a doubled outcome, or a
 missing one. The letters are the production function's:
 
+```math
+Y = f(H, A, C, K \mid O, T)
+```
+
+The outcome $Y$ depends on human judgment, agent labor, capital and knowledge, given the
+organization $O$ and the task mix $T$. What the record measures is a proxy for each factor, and
+narrower than it:
+
+| factor | in theory | the proxy the firm records |
+|---|---|---|
+| $H$ | the principal's attention and judgment | the asks and rulings, and who ruled each |
+| $A$ | the work agents do | the committed model calls |
+| $C$ | what the work consumes | the committed calls' recorded spend; a call lost before its record is missing |
+| $K$ | the firm's rules and procedures | the pinned snapshot |
+| $Y$ | the value of the accepted result | the dollars between the credit standing on the books and the case's gold credit, negated so that more is better |
+
+The interaction contrast compares a critic-enabled organization $o_1$ with one without, $o_0$,
+under two snapshots of the rules, $K_1$ with the SLA rule and $K_0$ without:
+
+```math
+I = \bigl[Y(o_1, K_1) - Y(o_0, K_1)\bigr] - \bigl[Y(o_1, K_0) - Y(o_0, K_0)\bigr]
+```
+
+`interaction` takes one outcome per cell, so it computes the contrast and estimates nothing: a mean,
+its uncertainty, or a population claim needs an experiment. A nonzero $I$ says the critic's effect
+depends on the rule. A positive $I$ makes the two complements; a rule that makes the critic unnecessary improves the firm by substitution, and its
+$I$ is negative.
+
 ## The ERP port
 
 `erp/port.py` is a typed port: its ops are answered by `Posted`, `Applied`, `Unapplied`,
@@ -98,6 +246,26 @@ memory.
 | a key names one move | an op whose key names a move differing in kind, customer, amount or original is `Refused`, and the move stands |
 | a fault is unknown | a call whose outcome could not be read raises `Unknown`, and the replay resolves it |
 
+On Odoo Community each op is one of the accounting moves a bookkeeper would make by hand:
+
+| op | on Odoo |
+|---|---|
+| `PostMemo` | a customer credit note (`out_refund`): loaded as a draft carrying its key, the key claimed, then posted |
+| `Reverse` | a move of the mirrored type naming the original in `reversed_entry_id`, posted the same way |
+| `Apply` | a partial reconcile (`account.partial.reconcile`) of the payment or the memo against the invoice, made in the fence with its claim |
+| `Unapply` | the removal of that partial reconcile, in the fence, when no other key holds it |
+| `Read` | the invoice's residual and the entries on its customer's account |
+
+Two rounds of one case can meet on one match: an earlier round's late unapply and a later round's
+apply that adopted the match. The match is owned by its claims ([ADR-0027](../../docs/adr/0027-the-firm-settles-to-a-fixpoint.md) §2), so an unapply
+releases only its own key's hold. `formal/quint/erp_claim.qnt` checks that protocol over every
+interleaving of two attempts in each of two rounds, reaching every state of the model within its
+30-step bound: the books hold the decision once settled, a live claim has its match, no round opens before the one before it ended, and a case
+is credited once. It assumes an attempt whose lease expired writes no checkpoint, and that one
+landing is one whole fence run, which the fence's serialization per invoice makes true. Exactly-once
+is per receiver: it rests on Odoo's unique keys and the fence, and another ERP needs its own
+protocol.
+
 ## The controls the tests check
 
 | control | what holds | pin |
@@ -113,7 +281,7 @@ memory.
 | each apply once | an apply sent by an attempt whose lease expired lands nothing after the compensation that undid it, for the payment and the memo; each undo names the apply it releases, and an earlier round's undo leaves a match a later round holds. `formal/quint/erp_claim.qnt` checks the protocol over every interleaving of two attempts in each of two rounds; the books hold wherever a first attempt's lease expires and wherever its held op lands, on both engines | `tests/test_agent_firm_stale_apply.py`, `tests/test_agent_firm_erp_port.py` |
 | credit within the shortfall | a settlement refuses a credit its payment's shortfall does not absorb, in whole cents from $0 to the shortfall, before anything is claimed or applied; the firm's proposal is held to the same rule | `tests/test_agent_firm_resolve.py` |
 | no step without its undo | a saga whose order cannot be compensated is refused before it runs | `tests/test_agent_firm_saga.py` |
-| period close | a reversal whose period locked posts in the open period | `tests/test_agent_firm_saga.py` |
+| closed-period reversal handling | a reversal whose period locked posts in the open period | `tests/test_agent_firm_saga.py` |
 | no duplicate settlement | a case resolved twice in one round settles once, in sequence or gathered, and a second settlement of the round makes no ERP call, whichever claims first, in every schedule of their ops within two switches and every crash at one; a second credit is superseded and does nothing; a denied or unanswered credit holds no round; a round starts only once the round before it has ended | `tests/test_agent_firm_resolve.py`, `tests/test_agent_firm_saga.py` |
 | the books settle | the firm settles the canonical cases in two passes, three when a proposal stops once; a case stopped every time, or denied, stays open beside its settling siblings; a completed case is not credited again, a compensated one settles in the next round, and an unlanded one continues its round | `tests/test_agent_firm_fixpoint.py` |
 | twice is once | two runs of the firm, the first converged with every case closed, equal one in the books and the customer's notices: the canonical firm run twice, two runs of one case in every schedule within one switch, and one run crashed at every op | `tests/test_agent_firm_fixpoint.py` |

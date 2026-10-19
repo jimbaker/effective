@@ -13,11 +13,6 @@ dependencies = [
     "pydantic>=2.10",
     "httpx>=0.28",
     "pyyaml>=6.0",
-    # Bounded: `ast-grep-cli` in the dev group must stay on the same series. Bump the two
-    # together.
-    "ast-grep-py>=0.45.3,<0.46",
-    # The semantic rung above ast-grep: jedi resolves bindings where ast-grep matches shapes.
-    "jedi>=0.20.0",
     "absurd-sdk>=0.5.0",
     # Exact pin: the code engine's entry path and its clock policy follow this API, so a bump
     # re-runs the engine's suites and the coverage probe.
@@ -27,7 +22,8 @@ dependencies = [
     "tdom==0.1.17",
     "sqlmodel>=0.0.47",
     "alembic>=1.14",
-    "psycopg[binary]>=3.3",
+    # The pure-Python build, over the system libpq; the `binary` extra bundles one.
+    "psycopg>=3.3",
     "openai>=3.24.0",
     # `effective.cards.render_shiny` lowers a CardSpec into an htmltools tag tree.
     "htmltools>=0.7.0",
@@ -54,9 +50,37 @@ bridge = [
 judge = [
     "typesafe-sdk==0.7.2",
 ]
+# The coding machine's handler half: the lint, the merge gate and the structural and semantic
+# edits. The yielding half and the rest of the substrate import neither, so a consumer that runs
+# workflows installs no parser, and an install on free-threaded CPython stays possible: ast-grep-py
+# ships no free-threaded wheel.
+coding = [
+    # Bounded: `ast-grep-cli` in the dev group runs the same release as this binding. Bump the
+    # two together.
+    "ast-grep-py>=0.45.3,<0.46",
+    # The semantic rung above ast-grep: jedi resolves bindings where ast-grep matches shapes.
+    "jedi>=0.20.0",
+]
+# psycopg's own libpq, for a machine without one. It ships no free-threaded wheel, so the core
+# takes the pure-Python build. Named directly rather than as `psycopg[binary]`, which the override
+# below rewrites. psycopg runs a binary build of another release without a check, so the two move
+# together, and `tests/test_core_install.py` holds the lock to one version of both.
+binary = [
+    "psycopg-binary>=3.3",
+]
 
 [dependency-groups]
+# What the race suites need beside the core, so `just race-free-threaded` installs exactly the
+# core and this on free-threaded CPython. The dev group includes it, so the ranges live once.
+race = [
+    # The conftest provisions a database per worker, so it reads xdist's options.
+    "pytest-xdist>=3.8.0",
+]
 dev = [
+    { include-group = "race" },
+    # The lint and the coding machine's tools, which `just check` runs.
+    "effective[coding]",
+    "effective[binary]",
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "pytest-asyncio>=0.25",
@@ -72,7 +96,6 @@ dev = [
     "effective[bridge]",
     "effective[judge]",
     "pytest-randomly>=5.0.0",
-    "pytest-xdist>=3.8.0",
     # Co-versioned with the `ast-grep-py` binding above; `scripts/whouses.py` shells to it.
     "ast-grep-cli>=0.45.3,<0.46",
 ]
@@ -132,6 +155,11 @@ skip_covered = false
 default-groups = ["dev"]
 # Supply-chain hardening: never resolve to package versions published in the last 7 days.
 exclude-newer = "7 days ago"
+# absurd-sdk asks for `psycopg[binary]`. The core takes psycopg's pure build over the system
+# libpq, which is the one free-threaded CPython can install, and the `binary` extra grants the
+# bundled libpq where a machine has none. The override replaces every requirement on psycopg, an
+# extra included, so a psycopg extra is named here as its own package, as `binary` is.
+override-dependencies = ["psycopg>=3.3"]
 
 [tool.uv.sources]
 # Vendored: infra/tdom is tdom 0.1.17's sdist plus one patch (infra/tdom/patches). Upstream's

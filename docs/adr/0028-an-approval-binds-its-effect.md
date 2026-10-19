@@ -1,6 +1,6 @@
 # ADR-0028: An approval binds its effect
 
-- **Date:** 2026-10-15
+- **Date:** 2026-10-14
 - **Status:** Accepted, and built.
 - **Relates to:** [ADR-0027](0027-the-firm-settles-to-a-fixpoint.md) (the terms row this binds),
   [ADR-0018](0018-measured-spend-accrual.md) (the recorded format an answer is read under).

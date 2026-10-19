@@ -35,8 +35,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import jedi
-from jedi.api.classes import Name
+try:
+    import jedi
+    from jedi.api.classes import Name
+except ImportError as missing:
+    raise ImportError(
+        "effective.coding.edits.semantic needs the coding extra: effective[coding]"
+    ) from missing
 
 
 class SemanticError(RuntimeError):

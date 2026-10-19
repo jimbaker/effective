@@ -296,14 +296,13 @@ odoo-down:
 odoo-test:
     EFFECTIVE_REQUIRE_ODOO=1 EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" uv run pytest tests/test_agent_firm_erp_port.py tests/test_agent_firm_saga.py tests/test_agent_firm_resolve.py -k odoo -v
 
-# The race suites on a free-threaded CPython, failing if the GIL comes back on
+# The race suites on a free-threaded CPython, failing if the GIL comes back on. The venv holds the
+# core, the `judge` extra and the `race` group, whole, so the import census runs against what a
+# consumer installs.
 race-free-threaded runs="3":
-    uv venv --quiet --allow-existing --python cpython-3.14.7+freethreaded build/venv-ft
-    uv export --quiet --no-hashes --format requirements-txt --no-emit-project --no-emit-workspace -o build/ft-requirements.txt
-    grep -viE '^(psycopg-binary|ast-grep-py|httptools)==|^\./' build/ft-requirements.txt > build/ft-requirements-core.txt
-    uv pip install --quiet --python build/venv-ft/bin/python --no-deps --only-binary :all: -r build/ft-requirements-core.txt
-    uv pip install --quiet --python build/venv-ft/bin/python --no-deps ./infra/tdom -e .
-    for n in $(seq 1 {{runs}}); do PYTHON_GIL=0 PSYCOPG_IMPL=python EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" build/venv-ft/bin/python scripts/gil_free_pytest.py tests/test_race_admission.py tests/test_race_durable.py tests/test_race.py tests/test_race_deadline.py tests/test_race_shapes.py tests/test_watched_descent.py tests/test_hedge.py tests/test_settle.py tests/test_choice.py tests/test_race_publish_seal.py -q --no-cov -p no:randomly -p no:cacheprovider || exit 1; done
+    UV_PROJECT_ENVIRONMENT=build/venv-ft uv sync --quiet --frozen --python cpython-3.14.7+freethreaded --no-default-groups --group race --extra judge
+    PYTHON_GIL=0 build/venv-ft/bin/python scripts/gil_free_pytest.py tests/test_core_install.py -q --no-cov -p no:cacheprovider
+    for n in $(seq 1 {{runs}}); do PYTHON_GIL=0 PSYCOPG_IMPL=python EFFECTIVE_REQUIRE_PG=1 DATABASE_URL="{{PG_URL}}" build/venv-ft/bin/python scripts/gil_free_pytest.py tests/test_race_admission.py tests/test_race_durable.py tests/test_race.py tests/test_race_deadline.py tests/test_race_shapes.py tests/test_watched_descent.py tests/test_hedge.py tests/test_settle.py tests/test_choice.py tests/test_race_publish_seal.py -q --no-cov -p no:cacheprovider || exit 1; done
 
 # --- database ---
 

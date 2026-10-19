@@ -6,7 +6,7 @@ scripted Odoo and on a live one.
 | crash-safe settlement    | one memo posts; it and the payment apply once, whatever crashes      |
 | rejection unwinds        | a rejected notice unapplies the memo and payment, reverses the memo  |
 | no step without its undo | a saga that cannot be compensated in order is refused before it runs |
-| period close             | a reversal whose period locked posts in the open one, matched        |
+| closed-period reversal   | a reversal whose period locked posts in the open one, matched        |
 
 A leg rejected before the pivot undoes only the legs that landed, a retriable leg is asked
 `RETRIES` times before the saga stops with it unlanded, and the customer hears each notice and
@@ -46,6 +46,7 @@ from examples.agent_firm.saga import (
     Leg,
     LegKind,
     Outcome,
+    Rejected,
     SagaOrder,
     Unlanded,
     saga,
@@ -399,6 +400,32 @@ RETRIABLE = _leg("remind", LegKind.RETRIABLE, undo=False)
 def test_a_saga_that_cannot_be_compensated_in_order_is_refused(legs):
     with pytest.raises(SagaOrder):
         saga(legs)
+
+
+def test_a_rejected_undo_fails_the_saga_and_leaves_the_legs_before_it_landed():
+    called: list[str] = []
+
+    def answered(name: str, outcome: Outcome) -> Callable[..., Effect[Outcome]]:
+        def answer(*_args: Any) -> Effect[Outcome]:
+            yield from ()
+            called.append(name)
+            return outcome
+
+        return answer
+
+    def compensable(name: str, undo: Outcome) -> Leg:
+        return Leg(name, LegKind.COMPENSABLE, answered(name, Landed()), answered(name, undo))
+
+    legs = [
+        compensable("memo", Landed()),
+        compensable("payment", Rejected(reason="locked")),
+        compensable("apply", Landed()),
+        Leg("notify", LegKind.PIVOT, answered("notify", Rejected(reason="bounced"))),
+    ]
+    with pytest.raises(RuntimeError, match="the undo of payment was rejected: locked"):
+        next(saga(legs)())
+    assert called == ["memo", "payment", "apply", "notify", "apply", "payment"]
+    assert called.count("memo") == 1
 
 
 @pytest.mark.parametrize(
